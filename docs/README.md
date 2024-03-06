@@ -1,6 +1,7 @@
 # System Overview
 
 DUTCTL is a dezentralized server-agent design as shown here:
+
 ![dutctl_server_agent](https://github.com/BlindspotSoftware/dutctl/assets/14163031/c16b0bde-4fb1-4a4e-8faf-ff63e24d8ac8)
 
 ## DUT
