@@ -8,7 +8,7 @@ DUTCTL is a dezentralized server-agent design as shown here:
 The device unter test you want to operate.
 
 ## DUT Agent (DA)
-The DUT Agend is a service usually running on a single board comuter, which can handle the wireing to the DUD (power supply, reset, flasher, serial console, GPIO etc.)
+The DUT Agend is a service usually running on a single board comuter, which can handle the wireing to the DUD (power supply, reset, flasher, serial console, GPIO etc.) The specifics and supported operation for the wired DUTs are feed to the DA via a [configuration file](./dutagent-config.md)
 
 ## DUT Controll (dutctl)
 This is the actual application running on the userser machine. It provides a command line interface to issue task. 
