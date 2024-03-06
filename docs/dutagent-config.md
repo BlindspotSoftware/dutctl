@@ -1,4 +1,4 @@
-# Configuration
+# DUT Agent Configuration
 
 The configuration of dutagent shall be done via YAML configuration file.
 
