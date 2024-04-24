@@ -1,4 +1,4 @@
-# How to implement a new module
+# [DRAFT / OUTDATED] How to implement a new module
 
 ## The interface
 ```
@@ -75,7 +75,7 @@ package dummybutton
 import (
 	"reflect"
 
-	"github.com/9elements/dutctl/module"
+	"/ropo/paath/dutctl/module"
 )
 
 type Button struct {

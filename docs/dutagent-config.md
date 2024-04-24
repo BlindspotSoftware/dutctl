@@ -1,36 +1,36 @@
-# DUT Agent Configuration
+# [DRAFT] DUT Agent Configuration
 
-The configuration of dutagent shall be done via YAML configuration file.
+The _DUT Agent_ is configured by a YAML configuration file.
 
 ### DUTAgent Schema
 
 | Attribute | Type | Default | Description | Mandatory |
 | --- | --- | --- | --- | --- |
-| version | string |  | dutagent configuration version | yes |
-| devices | [Devices](#Device) |  | list of devices | yes |
+| version | string |  | Version of this config schema | yes |
+| devices | [Devices](#Device) |  | List of dives-under-test (DUTs) connected to this agent | yes |
 
 ### Device
 
-| Attribute | Type | Default | Description |  |
+| Attribute | Type | Default | Description | Mandatory |
 | --- | --- | --- | --- | --- |
-| description | string |  | device description | no |
-| commands | [Commands](#Commands) |  | list of device commands | no |
+| description | string |  | Device description | no |
+| commands | [Commands](#Commands) |  | List of available device commands | no |
 
 ### Commands
 
 | Attribute | Type | Default | Description | Mandatory |
 | --- | --- | --- | --- | --- |
-| description | string |  | command description | no |
-| Modules | [Modules](#Module) |  | ordered list of command modules | yes |
+| description | string |  | Command description | no |
+| Modules | [Modules](#Module) |  | A command can be composed of multiple actions to fullfill its purpose. The list of modules represent these steps. The order of this list is important, though. | yes |
 
 ### Module
 
 | Attribute | Type | Default | Description | Mandatory |
 | --- | --- | --- | --- | --- |
-| module | string |  | module name identifier | yes |
-| main | bool | false | The main module gets the dutctl arguments and provide help information of how to use the command. | no |
-| args | string or null (Golang: *string) | nil | hardcoded module arguments for non-main modules | when main is false |
-| options | map[string]any |  | module options | yes |
+| module | string |  | The module's name is a unique identifier | yes |
+| main | bool | false | All arguments to a command are passed to its main module. The main modules usage information is also used as the command help text. | exactly once per command |
+| args | string or null (Golang: *string) | nil | If a module is not an commands main module, it does not get any arguments passed at runtime, instead arguments can be passed here.| when main is false |
+| options | map[string]any |  | Depending on the respective implementation the behavior of a module can be configured via options.| yes |
 
 **TODO:**
 
