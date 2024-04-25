@@ -1,0 +1,57 @@
+# Configuration for commitlint to enforce conventional commits
+# https://www.conventionalcommits.org/
+# -----------------------------------------------------
+# With conventional commits, commit messages looks like 
+
+# <type>(<optional scope>): <description>
+
+# [optional body]
+
+# [optional footer(s)]
+# -----------------------------------------------------
+
+# The complete scheme for defining rules according the above can be found at
+# https://commitlint.js.org/reference/configuration.html
+
+
+---
+# Basic set of rules is taken from [1] with the following _extends_ statement.
+# Some rules are overridden further down this file to fit the needs of this project. 
+#
+# [1] https://github.com/conventional-changelog/commitlint/tree/master/%40commitlint/config-conventional
+extends:
+  - "@commitlint/config-conventional"
+
+# Override type-enum to just use types, which are relevant to this project
+# type is forced to be one of the following (can be edited in an own config):
+# build:    Tooling, scripts, etc.
+# chore:    Housekeeping, dependency management, go.mod etc.
+# ci:       Continuous integration, pipelines, etc.
+# docs:     Readme, doc comments, further documentation
+# feat:     Source code changes introducing new functionality
+# fix:      Bug fixes, no new functionality
+# refactor: Source code changes without changing behavior
+# revert:   Revert a commit
+# test:     Add tests, increase coverage, (if not initially committed with a fix or feat)
+
+rules:
+  type-enum:
+    - 2
+    - always
+    - - build
+      - chore
+      - ci
+      - docs
+      - feat
+      - fix
+      - refactor
+      - revert
+      - test
+
+# Override scope-empty to not use scopes at all for now.
+# It could make sense to use scopes in the future e.g. to mark module development.
+# then one package.
+
+  scope-empty: 
+    - 2
+    - always
