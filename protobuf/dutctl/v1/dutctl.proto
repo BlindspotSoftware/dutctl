@@ -1,0 +1,91 @@
+syntax = "proto3";
+
+package dutctl.v1;
+
+option go_package = "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1;dutctlv1";
+
+// DeviceService defines the service for interacting with devices.
+service DeviceService {
+  rpc List(ListRequest) returns (ListResponse) {}
+  rpc Commands(CommandsRequest) returns (CommandsResponse) {}
+  rpc Run(stream RunRequest) returns (stream RunResponse) {}
+}
+
+// ListRequest is sent by the client to request a list of devices connected to the agent.
+message ListRequest {
+}
+
+// ListResponse is sent by the agent in response to a ListRequest.
+message ListResponse {
+  repeated string devices = 1;
+}
+
+// CommandsRequest is sent by the client to request a list of commands available for
+// a specific device.
+message CommandsRequest {
+  string device = 1;
+}
+
+// CommandsResponse is sent by the agent in response to a CommandsRequest.
+message CommandsResponse {
+  repeated string commands = 1;
+}
+
+
+// RunRequest is sent by the client to start a command execution on a device and optionally
+// to further interact with the agent during the command execution.
+// The first RunRequest message sent to a agent must allways contain a Command message.
+message RunRequest {
+  oneof msg {
+    Command command = 1;
+    Console console = 2;
+    File file = 3;
+  }
+}
+
+// RunResponse is sent by the agent in response to a RunRequest and can either contain
+// just the output of the command (Print), or trigger further interaction with the client.
+message RunResponse {
+  oneof msg {
+    Print print = 1;
+    Console console = 2;
+    FileRequest fileRequest = 3;
+    File file = 4;
+  }
+}
+
+// Command is used by the client to start a command execution on a device.
+message Command {
+  string device = 1;
+  string cmd = 2;
+  repeated string args = 3;
+}
+
+// Print is used by the agent to send the output of a command execution to the client.
+message Print {
+  bytes text = 1;
+}
+
+// Console is used by the client and agent during an interactive command execution.
+// An interactive session can only be started by the agend by sendeing the first Console message.
+message Console {
+  oneof data {
+    bytes stdin = 1;
+    bytes stdout = 2;
+    bytes stderr = 3;
+  }
+}
+
+// FileRequest is used by the agent to request a file from the client.
+message FileRequest {
+  string path = 1;
+}
+
+// File is used by the client and the agent to transfer a file.
+message File {
+  string path = 1;
+  bytes content = 2;
+}
+
+
+
