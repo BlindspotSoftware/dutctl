@@ -3,28 +3,24 @@ Device-under-Test (DUT) Control is an abstraction layer for remote hardware acce
 
 For details on the system architecture see [docs](./docs).
 
-| Supported DUT Agent Hardware | Status |
-|--------------------|--------|
-| RaspberryPi 4      | planned :hourglass:|
+| Supported Client OS | Supported DUT Agent Hardware |
+|---------------------|------------------------------|
+|  Linux | RaspberryPi 4 (planned :hourglass:)|
 
-| Supported Client OS | Status |
-|--------------------|--------|
-| Linux              | planned :hourglass:|
-
-| Supported Modules | Status |
+| Modules | Status |
 |-------------------|--------|
-| GPIO Button       | wip :x:|
-| GPIO Switch       | wip :x:|
-| IPMI Power Control | wip :x:|
-| Power Distribution Unit, Intellinet       | wip :x:|
-| Power Distribution Unit, Delock       | wip :x:|
-| SPI Flasher, dediprog       | wip :x:|
-| SPI Flasher, flashrom       | wip :x:|
-| SPI Flasher, flashprog       | wip :x:|
-| SPI Flasher, em100       | wip :x:|
-| Serial Console       | wip :x:|
-| Shell Execution       | wip :x:|
-| Secure Shell (SSH)       | wip :x:|
+| GPIO Button       | :x:|
+| GPIO Switch       | :x:|
+| IPMI Power Control | :x:|
+| Power Distribution Unit, Intellinet       | :x:|
+| Power Distribution Unit, Delock       | :x:|
+| SPI Flasher, dediprog       | :x:|
+| SPI Flasher, flashrom       | :x:|
+| SPI Flasher, flashprog       | :x:|
+| SPI Flasher, em100       | :x:|
+| Serial Console       | :x:|
+| Shell Execution       | :x:|
+| Secure Shell (SSH)       | :x:|
 
 
 
