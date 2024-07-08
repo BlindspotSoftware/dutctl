@@ -16,9 +16,9 @@ Commit messages are supposed to look like this:
 ```
 
 Where type is one of the following:
-- **build** tooling, taskfile, etc
-- **chore** housekeeping, dependency management, go.mod etc.
-- **ci** continuous integration, workflows, etc.
+- **build** Tooling, etc
+- **chore** Housekeeping, dependency management, go.mod etc.
+- **ci** Continuous integration, workflows, etc.
 - **docs** Readme, doc comments
 - **feat** Source code changes introducing new functionality
 - **fix** Bug fixes, no new functionality
@@ -42,3 +42,9 @@ npx commitlint --edit
 This change will not be populated to the remote repo.
 
 You can **bypass commitlint locally** like so: `git commit --no-verify -m"commitlint won't like"`
+
+## Code Quality
+Beside standart gofmt and staticcheck, this project uses [golangci-lint](https://golangci-lint.run/) to run a collection of linters. The and settings will be adapted as the project grows. 
+
+### Run golangci-lint locally
+For faster development cycle you can integrate [golangci-lint](https://golangci-lint.run/welcome/integrations/) into your local setup. The current version and configuration is pinned in `.golangci.yml`
