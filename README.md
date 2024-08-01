@@ -29,3 +29,9 @@ This project is in it's kickoff phase. Beta-Versions will be released onece the 
 
 # Contributing
 Until MVP is finished, external contributions most likely won't be handled.
+
+--------
+This project is supported by 
+
+![image](https://github.com/user-attachments/assets/1237fcaa-b3c3-4031-afac-34d789e8c096)
+
