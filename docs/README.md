@@ -33,11 +33,19 @@ According to the protobuf definition, during a Run-RPC stream the client and the
 The first RunRequest sent by the client must always be a Command message. 
 Depending on the module implementation of the executed command, there are the following scenarios for the further communication during the Run-RPC stream: 
 
+![print-msg](https://github.com/user-attachments/assets/e2f0b21e-3048-44d4-81e1-aab58017c38d)
+
 **Print**: After the initial RunRequest with a Command message by the client, the agent sends one or many RunResponses being Print messages. This type of messages are usually good for status updates of basic commands, which do not require further interaction or input. By convention Print messages should not be mixed with Console messages.
+
+![Console-msg](https://github.com/user-attachments/assets/e1a946bf-3482-41c1-9a01-5df5d5318fc7)
 
 **Console**: After the initial RunRequest with a Command message by the client, the agent sends one RunResponses being a Console message. From this time on until the end of the command execution, standard input from the client is redirected to the agent and standard output and standard error from the agent to the client. This way a remote console is realized, which enables interactive command execution. By convention, Console messages should not be mixed with Print messages.
 
+![FileDownload-msg](https://github.com/user-attachments/assets/2e6d75e6-02b0-43e1-875f-3e7634b6b147)
+
 **File download to the client**: After the initial RunRequest with a Command message by the client, for commands producing any artifacts, these can be downloaded to the client, with a RunResponse being a File message. Downloads can happen multiple times and can be mixed with Print messages and Console messages and file uploads.
+
+![FileUpload-msg](https://github.com/user-attachments/assets/1a12204b-58b1-4b05-88ec-c8a3ba3f2b6a)
 
 **File Upload to the agent**: After the initial RunRequest with a Command message by the client, for commands needing any artifacts, these can be uploaded to the client, with a RunResponse being a FileRequest message and the client answering with a RunRequest being a File message. Uploads can happen multiple times and can be mixed with Print messages and Console messages and file downloads.
 
