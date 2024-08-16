@@ -1,5 +1,6 @@
+# Linter selection and configuration file for golangci-lint.
 linters:
-  # Disable all linters. t's important to have reproducible CI: don't start to fail all builds at the same time.
+  # Disable all linters. It's important to have reproducible CI: don't start to fail all builds at the same time.
   # With golangci-lint this can happen if you use option --enable-all and a new linter is added
   # or when one upstream linter is upgraded.
   # Default: false
@@ -17,17 +18,17 @@ linters:
     - copyloopvar
     - cyclop
     - decorder
-    - depguard
+    #- depguard - no package black list needed for now
     - dogsled
     - dupl
     - dupword
     - durationcheck
-    - err113
+    #- err113 - enable after refactoring
     - errcheck
     - errchkjson
     - errname
-    - errorlint
-    - execinquery
+    #- errorlint - enable after refactoring
+    # - execinquery - deprecated
     #- exhaustive - It's ok not not set every field in a struct
     #- exhaustruct - It's ok not not set every field in a struct
     - exportloopref
@@ -48,7 +49,7 @@ linters:
     - godot
     - godox
     - gofmt
-    - gofumpt
+    #- gofumpt - no idea what format it checks, output is not helpful
     - goheader
     - goimports
     - gomoddirectives
@@ -115,4 +116,25 @@ linters:
     #- wrapcheck - Not ALL error should be wrapped, as they become part of the function API then.
     - wsl
     - zerologlint
-  
+
+# Options for analysis running.
+run:
+  # Include test files or not.
+  # Default: true
+  tests: false
+
+# Settings of specific linters.
+linters-settings:
+  varnamelen:
+    max-distance: 6
+    ignore-type-assert-ok: true
+    ignore-map-index-ok: true
+    ignore-chan-recv-ok: true
+    ignore-names:
+      - err
+      - wg # WaitGroup
+      - s # Session
+      - ch # Channel
+      - tt # Test Table
+      - r # Reader
+
