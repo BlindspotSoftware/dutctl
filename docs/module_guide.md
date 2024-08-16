@@ -10,7 +10,7 @@ The DUT Control project is designed for easy integration of new Modules via a pl
 
 ## The Module interface
 Modules must implement the Module interface (`pkg/module/module.go`)
-```
+```go
 type Module interface {
 	Help() string
 	Init() error
