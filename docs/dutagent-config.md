@@ -1,4 +1,4 @@
-# [DRAFT] DUT Agent Configuration
+# DUT Agent Configuration
 
 The _DUT Agent_ is configured by a YAML configuration file.
 
@@ -10,7 +10,7 @@ The implementation of a Module determines its capabilities and also exposes info
 
 The DUT Control project offers a collection of Module implementation but also allows for easy integration of [custom modules](./module_guide.md). 
 Often a _Command_ can consist of only one _Module_ to get the job done, e.g. power cycle the device. But in some cases
-like the flsh example mentioned earlier, eventually it is mandetory to toggle some GPIOs befor doing the actual SPI flash
+like the flash example mentioned earlier, eventually it is mandetory to toggle some GPIOs befor doing the actual SPI flash
 operation. In this case the command is build up of a Module dealing with GPIO manipulation and a Module performing a
 flash write with a specific programmer. See the 2nd device in the [example](#example-config-file) down below on how this
 could look like.
