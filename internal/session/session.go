@@ -9,7 +9,6 @@ type Session struct {
 	stdinCh  chan []byte
 	stdoutCh chan []byte
 	stderrCh chan []byte
-	doneCh   chan bool
 	Err      error
 }
 
@@ -17,6 +16,7 @@ func (s *Session) Print(text string) {
 	s.printCh <- text
 }
 
+//nolint:nonamedreturns
 func (s *Session) Console() (stdin io.Reader, stdout, stderr io.Writer) {
 	return &chanReader{s.stdinCh}, &chanWriter{s.stdoutCh}, &chanWriter{s.stderrCh}
 }
