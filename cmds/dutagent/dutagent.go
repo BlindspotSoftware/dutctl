@@ -48,6 +48,7 @@ func (a *dutagent) Commands(
 	return res, nil
 }
 
+//nolint:funlen
 func (a *dutagent) Run(
 	ctx context.Context,
 	stream *connect.BidiStream[pb.RunRequest, pb.RunResponse],
@@ -71,6 +72,7 @@ func (a *dutagent) Run(
 
 	cmd, ok := device.Cmds[cmdMsg.GetCmd()]
 	if !ok {
+		//nolint:lll
 		return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("device %q does not have command %q", cmdMsg.GetDevice(), cmdMsg.GetCmd()))
 	}
 
@@ -89,7 +91,8 @@ func (a *dutagent) Run(
 	// E.g. the device name, the command name, etc.
 
 	sesh := session{
-		print:   make(chan string),
+		//nolint:forbidigo
+		print:   make(chan string), // this should not trigger the linter
 		stdin:   make(chan []byte),
 		stdout:  make(chan []byte),
 		stderr:  make(chan []byte),
@@ -111,20 +114,23 @@ func (a *dutagent) Run(
 	// Start a worker for sending messages that are colleced by the session form the module to the client.
 	// Use a WaitGroup for synchronization as there might be messages left to send to the client after the module finished.
 	wg.Add(1)
+
 	go func() {
 		defer wg.Done()
 		log.Println("Starting send-to-client worker")
+		//nolint:errcheck
 		toClientWorker(stream, sesh)
 		log.Println("The send-to-client worker returned")
 	}()
 
 	// Start a worker for receiving messages from the client and pass them to the module.
-	// Do not use a WaitGroup here, as the worker blocks on on receive calls to the client.
+	// Do not use a WaitGroup here, as the worker blocks on receive calls to the client.
 	// In case of a non-interactive module (client does not send further messages), the worker will block forever.
 	// and waiting for it will never return.
 	// However, if the stream is closed, the receive calls to the client unblock and he worker will return.
 	go func() {
 		log.Println("Starting receive-from-client worker")
+		//nolint:errcheck
 		fromClientWorker(stream, sesh)
 		log.Println("The receive-from-client worker returned")
 	}()
@@ -140,12 +146,14 @@ func (a *dutagent) Run(
 
 // toClientWorker sends messages from the session to the client.
 // This function is an infinite loop. It terminates when the session is done.
+//
+//nolint:cyclop
 func toClientWorker(stream *connect.BidiStream[pb.RunRequest, pb.RunResponse], s session) error {
 	for {
 		select {
 		case str := <-s.print:
 			res := &pb.RunResponse{
-				Msg: &pb.RunResponse_Print{&pb.Print{Text: []byte(str)}},
+				Msg: &pb.RunResponse_Print{Print: &pb.Print{Text: []byte(str)}},
 			}
 
 			err := stream.Send(res)
@@ -154,7 +162,7 @@ func toClientWorker(stream *connect.BidiStream[pb.RunRequest, pb.RunResponse], s
 			}
 		case bytes := <-s.stdout:
 			res := &pb.RunResponse{
-				Msg: &pb.RunResponse_Console{&pb.Console{Data: &pb.Console_Stdout{bytes}}},
+				Msg: &pb.RunResponse_Console{Console: &pb.Console{Data: &pb.Console_Stdout{Stdout: bytes}}},
 			}
 
 			err := stream.Send(res)
@@ -163,7 +171,7 @@ func toClientWorker(stream *connect.BidiStream[pb.RunRequest, pb.RunResponse], s
 			}
 		case bytes := <-s.stderr:
 			res := &pb.RunResponse{
-				Msg: &pb.RunResponse_Console{&pb.Console{Data: &pb.Console_Stderr{bytes}}},
+				Msg: &pb.RunResponse_Console{Console: &pb.Console{Data: &pb.Console_Stderr{Stderr: bytes}}},
 			}
 
 			err := stream.Send(res)
@@ -172,7 +180,7 @@ func toClientWorker(stream *connect.BidiStream[pb.RunRequest, pb.RunResponse], s
 			}
 		case name := <-s.fileReq:
 			res := &pb.RunResponse{
-				Msg: &pb.RunResponse_FileRequest{&pb.FileRequest{Path: name}},
+				Msg: &pb.RunResponse_FileRequest{FileRequest: &pb.FileRequest{Path: name}},
 			}
 
 			err := stream.Send(res)
@@ -186,7 +194,9 @@ func toClientWorker(stream *connect.BidiStream[pb.RunRequest, pb.RunResponse], s
 }
 
 // fromClientWorker reads messages from the client and passes them to the session.
-// This function is an infinite loop. It terminates when the the session is done.
+// This function is an infinite loop. It terminates when the session is done.
+//
+//nolint:cyclop,funlen
 func fromClientWorker(stream *connect.BidiStream[pb.RunRequest, pb.RunResponse], s session) error {
 	for {
 		select {
@@ -198,38 +208,47 @@ func fromClientWorker(stream *connect.BidiStream[pb.RunRequest, pb.RunResponse],
 				return connect.NewError(connect.CodeAborted, err)
 			}
 
-			switch msg := req.Msg.(type) {
+			reqMsg := req.GetMsg()
+			switch msg := reqMsg.(type) {
 			case *pb.RunRequest_Console:
-				switch consoleMsg := msg.Console.Data.(type) {
+				msgConsoleData := msg.Console.GetData()
+				switch consoleMsg := msgConsoleData.(type) {
 				case *pb.Console_Stdin:
 					stdin := consoleMsg.Stdin
 					if stdin == nil {
 						log.Println("Received nil stdin message")
+
 						continue // Can this happen?
 					}
 
 					log.Printf("Server received stdin from client: %q", string(stdin))
 					s.stdin <- stdin
+
 					log.Println("Passed stdin to module")
 				default:
 					log.Printf("Unexpected Console message %T", consoleMsg)
 				}
 			case *pb.RunRequest_File:
-				//s.file = make(chan []byte, 1) // Buffered channel to be able to close it right after sending the file.
+				// s.file = make(chan []byte, 1) // Buffered channel to be able to close it right after sending the file.
 				fileMsg := msg.File
 				if fileMsg == nil {
 					log.Println("Received nil file message")
+
 					continue // Can this happen?
 				}
+
 				path := fileMsg.GetPath()
 				file := fileMsg.GetContent()
+
 				if file == nil {
 					log.Println("Received nil file content")
+
 					continue // Can this happen?
 				}
 
 				log.Printf("Server received file %q from client", path)
 				s.file <- file // This will not block, as the channel is buffered.
+
 				log.Println("Passed file to module (buffered in the session)")
 				close(s.file)
 				log.Println("Closed file channel")
@@ -241,7 +260,6 @@ func fromClientWorker(stream *connect.BidiStream[pb.RunRequest, pb.RunResponse],
 			if consoleMsg == nil {
 				continue // Ignore non-console messages
 			}
-
 		}
 	}
 }
@@ -251,6 +269,7 @@ func main() {
 	mux := http.NewServeMux()
 	path, handler := dutctlv1connect.NewDeviceServiceHandler(agent)
 	mux.Handle(path, handler)
+	//nolint:gosec
 	err := http.ListenAndServe(
 		"localhost:8080",
 		// Use h2c so we can serve HTTP/2 without TLS.

@@ -9,39 +9,39 @@ import (
 	"github.com/BlindspotSoftware/dutctl/pkg/module"
 )
 
-// DummyRepeat repeats the input from the client.
+// Repeat repeats the input from the client.
 // It demonstrates the use of the Console method of module.Session to interact with the client.
-type DummyRepeat struct{}
+type Repeat struct{}
 
 // Ensure implementing the Module interface.
-var _ module.Module = &DummyRepeat{}
+var _ module.Module = &Repeat{}
 
-func (d *DummyRepeat) Help() string {
-	log.Println("DummyRepeat module: Help called")
+func (d *Repeat) Help() string {
+	log.Println("dummy.Repeat module: Help called")
 
 	return "This dummy module repeats the input from the client."
 }
 
-func (d *DummyRepeat) Init() error {
-	log.Println("DummyRepeat module: Init called")
+func (d *Repeat) Init() error {
+	log.Println("dummy.Repeat module: Init called")
 
 	return nil
 }
 
-func (d *DummyRepeat) Deinit() error {
-	log.Println("DummyRepeat module: Deinit called")
+func (d *Repeat) Deinit() error {
+	log.Println("dummy.Repeat module: Deinit called")
 
 	return nil
 }
 
-func (d *DummyRepeat) Run(_ context.Context, s module.Session, args ...string) error {
-	log.Println("DummyRepeat module: Run called")
+func (d *Repeat) Run(_ context.Context, s module.Session, _ ...string) error {
+	log.Println("dummy.Repeat module: Run called")
 
 	cin, cout, cerr := s.Console()
 
 	_, err := cout.Write([]byte("Hello from dummy repeat module!\nEnter one word per line. (Two words will terminate)\n"))
 	if err != nil {
-		log.Println("dummy error writing to client: ", err)
+		log.Println("dummy.Repeat module: error writing to client: ", err)
 
 		return err
 	}
@@ -51,7 +51,7 @@ func (d *DummyRepeat) Run(_ context.Context, s module.Session, args ...string) e
 	for {
 		line, err := r.ReadString('\n')
 		if err != nil {
-			log.Println("dummy error reading from client: ", err)
+			log.Println("dummy.Repeat module: error reading from client: ", err)
 
 			return err
 		}
@@ -62,16 +62,17 @@ func (d *DummyRepeat) Run(_ context.Context, s module.Session, args ...string) e
 		if len(words) > 1 {
 			_, err = cerr.Write([]byte("Oh no! Can only handle one word per line.\n"))
 			if err != nil {
-				log.Println("dummy error writing to client: ", err)
+				log.Println("dummy.Repeat module: error writing to client: ", err)
 
 				return err
 			}
+
 			return nil
 		}
 
 		_, err = cout.Write([]byte(words[0] + "\n"))
 		if err != nil {
-			log.Println("dummy error writing to client: ", err)
+			log.Println("dummy.Repeat module: error writing to client: ", err)
 
 			return err
 		}

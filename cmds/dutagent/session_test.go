@@ -70,6 +70,7 @@ func TestChanReader_Read(t *testing.T) {
 			for _, b := range tt.channelIn {
 				ch <- b
 			}
+
 			close(ch) // Simulate closing the channel after sending all data
 
 			r := &chanReader{
@@ -78,6 +79,7 @@ func TestChanReader_Read(t *testing.T) {
 			}
 
 			p := make([]byte, tt.readSize)
+
 			gotN, err := r.Read(p)
 			if err != tt.wantErr {
 				t.Errorf("Read() error = %v, wantErr %v", err, tt.wantErr)

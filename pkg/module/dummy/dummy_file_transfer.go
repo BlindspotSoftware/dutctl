@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -11,33 +12,33 @@ import (
 	"github.com/BlindspotSoftware/dutctl/pkg/module"
 )
 
-// DummyFT is a dummy file transfer module.
+// FT is a dummy file transfer module.
 // It requests a file from the client and writes it to a file, processes it, and sends it back.
-type DummyFT struct{}
+type FT struct{}
 
 // Ensure implementing the Module interface.
-var _ module.Module = &DummyFT{}
+var _ module.Module = &FT{}
 
-func (d *DummyFT) Help() string {
-	log.Println("DummyFT module: Help called")
+func (d *FT) Help() string {
+	log.Println("dummy.FT module: Help called")
 
 	return "This dummy module demonstrates file transfer."
 }
 
-func (d *DummyFT) Init() error {
-	log.Println("DummyFT module: Init called")
+func (d *FT) Init() error {
+	log.Println("dummy.FT module: Init called")
 
 	return nil
 }
 
-func (d *DummyFT) Deinit() error {
-	log.Println("DummyFT module: Deinit called")
+func (d *FT) Deinit() error {
+	log.Println("dummy.FT module: Deinit called")
 
 	return nil
 }
 
-func (d *DummyFT) Run(_ context.Context, s module.Session, args ...string) error {
-	log.Println("DummyFT module: Run called")
+func (d *FT) Run(_ context.Context, s module.Session, args ...string) error {
+	log.Println("dummy.FT module: Run called")
 
 	s.Print("Hello from dummy file transfer module")
 
@@ -49,22 +50,25 @@ func (d *DummyFT) Run(_ context.Context, s module.Session, args ...string) error
 	}
 
 	inFile := args[0]
-	str = fmt.Sprintf("Requesting file: %s", inFile)
+	str = "Requesting file: " + inFile
 	s.Print(str)
 
-	fr, err := s.RequestFile(inFile)
+	fileReq, err := s.RequestFile(inFile)
 	if err != nil {
 		return fmt.Errorf("file request failed: %v", err)
 	}
 
-	log.Printf("Dummy-Module: Reading file: %s", inFile)
-	raw, err := io.ReadAll(fr)
+	log.Printf("dummy.FT module: Reading file: %s", inFile)
+
+	raw, err := io.ReadAll(fileReq)
 	if err != nil {
-		log.Printf("Dummy-Module: Failed to read file: %v", err)
+		log.Printf("dummy.FT module: Failed to read file: %v", err)
+
 		return fmt.Errorf("failed to read file: %v", err)
 	}
 
-	log.Printf("Dummy-Module: prepare writing file")
+	log.Printf("dummy.FT module: prepare writing file")
+
 	dir, err := os.MkdirTemp("", "dutagent-out")
 	if err != nil {
 		return fmt.Errorf("failed to create temp dir: %v", err)
@@ -72,12 +76,14 @@ func (d *DummyFT) Run(_ context.Context, s module.Session, args ...string) error
 
 	path := filepath.Join(dir, filepath.Base(inFile))
 
-	err = os.WriteFile(path, raw, os.ModePerm)
+	perm := 0600
+
+	err = os.WriteFile(path, raw, fs.FileMode(perm))
 	if err != nil {
 		return fmt.Errorf("failed to write file: %v", err)
 	}
 
-	log.Printf("Dummy-Module: Wrote file to: %s", path)
+	log.Printf("dummy.FT module: Wrote file to: %s", path)
 
 	s.Print("File written successfully")
 

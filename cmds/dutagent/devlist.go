@@ -12,6 +12,7 @@ func (devs devlist) names() []string {
 	for d := range devs {
 		names = append(names, d)
 	}
+
 	return names
 }
 
@@ -25,10 +26,13 @@ func (devs devlist) cmds(device string) []string {
 	for c := range dev.Cmds {
 		cmds = append(cmds, c)
 	}
+
 	return cmds
 }
 
-//nolint:composites
+// This is teporary test data
+
+//nolint:gochecknoglobals
 var testlist = devlist{
 	"device1": {
 		Desc: "Device 1",
@@ -41,7 +45,7 @@ var testlist = devlist{
 						Main:    true,
 						Args:    nil,
 						Options: nil,
-						Module:  &dummy.DummyStatus{},
+						Module:  &dummy.Status{},
 					},
 				},
 			},
@@ -58,7 +62,7 @@ var testlist = devlist{
 						Main:    true,
 						Args:    nil,
 						Options: nil,
-						Module:  &dummy.DummyStatus{},
+						Module:  &dummy.Status{},
 					},
 				},
 			},
@@ -70,7 +74,7 @@ var testlist = devlist{
 						Main:    true,
 						Args:    nil,
 						Options: nil,
-						Module:  &dummy.DummyRepeat{},
+						Module:  &dummy.Repeat{},
 					},
 				},
 			},
@@ -87,7 +91,7 @@ var testlist = devlist{
 						Main:    true,
 						Args:    nil,
 						Options: nil,
-						Module:  &dummy.DummyStatus{},
+						Module:  &dummy.Status{},
 					},
 				},
 			},
@@ -99,7 +103,7 @@ var testlist = devlist{
 						Main:    true,
 						Args:    nil,
 						Options: nil,
-						Module:  &dummy.DummyFT{},
+						Module:  &dummy.FT{},
 					},
 				},
 			},
