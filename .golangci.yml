@@ -40,7 +40,7 @@ linters:
     - ginkgolinter
     - gocheckcompilerdirectives
     - gochecknoglobals
-    - gochecknoinits
+    #- gochecknoinits - init functions are needed for the plugin system
     - gochecksumtype
     - gocognit
     - goconst
@@ -73,7 +73,7 @@ linters:
     - mirror
     - misspell
     - mnd
-    - musttag
+    #- musttag - Not all fields need to be tagged for YAML parsing, as the default way of assigning is fine.
     - nakedret
     - nestif
     - nilerr
@@ -84,7 +84,7 @@ linters:
     - nonamedreturns
     - nosprintfhostport
     #- paralleltest - Not necessary to do parallel tests for now, might enable later again
-    - perfsprint
+    #- perfsprint - Using fmt.Sprintf is fine, performance is not an issue.
     - prealloc
     - predeclared
     - promlinter
@@ -125,6 +125,39 @@ run:
 
 # Settings of specific linters.
 linters-settings:
+  gci:
+    # Section configuration to compare against.
+    # Section names are case-insensitive and may contain parameters in ().
+    # The default order of sections is `standard > default > custom > blank > dot > alias > localmodule`,
+    # If `custom-order` is `true`, it follows the order of `sections` option.
+    # Default: ["standard", "default"]
+    sections:
+      - standard # Standard section: captures all standard packages.
+      - default # Default section: contains all imports that could not be matched to another section type.
+      - blank # Blank section: contains all blank imports. This section is not present unless explicitly enabled.
+      - alias # Alias section: contains all alias imports. This section is not present unless explicitly enabled.
+      
+  ireturn:
+    # List of interfaces to allow.
+    # Lists of the keywords and regular expressions matched to interface or package names can be used.
+    # `allow` and `reject` settings cannot be used at the same time.
+    #
+    # Keywords:
+    # - `empty` for `interface{}`
+    # - `error` for errors
+    # - `stdlib` for standard library
+    # - `anon` for anonymous interfaces
+    # - `generic` for generic interfaces added in go 1.18
+    #
+    # Default: [anon, error, empty, stdlib]
+    allow:
+      - anon
+      - error
+      - empty
+      - stdlib
+      - generic
+      - "Module"
+
   varnamelen:
     max-distance: 6
     ignore-type-assert-ok: true
