@@ -39,6 +39,11 @@ func init() {
 `New` is a function to instantiate an instance of the module. Usually it can be as simple as shown above. 
 Note that initial setup code can be placed in the `Init()` function of the module interface, which supports error checking and should be preferred over the constructor for most setup code. 
 
+With this in place, the dutagent can use modules by using anonymous imports, e.g.:
+```go
+_ "github.com/BlindspotSoftware/dutctl/pkg/module/dummy"
+```
+
 ## Configuration
 A module can be dynamically configured when starting a dutagent using the options map in the [dutagent configuration](./dutagent-config.md#module). A module must be of type `struct' and have the options as fields. The parser will set the struct fields to match the map keys.
 
