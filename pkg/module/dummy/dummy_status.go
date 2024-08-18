@@ -9,6 +9,13 @@ import (
 	"github.com/BlindspotSoftware/dutctl/pkg/module"
 )
 
+func init() {
+	module.Register(module.Info{
+		ID:  "dummy-status",
+		New: func() module.Module { return &Status{} },
+	})
+}
+
 // Status prints status information about itself and the environment.
 // It demonstrates the use of the Print method of module.Session to send messages to the client.
 type Status struct{}

@@ -12,6 +12,13 @@ import (
 	"github.com/BlindspotSoftware/dutctl/pkg/module"
 )
 
+func init() {
+	module.Register(module.Info{
+		ID:  "dummy-ft",
+		New: func() module.Module { return &FT{} },
+	})
+}
+
 // FT is a dummy file transfer module.
 // It requests a file from the client and writes it to a file, processes it, and sends it back.
 type FT struct{}
