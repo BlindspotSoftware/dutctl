@@ -2,7 +2,7 @@ package main
 
 import (
 	"github.com/BlindspotSoftware/dutctl/pkg/dut"
-	"github.com/BlindspotSoftware/dutctl/pkg/module/dummy"
+	"github.com/BlindspotSoftware/dutctl/pkg/module"
 )
 
 type devlist map[string]dut.Device
@@ -45,7 +45,8 @@ var testlist = devlist{
 						Main:    true,
 						Args:    nil,
 						Options: nil,
-						Module:  &dummy.Status{},
+						//Module:  &dummy.Status{},
+						Module: module.New("dummy-status"),
 					},
 				},
 			},
@@ -62,7 +63,8 @@ var testlist = devlist{
 						Main:    true,
 						Args:    nil,
 						Options: nil,
-						Module:  &dummy.Status{},
+						//Module:  &dummy.Status{},
+						Module: module.New("dummy-status"),
 					},
 				},
 			},
@@ -74,7 +76,8 @@ var testlist = devlist{
 						Main:    true,
 						Args:    nil,
 						Options: nil,
-						Module:  &dummy.Repeat{},
+						//Module:  &dummy.Repeat{},
+						Module: module.New("dummy-repeat"),
 					},
 				},
 			},
@@ -91,7 +94,8 @@ var testlist = devlist{
 						Main:    true,
 						Args:    nil,
 						Options: nil,
-						Module:  &dummy.Status{},
+						//Module:  &dummy.Status{},
+						Module: module.New("dummy-status"),
 					},
 				},
 			},
@@ -103,7 +107,8 @@ var testlist = devlist{
 						Main:    true,
 						Args:    nil,
 						Options: nil,
-						Module:  &dummy.FT{},
+						//Module:  &dummy.FT{},
+						Module: module.New("dummy-ft"),
 					},
 				},
 			},

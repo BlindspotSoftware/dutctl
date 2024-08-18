@@ -9,6 +9,13 @@ import (
 	"github.com/BlindspotSoftware/dutctl/pkg/module"
 )
 
+func init() {
+	module.Register(module.Info{
+		ID:  "dummy-repeat",
+		New: func() module.Module { return &Repeat{} },
+	})
+}
+
 // Repeat repeats the input from the client.
 // It demonstrates the use of the Console method of module.Session to interact with the client.
 type Repeat struct{}

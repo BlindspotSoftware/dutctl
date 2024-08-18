@@ -16,6 +16,8 @@ import (
 	"github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1/dutctlv1connect"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
+
+	_ "github.com/BlindspotSoftware/dutctl/pkg/module/dummy"
 )
 
 type dutagent struct{}
