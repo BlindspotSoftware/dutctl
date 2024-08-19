@@ -1,7 +1,15 @@
 // Package dut provides representation of the device-under-test (DUT).
 package dut
 
-import "github.com/BlindspotSoftware/dutctl/pkg/module"
+import (
+	"errors"
+	"fmt"
+	"strings"
+
+	"github.com/BlindspotSoftware/dutctl/pkg/module"
+	"github.com/go-playground/validator/v10"
+	"gopkg.in/yaml.v3"
+)
 
 // Device is the representation of a device-under-test (DUT).
 type Device struct {
@@ -17,12 +25,121 @@ type Command struct {
 	Modules []Module
 }
 
+// commandAlias is used when parsing YAML to avoid recursion.
+type commandAlias Command
+
+// UnmarshalYAML unmarshals a Command from a YAML node and adds custom validation.
+//
+//nolint:cyclop
+func (c *Command) UnmarshalYAML(node *yaml.Node) error {
+	var cmd commandAlias
+	if err := node.Decode(&cmd); err != nil {
+		return err
+	}
+
+	*c = Command(cmd)
+
+	// Check presence of main module
+	switch len(c.Modules) {
+	case 0:
+		return errors.New("command must have at least one module")
+	case 1:
+		// Implicitly sets the only module as main
+		c.Modules[0].Config.Main = true
+	default:
+		if c.countMain() != 1 {
+			return errors.New("command must have exactly one main module")
+		}
+	}
+
+	// Check for presence of args in non-main modules only
+	for _, mod := range c.Modules {
+		if mod.Config.Main && mod.Config.Args != nil {
+			return errors.New("main module should not have args set, they are passed as command line arguments")
+		}
+
+		if !mod.Config.Main && mod.Config.Args == nil {
+			return errors.New("non-main modules should have args set")
+		}
+	}
+
+	return nil
+}
+
+func (c *Command) countMain() int {
+	count := 0
+
+	for _, mod := range c.Modules {
+		if mod.Config.Main {
+			count++
+		}
+	}
+
+	return count
+}
+
 // Module is a wrapper for any module implementation.
 type Module struct {
-	Name    string
-	Main    bool
-	Args    []string
-	Options map[string]any
+	Config ModuleConfig
 
 	module.Module
+}
+
+type ModuleConfig struct {
+	Name    string `yaml:"module"`
+	Main    bool
+	Args    *string
+	Options map[string]any
+}
+
+// UnmarshalYAML unmarshals a Module from a YAML node and adds custom validation.
+func (m *Module) UnmarshalYAML(node *yaml.Node) error {
+	if err := node.Decode(&m.Config); err != nil {
+		return err
+	}
+
+	var err error
+	if m.Module, err = module.New(m.Config.Name); err != nil {
+		return err
+	}
+
+	options, err := yaml.Marshal(m.Config.Options)
+	if err != nil {
+		return err
+	}
+
+	if err := yaml.Unmarshal(options, m.Module); err != nil {
+		return err
+	}
+
+	// validate Module options
+	validate := validator.New()
+	if err := validate.Struct(m.Module); err != nil {
+		return wrapValidatorErrors(err, node)
+	}
+
+	return nil
+}
+
+var ErrModuleValidation = errors.New("validation error")
+
+func wrapValidatorErrors(err error, node *yaml.Node) error {
+	if err == nil {
+		return nil
+	}
+
+	var valErrors validator.ValidationErrors
+	if !errors.As(err, &valErrors) {
+		// not of type ValidationErrors
+		return err
+	}
+
+	errMsg := make([]string, 0, len(valErrors))
+	for _, valErr := range valErrors {
+		errMsg = append(errMsg,
+			fmt.Sprintf("yaml: line %d: Field validation for '%s' failed on the '%s' tag",
+				node.Line, valErr.Field(), valErr.Tag()))
+	}
+
+	return fmt.Errorf("%w:\n%s", ErrModuleValidation, strings.Join(errMsg, "\n"))
 }

@@ -6,6 +6,7 @@ package module
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -75,26 +76,15 @@ func Register(mod Info) {
 }
 
 // New creates a new instance of a former registered module by its ID.
-// func New(id string) (Module, error) {
-// 	if id == "" {
-// 		return nil, errors.New("module ID must not be empty")
-// 	}
-
-// 	mod, ok := modules[id]
-// 	if !ok {
-// 		return nil, errors.New("module not found")
-// 	}
-
-// 	return mod.New(), nil
-// }
-
-// New creates a new instance of a former registered module by its ID.
-// Unsecure! Add error handling to this function.
-func New(id string) Module {
-	mod, ok := modules[id]
-	if !ok {
-		return nil
+func New(id string) (Module, error) {
+	if id == "" {
+		return nil, errors.New("module ID must not be empty")
 	}
 
-	return mod.New()
+	mod, ok := modules[id]
+	if !ok {
+		return nil, errors.New("module not found")
+	}
+
+	return mod.New(), nil
 }

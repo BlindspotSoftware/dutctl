@@ -18,9 +18,10 @@ import (
 	"sync"
 
 	"connectrpc.com/connect"
-	pb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1"
 	"github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1/dutctlv1connect"
 	"golang.org/x/net/http2"
+
+	pb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1"
 )
 
 func newInsecureClient() *http.Client {
