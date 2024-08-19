@@ -9,18 +9,23 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"sync"
 
 	"connectrpc.com/connect"
-	pb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1"
 	"github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1/dutctlv1connect"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
+	"gopkg.in/yaml.v3"
 
 	_ "github.com/BlindspotSoftware/dutctl/pkg/module/dummy"
+
+	pb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1"
 )
 
-type dutagent struct{}
+type dutagent struct {
+	devices devlist
+}
 
 func (a *dutagent) List(
 	_ context.Context,
@@ -29,7 +34,7 @@ func (a *dutagent) List(
 	log.Println("Server received List request")
 
 	res := connect.NewResponse(&pb.ListResponse{
-		Devices: testlist.names(),
+		Devices: a.devices.names(),
 	})
 
 	return res, nil
@@ -44,7 +49,7 @@ func (a *dutagent) Commands(
 	device := req.Msg.GetDevice()
 
 	res := connect.NewResponse(&pb.CommandsResponse{
-		Commands: testlist.cmds(device),
+		Commands: a.devices.cmds(device),
 	})
 
 	return res, nil
@@ -67,7 +72,7 @@ func (a *dutagent) Run(
 		return connect.NewError(connect.CodeInvalidArgument, errors.New("first run request must contain a command"))
 	}
 
-	device, ok := testlist[cmdMsg.GetDevice()]
+	device, ok := a.devices[cmdMsg.GetDevice()]
 	if !ok {
 		return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("device %q does not exist", cmdMsg.GetDevice()))
 	}
@@ -266,13 +271,31 @@ func fromClientWorker(stream *connect.BidiStream[pb.RunRequest, pb.RunResponse],
 	}
 }
 
+type config struct {
+	Version int
+	Devices devlist
+}
+
 func main() {
-	agent := &dutagent{}
+	cfgYAML, err := os.ReadFile("./contrib/dutagent-cfg-example.yaml")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	var cfg config
+	if err := yaml.Unmarshal(cfgYAML, &cfg); err != nil {
+		log.Fatal(err)
+	}
+
+	agent := &dutagent{
+		devices: cfg.Devices,
+	}
+
 	mux := http.NewServeMux()
 	path, handler := dutctlv1connect.NewDeviceServiceHandler(agent)
 	mux.Handle(path, handler)
 	//nolint:gosec
-	err := http.ListenAndServe(
+	err = http.ListenAndServe(
 		"localhost:8080",
 		// Use h2c so we can serve HTTP/2 without TLS.
 		h2c.NewHandler(mux, &http2.Server{}),
