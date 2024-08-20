@@ -1,4 +1,4 @@
-package main
+package chanio
 
 import (
 	"bytes"
@@ -6,6 +6,28 @@ import (
 	"reflect"
 	"testing"
 )
+
+func TestNewChanWriter(t *testing.T) {
+	ch := make(chan []byte)
+	writer := NewChanWriter(ch)
+
+	if writer.ch == nil {
+		t.Errorf("NewChanWriter() returned a ChanWriter with a nil channel")
+	}
+}
+
+func TestNewChanReader(t *testing.T) {
+	ch := make(chan []byte)
+	reader := NewChanReader(ch)
+
+	if reader.ch == nil {
+		t.Errorf("NewChanReader() returned a ChanReader with a nil channel")
+	}
+
+	if reader.buf == nil {
+		t.Errorf("NewChanReader() returned a ChanReader with a nil buffer")
+	}
+}
 
 func TestChanReader_Read(t *testing.T) {
 	tests := []struct {
@@ -73,7 +95,7 @@ func TestChanReader_Read(t *testing.T) {
 
 			close(ch) // Simulate closing the channel after sending all data
 
-			r := &chanReader{
+			r := &ChanReader{
 				ch:  ch,
 				buf: tt.bufferInit,
 			}
@@ -136,7 +158,7 @@ func TestChanReaderWithReadAll(t *testing.T) {
 			}
 			close(ch)
 
-			r := &chanReader{
+			r := &ChanReader{
 				ch:  ch,
 				buf: tt.bufferInit,
 			}
