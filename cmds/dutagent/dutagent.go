@@ -1,4 +1,4 @@
-// dutagent is the server of the DUT Contol system.
+// dutagent is the server of the DUT Control system.
 // The service ist designed to run on a single board computer,
 // which can handle the wiring to the devices under test (DUTs).
 package main
@@ -109,7 +109,7 @@ func (a *dutagent) Run(
 	}
 
 	// Run the module in a goroutine.
-	// The termiantion of the module execution is signaled by closing the done channel.
+	// The termination of the module execution is signaled by closing the done channel.
 	go func() {
 		sesh.err = cmd.Modules[0].Run(ctx, &sesh, cmdMsg.GetArgs()...)
 		log.Println("Module finished and returned error: ", sesh.err)
@@ -118,7 +118,7 @@ func (a *dutagent) Run(
 
 	var wg sync.WaitGroup
 
-	// Start a worker for sending messages that are colleced by the session form the module to the client.
+	// Start a worker for sending messages that are collected by the session form the module to the client.
 	// Use a WaitGroup for synchronization as there might be messages left to send to the client after the module finished.
 	wg.Add(1)
 
