@@ -8,17 +8,38 @@ import (
 )
 
 func TestNewChanWriter(t *testing.T) {
+	// Test with valid channel
 	ch := make(chan []byte)
-	writer := NewChanWriter(ch)
+	writer, err := NewChanWriter(ch)
+
+	if err != nil {
+		t.Fatalf("NewChanWriter() returned an error: %v", err)
+	}
 
 	if writer.ch == nil {
 		t.Errorf("NewChanWriter() returned a ChanWriter with a nil channel")
 	}
+
+	// Test with nil channel
+	writer, err = NewChanWriter(nil)
+
+	if err == nil {
+		t.Fatalf("NewChanWriter() did not return an error for nil channel")
+	}
+
+	if writer != nil {
+		t.Errorf("NewChanWriter() returned a non-nil ChanWriter for nil channel")
+	}
 }
 
 func TestNewChanReader(t *testing.T) {
+	// Test with valid channel
 	ch := make(chan []byte)
-	reader := NewChanReader(ch)
+	reader, err := NewChanReader(ch)
+
+	if err != nil {
+		t.Fatalf("NewChanReader() returned an error: %v", err)
+	}
 
 	if reader.ch == nil {
 		t.Errorf("NewChanReader() returned a ChanReader with a nil channel")
@@ -26,6 +47,17 @@ func TestNewChanReader(t *testing.T) {
 
 	if reader.buf == nil {
 		t.Errorf("NewChanReader() returned a ChanReader with a nil buffer")
+	}
+
+	// Test with nil channel
+	reader, err = NewChanReader(nil)
+
+	if err == nil {
+		t.Fatalf("NewChanReader() did not return an error for nil channel")
+	}
+
+	if reader != nil {
+		t.Errorf("NewChanReader() returned a non-nil ChanReader for nil channel")
 	}
 }
 
