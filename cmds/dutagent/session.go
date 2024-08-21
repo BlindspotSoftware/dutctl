@@ -26,13 +26,43 @@ func (s *session) Print(text string) {
 
 //nolint:nonamedreturns
 func (s *session) Console() (stdin io.Reader, stdout, stderr io.Writer) {
-	return chanio.NewChanReader(s.stdin), chanio.NewChanWriter(s.stdout), chanio.NewChanWriter(s.stderr)
+	var (
+		stdinReader                io.Reader
+		stdoutWriter, stderrWriter io.Writer
+		err                        error
+	)
+
+	stdinReader, err = chanio.NewChanReader(s.stdin)
+	if err != nil {
+		log.Fatalf("session.Console() failed to create stdinReader: %v", err)
+	}
+
+	stdoutWriter, err = chanio.NewChanWriter(s.stdout)
+	if err != nil {
+		log.Fatalf("session.Console() failed to create stdoutWriter: %v", err)
+	}
+
+	stderrWriter, err = chanio.NewChanWriter(s.stderr)
+	if err != nil {
+		log.Fatalf("session.Console() failed to create stderrWriter: %v", err)
+	}
+
+	return stdinReader, stdoutWriter, stderrWriter
 }
 
 func (s *session) RequestFile(name string) (io.Reader, error) {
+	if s.fileReq == nil {
+		log.Fatal("session.RequestFile() called but session.fileReq is nil")
+	}
+
+	r, err := chanio.NewChanReader(s.file)
+	if err != nil {
+		log.Fatalf("session.RequestFile() failed to create reader: %v", err)
+	}
+
 	s.fileReq <- name
 
-	return chanio.NewChanReader(s.file), nil
+	return r, nil
 }
 
 func (s *session) SendFile(_ string, _ io.Reader) error {

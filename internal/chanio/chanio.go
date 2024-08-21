@@ -2,6 +2,7 @@
 package chanio
 
 import (
+	"errors"
 	"io"
 	"log"
 )
@@ -14,11 +15,16 @@ type ChanReader struct {
 	buf []byte // Buffer to store excess bytes
 }
 
-func NewChanReader(ch <-chan []byte) *ChanReader {
+// NewChanReader returns a new ChanReader reading from ch. The provided channel must not be nil.
+func NewChanReader(ch <-chan []byte) (*ChanReader, error) {
+	if ch == nil {
+		return nil, errors.New("cannot create a ChanReader with a nil channel")
+	}
+
 	return &ChanReader{
 		ch:  ch,
 		buf: make([]byte, 0),
-	}
+	}, nil
 }
 
 // Read reads up to len(bytes) bytes into bytes. It returns the number of bytes
@@ -85,11 +91,15 @@ type ChanWriter struct {
 	ch chan<- []byte
 }
 
-// NewChanWriter returns a new ChanWriter writing to ch.
-func NewChanWriter(ch chan<- []byte) *ChanWriter {
+// NewChanWriter returns a new ChanWriter writing to ch. The provided channel must not be nil.
+func NewChanWriter(ch chan<- []byte) (*ChanWriter, error) {
+	if ch == nil {
+		return nil, errors.New("cannot create a ChanWriter with a nil channel")
+	}
+
 	return &ChanWriter{
 		ch: ch,
-	}
+	}, nil
 }
 
 // Write writes len(bytes) bytes from bytes to the underlying data stream.
