@@ -11,6 +11,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"net"
 	"net/http"
@@ -81,7 +82,7 @@ func (app *application) commandsRPC(device string) error {
 	return nil
 }
 
-//nolint:funlen,cyclop
+//nolint:funlen,cyclop,gocognit
 func (app *application) runRPC(device, command string, cmdArgs []string) error {
 	log.Println("Calling Run RPC ")
 
@@ -139,8 +140,8 @@ func (app *application) runRPC(device, command string, cmdArgs []string) error {
 				err := stream.Send(&pb.RunRequest{
 					Msg: &pb.RunRequest_File{
 						File: &pb.File{
-							Path:    "in-mem",
-							Content: []byte("some file content"),
+							Path:    "file.txt",
+							Content: []byte("some file content\n"),
 						},
 					},
 				})
@@ -148,6 +149,25 @@ func (app *application) runRPC(device, command string, cmdArgs []string) error {
 				if err != nil {
 					log.Fatalln(err)
 				}
+
+				log.Printf("Sent file: %q\n", "file.txt")
+			case *pb.RunResponse_File:
+				path := msg.File.GetPath()
+				content := msg.File.GetContent()
+
+				log.Printf("Received file: %q\n", path)
+
+				if len(content) == 0 {
+					log.Println("Received empty file content")
+				}
+
+				perm := 0600
+
+				err = os.WriteFile(path, content, fs.FileMode(perm))
+				if err != nil {
+					log.Fatalln(err)
+				}
+
 			default:
 				log.Printf("Unexpected message type %T", msg)
 			}
@@ -229,17 +249,17 @@ func start(stdin io.Reader, stdout, stderr io.Writer, args []string) {
 	// 	log.Fatal(err)
 	// }
 
-	// ###### DEMO RUN (repeat command, expecting interactive console messages) ######
-	err = app.runRPC("device2", "repeat", []string{})
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// // ###### DEMO RUN (file-transfer command, expecting file request) ######
-	// err = app.runRPC("device3", "file-transfer", []string{"file.txt"})
+	// // ###### DEMO RUN (repeat command, expecting interactive console messages) ######
+	// err = app.runRPC("device2", "repeat", []string{})
 	// if err != nil {
 	// 	log.Fatal(err)
 	// }
+
+	// ###### DEMO RUN (file-transfer command, expecting file request) ######
+	err = app.runRPC("device3", "file-transfer", []string{"file.txt"})
+	if err != nil {
+		log.Fatal(err)
+	}
 }
 
 func main() {
