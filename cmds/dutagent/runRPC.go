@@ -46,7 +46,7 @@ func (a *dutagent) Run(
 			stdout:  make(chan []byte),
 			stderr:  make(chan []byte),
 			fileReq: make(chan string),
-			file:    make(chan []byte, 1),
+			file:    make(chan chan []byte),
 			done:    make(chan struct{}),
 		},
 		workerWG:   &sync.WaitGroup{},

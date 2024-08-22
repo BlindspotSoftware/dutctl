@@ -2,9 +2,11 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"log"
 
 	"connectrpc.com/connect"
+	"github.com/BlindspotSoftware/dutctl/internal/chanio"
 
 	pb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1"
 )
@@ -12,7 +14,7 @@ import (
 // toClientWorker sends messages from the module session to the client.
 // This function is an infinite loop. It terminates when the session's done channel is closed.
 //
-//nolint:cyclop
+//nolint:cyclop, funlen
 func toClientWorker(stream *connect.BidiStream[pb.RunRequest, pb.RunResponse], s *session) error {
 	for {
 		select {
@@ -52,6 +54,36 @@ func toClientWorker(stream *connect.BidiStream[pb.RunRequest, pb.RunResponse], s
 			if err != nil {
 				return connect.NewError(connect.CodeInternal, fmt.Errorf("to-client-worker: %v", err))
 			}
+
+			s.currentFile = name
+		case file := <-s.file:
+			r, err := chanio.NewChanReader(file)
+			if err != nil {
+				return connect.NewError(connect.CodeInternal, fmt.Errorf("to-client-worker: %v", err))
+			}
+
+			content, err := io.ReadAll(r)
+			if err != nil {
+				return connect.NewError(connect.CodeInternal, fmt.Errorf("to-client-worker: %v", err))
+			}
+
+			log.Printf("Received file from module, sending to client. Name: %q, Size %d", s.currentFile, len(content))
+
+			res := &pb.RunResponse{
+				Msg: &pb.RunResponse_File{
+					File: &pb.File{
+						Path:    s.currentFile,
+						Content: content,
+					},
+				},
+			}
+
+			err = stream.Send(res)
+			if err != nil {
+				return connect.NewError(connect.CodeInternal, fmt.Errorf("to-client-worker: %v", err))
+			}
+
+			s.currentFile = ""
 		case <-s.done:
 			return nil
 		}
@@ -61,7 +93,7 @@ func toClientWorker(stream *connect.BidiStream[pb.RunRequest, pb.RunResponse], s
 // fromClientWorker reads messages from the client and passes them to the module session.
 // This function is an infinite loop. It terminates when the session's done channel is closed.
 //
-//nolint:cyclop,funlen
+//nolint:cyclop,funlen,gocognit
 func fromClientWorker(stream *connect.BidiStream[pb.RunRequest, pb.RunResponse], s *session) error {
 	for {
 		select {
@@ -94,29 +126,44 @@ func fromClientWorker(stream *connect.BidiStream[pb.RunRequest, pb.RunResponse],
 					log.Printf("Unexpected Console message %T", consoleMsg)
 				}
 			case *pb.RunRequest_File:
-				// s.file = make(chan []byte, 1) // Buffered channel to be able to close it right after sending the file.
 				fileMsg := msg.File
 				if fileMsg == nil {
-					log.Println("Received nil file message")
+					log.Println("Received empty file message")
 
 					continue // Can this happen?
+				}
+
+				if s.currentFile == "" {
+					log.Println("Received file without a request - ignoring!")
+
+					continue // Ignore unexpected files
 				}
 
 				path := fileMsg.GetPath()
-				file := fileMsg.GetContent()
+				content := fileMsg.GetContent()
 
-				if file == nil {
-					log.Println("Received nil file content")
+				if content == nil {
+					log.Println("Received file message with empty content")
 
 					continue // Can this happen?
 				}
 
+				if path != s.currentFile {
+					log.Printf("Received unexpected file %q - ignoring!", path)
+
+					continue // Ignore unexpected files
+				}
+
 				log.Printf("Server received file %q from client", path)
-				s.file <- file // This will not block, as the channel is buffered.
+
+				file := make(chan []byte, 1)
+				s.file <- file
+				file <- content
+				close(file) // indicate EOF.
 
 				log.Println("Passed file to module (buffered in the session)")
-				close(s.file)
-				log.Println("Closed file channel")
+
+				s.currentFile = ""
 			default:
 				log.Printf("Unexpected message type %T", msg)
 			}
