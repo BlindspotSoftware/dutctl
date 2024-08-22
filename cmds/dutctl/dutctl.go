@@ -223,22 +223,23 @@ func start(stdin io.Reader, stdout, stderr io.Writer, args []string) {
 		log.Fatal(err)
 	}
 
-	// ###### DEMO RUN (status command, expecting prints only) ######
+	// // ###### DEMO RUN (status command, expecting prints only) ######
 	// err = app.runRPC("device1", "status", []string{"foo", "bar"})
 	// if err != nil {
 	// 	log.Fatal(err)
 	// }
 
 	// ###### DEMO RUN (repeat command, expecting interactive console messages) ######
-	// err = app.runRPC("device2", "repeat", []string{})
-	// if err != nil {
-	// 	log.Fatal(err)
-	// }
-
-	err = app.runRPC("device3", "file-transfer", []string{"file.txt"})
+	err = app.runRPC("device2", "repeat", []string{})
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	// // ###### DEMO RUN (file-transfer command, expecting file request) ######
+	// err = app.runRPC("device3", "file-transfer", []string{"file.txt"})
+	// if err != nil {
+	// 	log.Fatal(err)
+	// }
 }
 
 func main() {
