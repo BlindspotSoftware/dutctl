@@ -1,11 +1,10 @@
-package main
+package dutagent
 
 import (
-	"fmt"
+	"context"
 	"io"
 	"log"
 
-	"connectrpc.com/connect"
 	"github.com/BlindspotSoftware/dutctl/internal/chanio"
 
 	pb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1"
@@ -15,56 +14,58 @@ import (
 // This function is an infinite loop. It terminates when the session's done channel is closed.
 //
 //nolint:cyclop, funlen
-func toClientWorker(stream *connect.BidiStream[pb.RunRequest, pb.RunResponse], s *session) error {
+func toClientWorker(ctx context.Context, stream Stream, s *session) error {
 	for {
 		select {
-		case str := <-s.print:
+		case <-ctx.Done():
+			return nil
+		case str := <-s.printCh:
 			res := &pb.RunResponse{
 				Msg: &pb.RunResponse_Print{Print: &pb.Print{Text: []byte(str)}},
 			}
 
 			err := stream.Send(res)
 			if err != nil {
-				return connect.NewError(connect.CodeInternal, fmt.Errorf("to-client-worker: %v", err))
+				return err
 			}
-		case bytes := <-s.stdout:
+		case bytes := <-s.stdoutCh:
 			res := &pb.RunResponse{
 				Msg: &pb.RunResponse_Console{Console: &pb.Console{Data: &pb.Console_Stdout{Stdout: bytes}}},
 			}
 
 			err := stream.Send(res)
 			if err != nil {
-				return connect.NewError(connect.CodeInternal, fmt.Errorf("to-client-worker: %v", err))
+				return err
 			}
-		case bytes := <-s.stderr:
+		case bytes := <-s.stderrCh:
 			res := &pb.RunResponse{
 				Msg: &pb.RunResponse_Console{Console: &pb.Console{Data: &pb.Console_Stderr{Stderr: bytes}}},
 			}
 
 			err := stream.Send(res)
 			if err != nil {
-				return connect.NewError(connect.CodeInternal, fmt.Errorf("to-client-worker: %v", err))
+				return err
 			}
-		case name := <-s.fileReq:
+		case name := <-s.fileReqCh:
 			res := &pb.RunResponse{
 				Msg: &pb.RunResponse_FileRequest{FileRequest: &pb.FileRequest{Path: name}},
 			}
 
 			err := stream.Send(res)
 			if err != nil {
-				return connect.NewError(connect.CodeInternal, fmt.Errorf("to-client-worker: %v", err))
+				return err
 			}
 
 			s.currentFile = name
-		case file := <-s.file:
+		case file := <-s.fileCh:
 			r, err := chanio.NewChanReader(file)
 			if err != nil {
-				return connect.NewError(connect.CodeInternal, fmt.Errorf("to-client-worker: %v", err))
+				return err
 			}
 
 			content, err := io.ReadAll(r)
 			if err != nil {
-				return connect.NewError(connect.CodeInternal, fmt.Errorf("to-client-worker: %v", err))
+				return err
 			}
 
 			log.Printf("Received file from module, sending to client. Name: %q, Size %d", s.currentFile, len(content))
@@ -80,12 +81,10 @@ func toClientWorker(stream *connect.BidiStream[pb.RunRequest, pb.RunResponse], s
 
 			err = stream.Send(res)
 			if err != nil {
-				return connect.NewError(connect.CodeInternal, fmt.Errorf("to-client-worker: %v", err))
+				return err
 			}
 
 			s.currentFile = ""
-		case <-s.done:
-			return nil
 		}
 	}
 }
@@ -94,15 +93,15 @@ func toClientWorker(stream *connect.BidiStream[pb.RunRequest, pb.RunResponse], s
 // This function is an infinite loop. It terminates when the session's done channel is closed.
 //
 //nolint:cyclop,funlen,gocognit
-func fromClientWorker(stream *connect.BidiStream[pb.RunRequest, pb.RunResponse], s *session) error {
+func fromClientWorker(ctx context.Context, stream Stream, s *session) error {
 	for {
 		select {
-		case <-s.done:
+		case <-ctx.Done():
 			return nil
 		default:
 			req, err := stream.Receive()
 			if err != nil {
-				return connect.NewError(connect.CodeAborted, fmt.Errorf("from-client-worker: %v", err))
+				return err
 			}
 
 			reqMsg := req.GetMsg()
@@ -119,7 +118,7 @@ func fromClientWorker(stream *connect.BidiStream[pb.RunRequest, pb.RunResponse],
 					}
 
 					log.Printf("Server received stdin from client: %q", string(stdin))
-					s.stdin <- stdin
+					s.stdinCh <- stdin
 
 					log.Println("Passed stdin to module")
 				default:
@@ -157,7 +156,7 @@ func fromClientWorker(stream *connect.BidiStream[pb.RunRequest, pb.RunResponse],
 				log.Printf("Server received file %q from client", path)
 
 				file := make(chan []byte, 1)
-				s.file <- file
+				s.fileCh <- file
 				file <- content
 				close(file) // indicate EOF.
 
