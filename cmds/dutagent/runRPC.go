@@ -5,9 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"sync"
 
 	"connectrpc.com/connect"
+	"github.com/BlindspotSoftware/dutctl/internal/dutagent"
 	"github.com/BlindspotSoftware/dutctl/internal/fsm"
 	"github.com/BlindspotSoftware/dutctl/pkg/dut"
 
@@ -19,45 +19,39 @@ type runCmdArgs struct {
 	// dependencies for the state machine
 
 	stream     *connect.BidiStream[pb.RunRequest, pb.RunResponse]
-	sesh       *session
-	workerWG   *sync.WaitGroup // TODO: eventually replace with another done channel or take a look at sync.ErrGroup
+	broker     *dutagent.Broker
 	deviceList devlist
 
 	// fields for the states used during execution
 
-	cmdMsg *pb.Command
-	dev    dut.Device
-	cmd    dut.Command
+	cmdMsg    *pb.Command
+	dev       dut.Device
+	cmd       dut.Command
+	moduleErr error
 }
 
 // Run is the handler for the Run RPC.
-func (a *dutagent) Run(
+func (a *dutagentService) Run(
 	ctx context.Context,
 	stream *connect.BidiStream[pb.RunRequest, pb.RunResponse],
 ) error {
 	log.Println("Server received Run request")
 
 	args := runCmdArgs{
-		stream: stream,
-		sesh: &session{
-			//nolint:forbidigo
-			print:   make(chan string), // this should not trigger the linter
-			stdin:   make(chan []byte),
-			stdout:  make(chan []byte),
-			stderr:  make(chan []byte),
-			fileReq: make(chan string),
-			file:    make(chan chan []byte),
-			done:    make(chan struct{}),
-		},
-		workerWG:   &sync.WaitGroup{},
+		stream:     stream,
+		broker:     &dutagent.Broker{},
 		deviceList: a.devices,
 	}
 
 	_, err := fsm.Run(ctx, args, receiveCommandRPC)
 
-	// TODO: change error handling to create a connect.Error here and wrap the
-	// returned error in it. Also, may use the returned args to provide more
-	// context in the error message.
+	var connectErr *connect.Error
+	if err != nil && !errors.As(err, &connectErr) {
+		// Wrap the error in a connect.Error if not done yet.
+		return connect.NewError(connect.CodeInternal, err)
+	}
+
+	log.Print("Run-RPC finished with error: ", err)
 
 	return err
 }
@@ -136,47 +130,24 @@ func findDUTCmd(_ context.Context, args runCmdArgs) (runCmdArgs, fsm.State[runCm
 // Further, worker goroutines will be started to serve the module-to-client communication
 // during the module execution.
 func executeModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State[runCmdArgs], error) {
-	if args.sesh == nil {
-		e := connect.NewError(connect.CodeInternal, errors.New("module session is not initialized"))
+	if args.broker == nil {
+		e := connect.NewError(connect.CodeInternal, errors.New("broker is not initialized"))
 
 		return args, nil, e
 	}
 
+	rpcCtx := ctx
+	modCtx, modCtxCancel := context.WithCancel(rpcCtx)
+
+	args.broker.Start(modCtx, args.stream)
+	moduleSession := args.broker.ModuleSession()
+
 	// Run the module in a goroutine.
 	// The termination of the module execution is signaled by closing the done channel.
 	go func() {
-		args.sesh.err = args.cmd.Modules[0].Run(ctx, args.sesh, args.cmdMsg.GetArgs()...)
-		log.Println("Module finished and returned error: ", args.sesh.err)
-		close(args.sesh.done)
-	}()
-
-	// TODO: Maybe change
-
-	// Start a worker for sending messages that are collected by the session form the module to the client.
-	// This worker will be synchronized with the module execution by sessions done channel. The worker will
-	// return when the module execution is finished.
-	// Use a WaitGroup for synchronization as there might be messages left to send to the client after the
-	// module finished.
-	args.workerWG.Add(1)
-
-	go func() {
-		defer args.workerWG.Done()
-		log.Println("Starting send-to-client worker")
-		//nolint:errcheck
-		toClientWorker(args.stream, args.sesh) // TODO: error handling
-		log.Println("The send-to-client worker returned")
-	}()
-
-	// Start a worker for receiving messages from the client and pass them to the module.
-	// Do not use a WaitGroup here, as the worker blocks on receive calls to the client.
-	// In case of a non-interactive module (client does not send further messages), the worker will block forever.
-	// and waiting for it will never return.
-	// However, if the stream is closed, the receive calls to the client unblock and the worker will return.
-	go func() {
-		log.Println("Starting receive-from-client worker")
-		//nolint:errcheck
-		fromClientWorker(args.stream, args.sesh) // TODO: error handling
-		log.Println("The receive-from-client worker returned")
+		args.moduleErr = args.cmd.Modules[0].Run(rpcCtx, moduleSession, args.cmdMsg.GetArgs()...)
+		log.Println("Module finished and returned error: ", args.moduleErr)
+		modCtxCancel()
 	}()
 
 	return args, waitModules, nil
@@ -185,12 +156,35 @@ func executeModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State
 // waitModules is a state of the Run RPC.
 //
 // It waits for the module execution to finish. The state will block until the module execution is finished.
-func waitModules(_ context.Context, args runCmdArgs) (runCmdArgs, fsm.State[runCmdArgs], error) {
-	log.Println("Waiting for session to finish")
+func waitModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State[runCmdArgs], error) {
+	log.Println("Waiting for module to finish")
 
-	args.workerWG.Wait()
+	var moduleDone bool
 
-	log.Println("Session finished")
+	for {
+		select {
+		case <-ctx.Done():
+			e := connect.NewError(connect.CodeAborted, fmt.Errorf("module execution aborted: %v", ctx.Err()))
 
-	return args, nil, args.sesh.err
+			return args, nil, e
+		case brokerErr := <-args.broker.Err():
+			if brokerErr != nil {
+				e := connect.NewError(connect.CodeInternal, fmt.Errorf("module environment error: %v", brokerErr))
+				// An error occurred with the communication to the module during the module execution.
+				return args, nil, e
+			} else {
+				// If the error returned by the broker is nil, the module execution is done.
+				moduleDone = true
+			}
+		default:
+			if args.moduleErr != nil {
+				e := connect.NewError(connect.CodeInternal, fmt.Errorf("module execution failed: %v", args.moduleErr))
+				// The module execution failed.
+				return args, nil, e
+			} else if args.moduleErr == nil && moduleDone {
+				// The module execution finished successfully.
+				return args, nil, nil
+			}
+		}
+	}
 }
