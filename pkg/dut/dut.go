@@ -29,8 +29,6 @@ type Command struct {
 type commandAlias Command
 
 // UnmarshalYAML unmarshals a Command from a YAML node and adds custom validation.
-//
-//nolint:cyclop
 func (c *Command) UnmarshalYAML(node *yaml.Node) error {
 	var cmd commandAlias
 	if err := node.Decode(&cmd); err != nil {
@@ -56,10 +54,6 @@ func (c *Command) UnmarshalYAML(node *yaml.Node) error {
 	for _, mod := range c.Modules {
 		if mod.Config.Main && mod.Config.Args != nil {
 			return errors.New("main module should not have args set, they are passed as command line arguments")
-		}
-
-		if !mod.Config.Main && mod.Config.Args == nil {
-			return errors.New("non-main modules should have args set")
 		}
 	}
 

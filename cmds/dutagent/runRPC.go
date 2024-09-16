@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 
 	"connectrpc.com/connect"
 	"github.com/BlindspotSoftware/dutctl/internal/dutagent"
@@ -111,12 +112,6 @@ func findDUTCmd(_ context.Context, args runCmdArgs) (runCmdArgs, fsm.State[runCm
 		return args, nil, e
 	}
 
-	if len(cmd.Modules) > 1 {
-		e := connect.NewError(connect.CodeUnimplemented, errors.New("multiple modules per command are not supported yet"))
-
-		return args, nil, e
-	}
-
 	args.dev = device
 	args.cmd = cmd
 
@@ -142,11 +137,40 @@ func executeModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State
 	args.broker.Start(modCtx, args.stream)
 	moduleSession := args.broker.ModuleSession()
 
-	// Run the module in a goroutine.
+	// Run the modules in a goroutine.
 	// The termination of the module execution is signaled by closing the done channel.
 	go func() {
-		args.moduleErr = args.cmd.Modules[0].Run(rpcCtx, moduleSession, args.cmdMsg.GetArgs()...)
-		log.Println("Module finished and returned error: ", args.moduleErr)
+		cnt := len(args.cmd.Modules)
+
+		for idx, module := range args.cmd.Modules {
+			log.Printf("Running module %d of %d: %q", idx+1, cnt, module.Config.Name)
+
+			var moduleArgs []string
+
+			if module.Config.Main {
+				moduleArgs = args.cmdMsg.GetArgs()
+			} else if module.Config.Args != nil {
+				moduleArgs = strings.Split(*module.Config.Args, " ")
+			}
+
+			err := module.Run(rpcCtx, moduleSession, moduleArgs...)
+			if err != nil {
+				args.moduleErr = err
+				log.Printf("Module %q failed: %v", module.Config.Name, err)
+				modCtxCancel()
+
+				return
+			}
+
+			if ctx.Err() != nil {
+				log.Printf("Module execution aborted, %d of %d done: %v", idx+1, cnt, ctx.Err())
+				modCtxCancel()
+
+				return
+			}
+		}
+
+		log.Print("All modules finished successfully")
 		modCtxCancel()
 	}()
 
