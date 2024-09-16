@@ -34,5 +34,7 @@ devices:
       file-transfer:
         desc: "Transfer a file"
         modules:
+          - module: dummy-status
+            args: "foo bar"
           - module: dummy-ft
             main: true
