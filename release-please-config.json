@@ -1,0 +1,41 @@
+{
+    "draft": true,
+    "last-release-sha": "c64effa173aaa9a634b186f8f8a938b407504c88",
+    "release-type": "go",
+    "bump-minor-pre-major": true,
+    "pull-request-title-pattern": "chore: release ${version}",
+    "include-component-in-tag": false,
+    "include-v-in-tag": true,
+    "changelog-sections": [
+      {
+        "type": "feat",
+        "section": "Features"
+      },
+      {
+        "type": "fix",
+        "section": "Bug Fixes"
+      },
+      {
+        "type": "docs",
+        "section": "Documentation"
+      },
+      {
+        "type": "refactor",
+        "section": "Other Work"
+      },
+      {
+        "type": "test",
+        "section": "Other Work"
+      },
+      {
+        "type": "build",
+        "section": "Other Work"
+      }
+    ],
+    "packages": {
+      ".": {
+        
+      }
+    }
+}
+  
