@@ -33,8 +33,7 @@
         },
         {
             "type": "ci",
-            "section": "CI",
-            "hidden": true
+            "section": "CI"
         },
         {
             "type": "chore",
