@@ -30,6 +30,21 @@
       {
         "type": "build",
         "section": "Other Work"
+      },
+      {
+        "type": "ci",
+        "section": "CI"
+        "hide": true
+      }, 
+      {
+        "type": "chore",
+        "section": "Chore"
+        "hide": true
+      },
+      {
+        "type": "revert",
+        "section": "Revert"
+        "hide": true
       }
     ],
     "packages": {
