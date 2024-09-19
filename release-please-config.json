@@ -34,17 +34,17 @@
         {
             "type": "ci",
             "section": "CI",
-            "hide": true
+            "hidden": true
         },
         {
             "type": "chore",
             "section": "Chore",
-            "hide": true
+            "hidden": true
         },
         {
             "type": "revert",
             "section": "Revert",
-            "hide": true
+            "hidden": true
         }
     ],
     "packages": {
