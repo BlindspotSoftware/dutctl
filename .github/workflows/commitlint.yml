@@ -1,5 +1,4 @@
-name: CI
-
+name: Repo
 on:
   # Triggers the workflow on push or pull request events but only for the "main" branch
   push:
@@ -13,6 +12,7 @@ on:
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
   commitlint:
+    name: Conventional Commits
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
