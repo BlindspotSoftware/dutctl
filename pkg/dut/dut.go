@@ -11,6 +11,32 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// Devlist is a list of devices-under-test
+type Devlist map[string]Device
+
+func (devs Devlist) Names() []string {
+	names := make([]string, 0, len(devs))
+	for d := range devs {
+		names = append(names, d)
+	}
+
+	return names
+}
+
+func (devs Devlist) Cmds(device string) []string {
+	dev, ok := devs[device]
+	if !ok {
+		return []string{}
+	}
+
+	cmds := make([]string, 0, len(dev.Cmds))
+	for c := range dev.Cmds {
+		cmds = append(cmds, c)
+	}
+
+	return cmds
+}
+
 // Device is the representation of a device-under-test (DUT).
 type Device struct {
 	Desc string

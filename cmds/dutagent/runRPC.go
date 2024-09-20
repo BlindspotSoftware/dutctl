@@ -21,7 +21,7 @@ type runCmdArgs struct {
 
 	stream     *connect.BidiStream[pb.RunRequest, pb.RunResponse]
 	broker     *dutagent.Broker
-	deviceList devlist
+	deviceList dut.Devlist
 
 	// fields for the states used during execution
 
