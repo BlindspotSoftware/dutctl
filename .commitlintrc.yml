@@ -22,6 +22,8 @@
 extends:
   - "@commitlint/config-conventional"
 
+rules:
+
 # Override type-enum to just use types, which are relevant to this project
 # type is forced to be one of the following (can be edited in an own config):
 # build:    Tooling, scripts, etc.
@@ -34,7 +36,6 @@ extends:
 # revert:   Revert a commit
 # test:     Add tests, increase coverage, (if not initially committed with a fix or feat)
 
-rules:
   type-enum:
     - 2
     - always
@@ -55,3 +56,10 @@ rules:
   scope-empty: 
     - 2
     - always
+    
+# Require signed-off commits
+
+  signed-off-by: 
+    - 2
+    - always 
+    - 'Signed-off-by:'
