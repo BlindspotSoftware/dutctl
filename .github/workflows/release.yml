@@ -1,0 +1,77 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    name: Maintain Upcoming Release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+      - if: ${{ steps.release.outputs.release_created }}
+        uses: actions/checkout@v4
+      - name: Set up Go
+        if: ${{ steps.release.outputs.release_created }}
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+      - if: ${{ steps.release.outputs.release_created }}
+        run: go version
+        
+
+      - name: Build dutctl for amd64
+        if: ${{ steps.release.outputs.release_created }}
+        run: GOOS=linux GOARCH=amd64 go build -o dutctl-linux-amd64 ./cmds/dutctl
+
+      - name: Build dutagent for amd64
+        if: ${{ steps.release.outputs.release_created }}
+        run: GOOS=linux GOARCH=amd64 go build -o dutagent-linux-amd64 ./cmds/dutctl 
+        
+      - name: Build dutagent for arm64
+        if: ${{ steps.release.outputs.release_created }}
+        run: GOOS=linux GOARCH=arm64 go build -o dutagent-linux-arm64 ./cmds/dutctl
+
+
+      - name: Upload dutctl-linux-amd64
+        if: ${{ steps.release.outputs.release_created }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload ${{ steps.release.outputs.tag_name }} ./dutctl-linux-amd64
+
+      - name: Upload dutagent-linux-amd64
+        if: ${{ steps.release.outputs.release_created }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload ${{ steps.release.outputs.tag_name }} ./dutagent-linux-amd64
+
+      - name: Upload dutagent-linux-arm64
+        if: ${{ steps.release.outputs.release_created }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload ${{ steps.release.outputs.tag_name }} ./dutagent-linux-arm64
+
+        
+
+
+
+
+
+
+
+
+
+      
