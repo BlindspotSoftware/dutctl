@@ -15,13 +15,14 @@ import (
 	"golang.org/x/net/http2/h2c"
 	"gopkg.in/yaml.v3"
 
+	"github.com/BlindspotSoftware/dutctl/pkg/dut"
 	_ "github.com/BlindspotSoftware/dutctl/pkg/module/dummy"
 
 	pb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1"
 )
 
 type dutagentService struct {
-	devices devlist
+	devices dut.Devlist
 }
 
 // List is the handler for the List RPC.
@@ -32,7 +33,7 @@ func (a *dutagentService) List(
 	log.Println("Server received List request")
 
 	res := connect.NewResponse(&pb.ListResponse{
-		Devices: a.devices.names(),
+		Devices: a.devices.Names(),
 	})
 
 	log.Print("List-RPC finished")
@@ -50,7 +51,7 @@ func (a *dutagentService) Commands(
 	device := req.Msg.GetDevice()
 
 	res := connect.NewResponse(&pb.CommandsResponse{
-		Commands: a.devices.cmds(device),
+		Commands: a.devices.Cmds(device),
 	})
 
 	log.Print("Commands-RPC finished")
@@ -60,7 +61,7 @@ func (a *dutagentService) Commands(
 
 type config struct {
 	Version int
-	Devices devlist
+	Devices dut.Devlist
 }
 
 func main() {
