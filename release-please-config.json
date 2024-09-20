@@ -6,6 +6,7 @@
     "pull-request-title-pattern": "chore: release ${version}",
     "include-component-in-tag": false,
     "include-v-in-tag": true,
+    "signoff": "release-please-bot",
     "changelog-sections": [
         {
             "type": "feat",
