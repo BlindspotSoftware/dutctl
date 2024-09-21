@@ -11,7 +11,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Devlist is a list of devices-under-test
+// Devlist is a list of devices-under-test.
 type Devlist map[string]Device
 
 func (devs Devlist) Names() []string {

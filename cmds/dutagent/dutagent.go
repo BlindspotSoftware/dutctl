@@ -6,18 +6,21 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"connectrpc.com/connect"
 	"github.com/BlindspotSoftware/dutctl/internal/dutagent"
+	"github.com/BlindspotSoftware/dutctl/pkg/dut"
 	"github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1/dutctlv1connect"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 	"gopkg.in/yaml.v3"
 
-	"github.com/BlindspotSoftware/dutctl/pkg/dut"
 	_ "github.com/BlindspotSoftware/dutctl/pkg/module/dummy"
 
 	pb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1"
@@ -66,26 +69,68 @@ type config struct {
 	Devices dut.Devlist
 }
 
+func printInitErr(err error) {
+	var initerr *dutagent.ModuleInitError
+	if errors.As(err, &initerr) {
+		for _, item := range initerr.Errs {
+			devstr := fmt.Sprintf("dev:%q cmd:%q module:%q", item.Dev, item.Cmd, item.Mod.Config.Name)
+			log.Printf("init %s failed with:\n%v\n", devstr, item.Err)
+		}
+	}
+
+	log.Print(err)
+}
+
+// cleanup takes care of a graceful shutdown of the service and calls os.Exit
+// afterwards. If clean-up fails, os.Exit is called with code 1, otherwise
+// os.Exit is called with exitcode.
+func cleanup(devlist dut.Devlist, exitcode int) {
+	if devlist != nil {
+		err := dutagent.Deinit(devlist)
+		if err != nil {
+			printInitErr(err)
+			log.Fatal("System might be in an UNKNOWN STATE !!!")
+		}
+
+		os.Exit(1)
+	}
+
+	os.Exit(exitcode)
+}
+
 func main() {
+	var cfg config
+
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("Recovered from panic: %v", r)
+			cleanup(cfg.Devices, 1)
+		}
+	}()
+
 	cfgYAML, err := os.ReadFile("./contrib/dutagent-cfg-example.yaml")
 	if err != nil {
+		//nolint:gocritic
 		log.Fatal(err)
 	}
 
-	var cfg config
 	if err := yaml.Unmarshal(cfgYAML, &cfg); err != nil {
 		log.Fatal(err)
 	}
 
 	if err = dutagent.Init(cfg.Devices); err != nil {
-		var initerr *dutagent.ModuleInitError
-		if errors.As(err, &initerr) {
-			for mod, err := range initerr.Errs {
-				log.Printf("init %s failed with:\n%v\n", mod, err)
-			}
-		}
-		log.Fatal(err)
+		printInitErr(err)
+		cleanup(cfg.Devices, 1)
 	}
+
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
+
+	go func() {
+		sig := <-c
+		log.Printf("Captured signal: %v", sig)
+		cleanup(cfg.Devices, 0)
+	}()
 
 	agent := &dutagentService{
 		devices: cfg.Devices,
@@ -101,5 +146,6 @@ func main() {
 		h2c.NewHandler(mux, &http2.Server{}),
 	)
 
-	log.Fatalln(err)
+	log.Printf("internal RPC handler error: %v", err)
+	cleanup(cfg.Devices, 1)
 }
