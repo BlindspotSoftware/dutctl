@@ -32,7 +32,7 @@ type runCmdArgs struct {
 }
 
 // Run is the handler for the Run RPC.
-func (a *dutagentService) Run(
+func (a *rpcService) Run(
 	ctx context.Context,
 	stream *connect.BidiStream[pb.RunRequest, pb.RunResponse],
 ) error {
