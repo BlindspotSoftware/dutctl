@@ -5,11 +5,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log"
 	"net/http"
 	"os"
 
 	"connectrpc.com/connect"
+	"github.com/BlindspotSoftware/dutctl/internal/dutagent"
 	"github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1/dutctlv1connect"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
@@ -72,6 +74,16 @@ func main() {
 
 	var cfg config
 	if err := yaml.Unmarshal(cfgYAML, &cfg); err != nil {
+		log.Fatal(err)
+	}
+
+	if err = dutagent.Init(cfg.Devices); err != nil {
+		var initerr *dutagent.ModuleInitError
+		if errors.As(err, &initerr) {
+			for mod, err := range initerr.Errs {
+				log.Printf("init %s failed with:\n%v\n", mod, err)
+			}
+		}
 		log.Fatal(err)
 	}
 
