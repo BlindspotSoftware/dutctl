@@ -158,6 +158,9 @@ linters-settings:
       - generic
       - "Module"
 
+  lll:
+    line-length: 140
+
   varnamelen:
     max-distance: 6
     ignore-type-assert-ok: true
