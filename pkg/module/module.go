@@ -24,10 +24,13 @@ type Module interface {
 	// Help returns a formatted string with the capabilities of the module.
 	// It provides any user information required to interact with the module.
 	Help() string
-	// Init is called when the module is loaded by dutagent on an execution request for a command that uses this module.
+	// Init is called once when the dutagent services is started.
+	// It's a good place to establish connections or allocate resources and check whether
+	// the module is configured functional
 	Init() error
-	// Deinit is called when the module is unloaded by dutagent after the execution of a command that uses this module.
-	// It is used to clean up any resources that were allocated during the Init phase.
+	// Deinit is called when the module is unloaded by dutagent or an internal error occurs.
+	// It is used to clean up any resources that were allocated during the Init phase and
+	// shall guarantee a graceful shutdown of the service
 	Deinit() error
 	// Run is the entry point and executes the module with the given arguments.
 	Run(ctx context.Context, s Session, args ...string) error
