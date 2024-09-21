@@ -225,7 +225,7 @@ func start(stdin io.Reader, stdout, stderr io.Writer, args []string) {
 	client := dutctlv1connect.NewDeviceServiceClient(
 		// Instead of http.DefaultClient, use the HTTP/2 protocol without TLS
 		newInsecureClient(),
-		"http://localhost:8080",
+		"http://localhost:1024",
 		connect.WithGRPC(),
 	)
 
