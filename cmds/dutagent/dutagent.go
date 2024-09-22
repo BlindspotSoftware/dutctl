@@ -31,10 +31,10 @@ const (
 	dryRunInfo      = `Only run the initialization phase of the modules, not start the (includes validation of the configuration)`
 )
 
-func newAgent(w io.Writer, exitFunc func(int), args []string) *agent {
+func newAgent(stdout io.Writer, exitFunc func(int), args []string) *agent {
 	var agt agent
 
-	agt.stdout = w
+	agt.stdout = stdout
 	agt.exit = exitFunc
 
 	f := flag.NewFlagSet(args[0], flag.ExitOnError)
