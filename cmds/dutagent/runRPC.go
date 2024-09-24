@@ -94,27 +94,12 @@ func findDUTCmd(_ context.Context, args runCmdArgs) (runCmdArgs, fsm.State[runCm
 	wantDev := args.cmdMsg.GetDevice()
 	wantCmd := args.cmdMsg.GetCmd()
 
-	device, ok := args.deviceList[wantDev]
-	if !ok {
-		e := connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("device %q does not exist", wantDev))
-
-		return args, nil, e
+	dev, cmd, err := findCmd(args.deviceList, wantDev, wantCmd)
+	if err != nil {
+		return args, nil, err
 	}
 
-	cmd, ok := device.Cmds[wantCmd]
-	if !ok {
-		e := connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("device %q does not have command %q", wantDev, wantCmd))
-
-		return args, nil, e
-	}
-
-	if len(cmd.Modules) == 0 {
-		e := connect.NewError(connect.CodeInternal, fmt.Errorf("no modules set for command %q", wantCmd))
-
-		return args, nil, e
-	}
-
-	args.dev = device
+	args.dev = dev
 	args.cmd = cmd
 
 	return args, executeModules, nil

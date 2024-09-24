@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"errors"
+	"fmt"
 	"log"
 
 	"connectrpc.com/connect"
@@ -52,7 +52,54 @@ func (a *rpcService) Commands(
 
 func (a *rpcService) Details(
 	_ context.Context,
-	_ *connect.Request[pb.DetailsRequest],
+	req *connect.Request[pb.DetailsRequest],
 ) (*connect.Response[pb.DetailsResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("Details RPC not implemented"))
+	log.Println("Server received Details request")
+
+	wantDev := req.Msg.GetDevice()
+	wantCmd := req.Msg.GetCmd()
+	keyword := req.Msg.GetKeyword()
+
+	_, cmd, err := findCmd(a.devices, wantDev, wantCmd)
+	if err != nil {
+		return nil, err
+	}
+
+	var (
+		helpStr   string
+		foundMain bool
+	)
+
+	for _, module := range cmd.Modules {
+		if module.Config.Main {
+			foundMain = true
+			helpStr = module.Help()
+		}
+	}
+
+	if !foundMain {
+		e := connect.NewError(
+			connect.CodeInternal,
+			fmt.Errorf("no main module found for command %q at device %q", wantCmd, wantDev),
+		)
+
+		return nil, e
+	}
+
+	if keyword != "help" {
+		e := connect.NewError(
+			connect.CodeInvalidArgument,
+			fmt.Errorf("unknown keyword %q, possible values are: 'help'", keyword),
+		)
+
+		return nil, e
+	}
+
+	res := connect.NewResponse(&pb.DetailsResponse{
+		Details: helpStr,
+	})
+
+	log.Print("Details-RPC finished")
+
+	return res, nil
 }

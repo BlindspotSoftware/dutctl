@@ -58,7 +58,7 @@ func (d *FT) Run(_ context.Context, s module.Session, args ...string) error {
 	}
 
 	inFile := args[0]
-	str = "Requesting file: " + inFile
+	str = fmt.Sprintf("Requesting file %q passed in arg[0]", inFile)
 	s.Print(str)
 
 	fileReader, err := s.RequestFile(inFile)
@@ -83,14 +83,14 @@ func (d *FT) Run(_ context.Context, s module.Session, args ...string) error {
 		return fmt.Errorf("failed to process file: %v", err)
 	}
 
-	log.Print("dummy.FT module: Sending processed file")
+	log.Print("dummy.FT module: Sending back processed file")
 
 	err = s.SendFile("processed.txt", bytes.NewBuffer(result))
 	if err != nil {
 		return fmt.Errorf("failed to send file: %v", err)
 	}
 
-	s.Print("File operated successfully")
+	s.Print("File operated successfully, check processed.txt")
 
 	return nil
 }

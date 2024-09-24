@@ -4,26 +4,68 @@
 package main
 
 import (
-	"bufio"
-	"context"
 	"crypto/tls"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
-	"io/fs"
 	"log"
 	"net"
 	"net/http"
 	"os"
-	"sync"
 
 	"connectrpc.com/connect"
 	"github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1/dutctlv1connect"
 	"golang.org/x/net/http2"
-
-	pb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1"
 )
+
+const usage = `dutctl is the client application of the DUT Control system.
+
+TODO: Add synopsis here.
+`
+
+const serverInfo = `Address and port of the dutagent to connect to in the format: address:port`
+
+func newApp(stdin io.Reader, stdout, stderr io.Writer, args []string) *application {
+	var app application
+
+	app.stdout = stdout
+	app.stderr = stderr
+	app.stdin = stdin
+
+	f := flag.NewFlagSet(args[0], flag.ExitOnError)
+	f.StringVar(&app.serverAddr, "s", "localhost:1024", serverInfo)
+	//nolint:errcheck // flag.Parse always returns no error because of flag.ExitOnError
+	f.Parse(args[1:])
+
+	app.args = f.Args()
+
+	return &app
+}
+
+type application struct {
+	stdin  io.Reader
+	stdout io.Writer
+	stderr io.Writer
+
+	// flags
+	serverAddr string
+	args       []string
+
+	rpcClient dutctlv1connect.DeviceServiceClient
+}
+
+func (app *application) setupRPCClient() {
+	client := dutctlv1connect.NewDeviceServiceClient(
+		// Instead of http.DefaultClient, use the HTTP/2 protocol without TLS
+		newInsecureClient(),
+		fmt.Sprintf("http://%s", app.serverAddr),
+		connect.WithGRPC(),
+	)
+
+	fmt.Fprintf(app.stdout, "Connect to dutagent %s\n", app.serverAddr)
+
+	app.rpcClient = client
+}
 
 func newInsecureClient() *http.Client {
 	return &http.Client{
@@ -40,228 +82,57 @@ func newInsecureClient() *http.Client {
 	}
 }
 
-type application struct {
-	stdin  io.Reader
-	stdout io.Writer
-	stderr io.Writer
+var ErrInvalidArgs = fmt.Errorf("invalid command-line arguments")
 
-	args []string
+// start is the entry point of the application.
+func (app *application) start() error {
+	log.SetOutput(app.stdout)
 
-	client dutctlv1connect.DeviceServiceClient
-}
+	app.setupRPCClient()
 
-func (app *application) listRPC() error {
-	log.Println("Calling List RPC")
+	if len(app.args) == 0 {
+		fmt.Fprint(app.stderr, usage)
 
-	ctx := context.Background()
-	req := connect.NewRequest(&pb.ListRequest{})
-
-	res, err := app.client.List(ctx, req)
-	if err != nil {
-		return err
+		return ErrInvalidArgs
 	}
 
-	fmt.Fprintln(app.stdout, res.Msg.GetDevices())
+	if app.args[0] == "list" {
+		if len(app.args) > 1 {
+			fmt.Fprint(app.stderr, usage)
 
-	return nil
-}
-
-func (app *application) commandsRPC(device string) error {
-	log.Println("Calling Commands RPC for device2")
-
-	ctx := context.Background()
-	req := connect.NewRequest(&pb.CommandsRequest{Device: device})
-
-	res, err := app.client.Commands(ctx, req)
-	if err != nil {
-		return err
-	}
-
-	fmt.Fprintln(app.stdout, res.Msg.GetCommands())
-
-	return nil
-}
-
-//nolint:funlen,cyclop,gocognit
-func (app *application) runRPC(device, command string, cmdArgs []string) error {
-	log.Println("Calling Run RPC ")
-
-	wg := sync.WaitGroup{}
-
-	ctx := context.Background()
-	stream := app.client.Run(ctx)
-	req := &pb.RunRequest{
-		Msg: &pb.RunRequest_Command{
-			Command: &pb.Command{
-				Device: device,
-				Cmd:    command,
-				Args:   cmdArgs,
-			},
-		},
-	}
-
-	err := stream.Send(req)
-	if err != nil {
-		return err
-	}
-
-	// Receive routine
-	wg.Add(1)
-
-	go func() {
-		defer wg.Done()
-
-		for {
-			res, err := stream.Receive()
-			if errors.Is(err, io.EOF) {
-				log.Println("Receive routine terminating: Stream closed by agent")
-
-				return
-			} else if err != nil {
-				log.Fatalln(err)
-			}
-
-			//nolint:protogetter
-			switch msg := res.Msg.(type) {
-			case *pb.RunResponse_Print:
-				fmt.Fprintln(app.stdout, string(msg.Print.GetText()))
-			case *pb.RunResponse_Console:
-				switch consoleData := msg.Console.Data.(type) {
-				case *pb.Console_Stdout:
-					fmt.Fprint(app.stdout, string(consoleData.Stdout))
-				case *pb.Console_Stderr:
-					fmt.Fprint(app.stdout, string(consoleData.Stderr))
-				case *pb.Console_Stdin:
-					log.Printf("Unexpected Console Stdin %q", string(consoleData.Stdin))
-				}
-			case *pb.RunResponse_FileRequest:
-				log.Printf("File request for: %q\n", msg.FileRequest.GetPath())
-
-				err := stream.Send(&pb.RunRequest{
-					Msg: &pb.RunRequest_File{
-						File: &pb.File{
-							Path:    "file.txt",
-							Content: []byte("some file content\n"),
-						},
-					},
-				})
-
-				if err != nil {
-					log.Fatalln(err)
-				}
-
-				log.Printf("Sent file: %q\n", "file.txt")
-			case *pb.RunResponse_File:
-				path := msg.File.GetPath()
-				content := msg.File.GetContent()
-
-				log.Printf("Received file: %q\n", path)
-
-				if len(content) == 0 {
-					log.Println("Received empty file content")
-				}
-
-				perm := 0600
-
-				err = os.WriteFile(path, content, fs.FileMode(perm))
-				if err != nil {
-					log.Fatalln(err)
-				}
-
-			default:
-				log.Printf("Unexpected message type %T", msg)
-			}
+			return ErrInvalidArgs
 		}
-	}()
 
-	// Send routine
-	// No wg.Add(1) as this routine blocks on reading input, so waiting on this routine
-	// is a deadlock. It will be killed, when the applications exits.
-	//
-	// No clue how to signal the send routine to stop, as it will block on the reader.
-	// Maybe set the source of the reader to nil to unblock and check some condition / done-channel?
-	go func() {
-		reader := bufio.NewReader(app.stdin)
+		fmt.Fprintf(app.stdout, "Calling List-RPC\n")
 
-		for {
-			text, err := reader.ReadString('\n')
-			if err != nil {
-				log.Fatalln(err)
-			}
-
-			err = stream.Send(&pb.RunRequest{
-				Msg: &pb.RunRequest_Console{
-					Console: &pb.Console{
-						Data: &pb.Console_Stdin{
-							Stdin: []byte(text),
-						},
-					},
-				},
-			})
-			if err != nil {
-				log.Fatalln(err)
-			}
-		}
-	}()
-
-	wg.Wait()
-
-	return nil
-}
-
-func start(stdin io.Reader, stdout, stderr io.Writer, args []string) {
-	app := application{
-		stdin:  stdin,
-		stdout: stdout,
-		stderr: stderr,
+		return app.listRPC()
 	}
 
-	fs := flag.NewFlagSet(args[0], flag.ExitOnError)
-	//nolint:errcheck
-	fs.Parse(args[1:])
+	if len(app.args) == 1 {
+		device := app.args[0]
+		fmt.Fprintf(app.stdout, "Calling Commands-RPC with\ndevice=%q\n", device)
 
-	app.args = flag.Args()
-
-	client := dutctlv1connect.NewDeviceServiceClient(
-		// Instead of http.DefaultClient, use the HTTP/2 protocol without TLS
-		newInsecureClient(),
-		"http://localhost:1024",
-		connect.WithGRPC(),
-	)
-
-	app.client = client
-
-	// ###### DEMO LIST ######
-	err := app.listRPC()
-	if err != nil {
-		log.Fatal(err)
+		return app.commandsRPC(device)
 	}
 
-	// ###### DEMO CMDS ######
-	err = app.commandsRPC("device2")
-	if err != nil {
-		log.Fatal(err)
+	device := app.args[0]
+	command := app.args[1]
+	cmdArgs := app.args[2:]
+
+	if len(cmdArgs) > 0 && cmdArgs[0] == "help" {
+		fmt.Fprintf(app.stdout, "Calling Details-RPC with\ndevice=%q\ncommand=%q\nkeyword=%q\n", device, command, "help")
+
+		return app.detailsRPC(device, command, "help")
 	}
 
-	// // ###### DEMO RUN (status command, expecting prints only) ######
-	// err = app.runRPC("device1", "status", []string{"foo", "bar"})
-	// if err != nil {
-	// 	log.Fatal(err)
-	// }
+	fmt.Fprintf(app.stdout, "Calling Run-RPC with\ndevice=%q\ncommand=%q\ncmdArgs=%q\n", device, command, cmdArgs)
 
-	// // ###### DEMO RUN (repeat command, expecting interactive console messages) ######
-	// err = app.runRPC("device2", "repeat", []string{})
-	// if err != nil {
-	// 	log.Fatal(err)
-	// }
-
-	// ###### DEMO RUN (file-transfer command, expecting file request) ######
-	err = app.runRPC("device3", "file-transfer", []string{"file.txt"})
-	if err != nil {
-		log.Fatal(err)
-	}
+	return app.runRPC(device, command, cmdArgs)
 }
 
 func main() {
-	start(os.Stdin, os.Stdout, os.Stderr, os.Args)
+	err := newApp(os.Stdin, os.Stdout, os.Stderr, os.Args).start()
+	if err != nil {
+		log.Fatal(err)
+	}
 }
