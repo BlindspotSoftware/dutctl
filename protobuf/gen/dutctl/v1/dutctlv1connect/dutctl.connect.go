@@ -37,6 +37,8 @@ const (
 	DeviceServiceListProcedure = "/dutctl.v1.DeviceService/List"
 	// DeviceServiceCommandsProcedure is the fully-qualified name of the DeviceService's Commands RPC.
 	DeviceServiceCommandsProcedure = "/dutctl.v1.DeviceService/Commands"
+	// DeviceServiceDetailsProcedure is the fully-qualified name of the DeviceService's Details RPC.
+	DeviceServiceDetailsProcedure = "/dutctl.v1.DeviceService/Details"
 	// DeviceServiceRunProcedure is the fully-qualified name of the DeviceService's Run RPC.
 	DeviceServiceRunProcedure = "/dutctl.v1.DeviceService/Run"
 )
@@ -46,6 +48,7 @@ var (
 	deviceServiceServiceDescriptor        = v1.File_dutctl_v1_dutctl_proto.Services().ByName("DeviceService")
 	deviceServiceListMethodDescriptor     = deviceServiceServiceDescriptor.Methods().ByName("List")
 	deviceServiceCommandsMethodDescriptor = deviceServiceServiceDescriptor.Methods().ByName("Commands")
+	deviceServiceDetailsMethodDescriptor  = deviceServiceServiceDescriptor.Methods().ByName("Details")
 	deviceServiceRunMethodDescriptor      = deviceServiceServiceDescriptor.Methods().ByName("Run")
 )
 
@@ -53,6 +56,7 @@ var (
 type DeviceServiceClient interface {
 	List(context.Context, *connect.Request[v1.ListRequest]) (*connect.Response[v1.ListResponse], error)
 	Commands(context.Context, *connect.Request[v1.CommandsRequest]) (*connect.Response[v1.CommandsResponse], error)
+	Details(context.Context, *connect.Request[v1.DetailsRequest]) (*connect.Response[v1.DetailsResponse], error)
 	Run(context.Context) *connect.BidiStreamForClient[v1.RunRequest, v1.RunResponse]
 }
 
@@ -78,6 +82,12 @@ func NewDeviceServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(deviceServiceCommandsMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		details: connect.NewClient[v1.DetailsRequest, v1.DetailsResponse](
+			httpClient,
+			baseURL+DeviceServiceDetailsProcedure,
+			connect.WithSchema(deviceServiceDetailsMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		run: connect.NewClient[v1.RunRequest, v1.RunResponse](
 			httpClient,
 			baseURL+DeviceServiceRunProcedure,
@@ -91,6 +101,7 @@ func NewDeviceServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 type deviceServiceClient struct {
 	list     *connect.Client[v1.ListRequest, v1.ListResponse]
 	commands *connect.Client[v1.CommandsRequest, v1.CommandsResponse]
+	details  *connect.Client[v1.DetailsRequest, v1.DetailsResponse]
 	run      *connect.Client[v1.RunRequest, v1.RunResponse]
 }
 
@@ -104,6 +115,11 @@ func (c *deviceServiceClient) Commands(ctx context.Context, req *connect.Request
 	return c.commands.CallUnary(ctx, req)
 }
 
+// Details calls dutctl.v1.DeviceService.Details.
+func (c *deviceServiceClient) Details(ctx context.Context, req *connect.Request[v1.DetailsRequest]) (*connect.Response[v1.DetailsResponse], error) {
+	return c.details.CallUnary(ctx, req)
+}
+
 // Run calls dutctl.v1.DeviceService.Run.
 func (c *deviceServiceClient) Run(ctx context.Context) *connect.BidiStreamForClient[v1.RunRequest, v1.RunResponse] {
 	return c.run.CallBidiStream(ctx)
@@ -113,6 +129,7 @@ func (c *deviceServiceClient) Run(ctx context.Context) *connect.BidiStreamForCli
 type DeviceServiceHandler interface {
 	List(context.Context, *connect.Request[v1.ListRequest]) (*connect.Response[v1.ListResponse], error)
 	Commands(context.Context, *connect.Request[v1.CommandsRequest]) (*connect.Response[v1.CommandsResponse], error)
+	Details(context.Context, *connect.Request[v1.DetailsRequest]) (*connect.Response[v1.DetailsResponse], error)
 	Run(context.Context, *connect.BidiStream[v1.RunRequest, v1.RunResponse]) error
 }
 
@@ -134,6 +151,12 @@ func NewDeviceServiceHandler(svc DeviceServiceHandler, opts ...connect.HandlerOp
 		connect.WithSchema(deviceServiceCommandsMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	deviceServiceDetailsHandler := connect.NewUnaryHandler(
+		DeviceServiceDetailsProcedure,
+		svc.Details,
+		connect.WithSchema(deviceServiceDetailsMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	deviceServiceRunHandler := connect.NewBidiStreamHandler(
 		DeviceServiceRunProcedure,
 		svc.Run,
@@ -146,6 +169,8 @@ func NewDeviceServiceHandler(svc DeviceServiceHandler, opts ...connect.HandlerOp
 			deviceServiceListHandler.ServeHTTP(w, r)
 		case DeviceServiceCommandsProcedure:
 			deviceServiceCommandsHandler.ServeHTTP(w, r)
+		case DeviceServiceDetailsProcedure:
+			deviceServiceDetailsHandler.ServeHTTP(w, r)
 		case DeviceServiceRunProcedure:
 			deviceServiceRunHandler.ServeHTTP(w, r)
 		default:
@@ -163,6 +188,10 @@ func (UnimplementedDeviceServiceHandler) List(context.Context, *connect.Request[
 
 func (UnimplementedDeviceServiceHandler) Commands(context.Context, *connect.Request[v1.CommandsRequest]) (*connect.Response[v1.CommandsResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("dutctl.v1.DeviceService.Commands is not implemented"))
+}
+
+func (UnimplementedDeviceServiceHandler) Details(context.Context, *connect.Request[v1.DetailsRequest]) (*connect.Response[v1.DetailsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("dutctl.v1.DeviceService.Details is not implemented"))
 }
 
 func (UnimplementedDeviceServiceHandler) Run(context.Context, *connect.BidiStream[v1.RunRequest, v1.RunResponse]) error {

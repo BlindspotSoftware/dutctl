@@ -8,6 +8,7 @@ option go_package = "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1;
 service DeviceService {
   rpc List(ListRequest) returns (ListResponse) {}
   rpc Commands(CommandsRequest) returns (CommandsResponse) {}
+  rpc Details(DetailsRequest) returns (DetailsResponse) {}
   rpc Run(stream RunRequest) returns (stream RunResponse) {}
 }
 
@@ -29,6 +30,19 @@ message CommandsRequest {
 // CommandsResponse is sent by the agent in response to a CommandsRequest.
 message CommandsResponse {
   repeated string commands = 1;
+}
+
+// DetailsRequest is sent by the client to request further information for specific 
+// device or a specific command. The type of information is defined by keyword.
+message DetailsRequest {
+  string device = 1;
+  string cmd = 2;
+  string keyword = 3;
+}
+
+// DetailsResponse is sent by the agent in response to a DetailsRequest.
+message DetailsResponse {
+  string details = 1;
 }
 
 
