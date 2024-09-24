@@ -28,7 +28,7 @@ type runCmdArgs struct {
 	cmdMsg    *pb.Command
 	dev       dut.Device
 	cmd       dut.Command
-	moduleErr error
+	moduleErr chan error
 }
 
 // Run is the handler for the Run RPC.
@@ -42,14 +42,16 @@ func (a *rpcService) Run(
 		stream:     stream,
 		broker:     &dutagent.Broker{},
 		deviceList: a.devices,
+		moduleErr:  make(chan error, 1),
 	}
 
-	_, err := fsm.Run(ctx, args, receiveCommandRPC)
+	var err error
+	_, err = fsm.Run(ctx, args, receiveCommandRPC)
 
 	var connectErr *connect.Error
 	if err != nil && !errors.As(err, &connectErr) {
 		// Wrap the error in a connect.Error if not done yet.
-		return connect.NewError(connect.CodeInternal, err)
+		err = connect.NewError(connect.CodeInternal, err)
 	}
 
 	log.Print("Run-RPC finished with error: ", err)
@@ -138,7 +140,7 @@ func executeModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State
 	moduleSession := args.broker.ModuleSession()
 
 	// Run the modules in a goroutine.
-	// The termination of the module execution is signaled by closing the done channel.
+	// The termination of the module execution is signaled by sending a result to the args.moduleErr channel.
 	go func() {
 		cnt := len(args.cmd.Modules)
 
@@ -155,7 +157,7 @@ func executeModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State
 
 			err := module.Run(rpcCtx, moduleSession, moduleArgs...)
 			if err != nil {
-				args.moduleErr = err
+				args.moduleErr <- err
 				log.Printf("Module %q failed: %v", module.Config.Name, err)
 				modCtxCancel()
 
@@ -172,6 +174,7 @@ func executeModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State
 
 		log.Print("All modules finished successfully")
 		modCtxCancel()
+		args.moduleErr <- nil // Signal that all modules finished successfully
 	}()
 
 	return args, waitModules, nil
@@ -183,30 +186,43 @@ func executeModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State
 func waitModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State[runCmdArgs], error) {
 	log.Println("Waiting for module to finish")
 
-	var moduleDone bool
+	var (
+		brokerDone bool
+		moduleDone bool
+	)
 
 	for {
 		select {
 		case <-ctx.Done():
 			e := connect.NewError(connect.CodeAborted, fmt.Errorf("module execution aborted: %v", ctx.Err()))
+			log.Printf("Wait for Modules to finish: Context closed: %v", e)
 
 			return args, nil, e
 		case brokerErr := <-args.broker.Err():
+			brokerDone = true
+
 			if brokerErr != nil {
-				e := connect.NewError(connect.CodeInternal, fmt.Errorf("module environment error: %v", brokerErr))
 				// An error occurred with the communication to the module during the module execution.
+				e := connect.NewError(connect.CodeInternal, fmt.Errorf("module environment error: %v", brokerErr))
+				log.Printf("Wait for Modules to finish: Broker issue: %v", e)
+
 				return args, nil, e
-			} else {
-				// If the error returned by the broker is nil, the module execution is done.
-				moduleDone = true
+			}
+		case moduleErr := <-args.moduleErr:
+			moduleDone = true
+
+			if moduleErr != nil {
+				// The module execution failed.
+				e := connect.NewError(connect.CodeAborted, fmt.Errorf("module execution failed: %v", moduleErr))
+				log.Printf("Wait for Modules to finish: A module failed: %v", e)
+
+				return args, nil, e
 			}
 		default:
-			if args.moduleErr != nil {
-				e := connect.NewError(connect.CodeInternal, fmt.Errorf("module execution failed: %v", args.moduleErr))
-				// The module execution failed.
-				return args, nil, e
-			} else if args.moduleErr == nil && moduleDone {
-				// The module execution finished successfully.
+			// If the modules are done, we also need to wait for the broker to finish any remaining communication.
+			if brokerDone && moduleDone {
+				log.Println("Module execution finished successfully")
+
 				return args, nil, nil
 			}
 		}
