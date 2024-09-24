@@ -2,6 +2,7 @@ package dutagent
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log"
 
@@ -129,13 +130,13 @@ func fromClientWorker(ctx context.Context, stream Stream, s *session) error {
 				if fileMsg == nil {
 					log.Println("Received empty file message")
 
-					continue // Can this happen?
+					return fmt.Errorf("bad file transfer: received empty file-message")
 				}
 
 				if s.currentFile == "" {
-					log.Println("Received file without a request - ignoring!")
+					log.Println("Received file without a request")
 
-					continue // Ignore unexpected files
+					return fmt.Errorf("bad file transfer: received file-message without a former request")
 				}
 
 				path := fileMsg.GetPath()
@@ -144,13 +145,13 @@ func fromClientWorker(ctx context.Context, stream Stream, s *session) error {
 				if content == nil {
 					log.Println("Received file message with empty content")
 
-					continue // Can this happen?
+					return fmt.Errorf("bad file transfer: received file-message without content")
 				}
 
 				if path != s.currentFile {
 					log.Printf("Received unexpected file %q - ignoring!", path)
 
-					continue // Ignore unexpected files
+					return fmt.Errorf("bad file transfer: received file-message %q but requested %q", path, s.currentFile)
 				}
 
 				log.Printf("Server received file %q from client", path)
