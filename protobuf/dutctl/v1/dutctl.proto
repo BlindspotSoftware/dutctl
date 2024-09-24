@@ -48,7 +48,7 @@ message DetailsResponse {
 
 // RunRequest is sent by the client to start a command execution on a device and optionally
 // to further interact with the agent during the command execution.
-// The first RunRequest message sent to a agent must allways contain a Command message.
+// The first RunRequest message sent to a agent must always contain a Command message.
 message RunRequest {
   oneof msg {
     Command command = 1;
@@ -63,7 +63,7 @@ message RunResponse {
   oneof msg {
     Print print = 1;
     Console console = 2;
-    FileRequest fileRequest = 3;
+    FileRequest file_request = 3;
     File file = 4;
   }
 }
@@ -71,7 +71,7 @@ message RunResponse {
 // Command is used by the client to start a command execution on a device.
 message Command {
   string device = 1;
-  string cmd = 2;
+  string command = 2;
   repeated string args = 3;
 }
 
@@ -81,7 +81,7 @@ message Print {
 }
 
 // Console is used by the client and agent during an interactive command execution.
-// An interactive session can only be started by the agend by sendeing the first Console message.
+// An interactive session can only be started by the agent by sending the first Console message.
 message Console {
   oneof data {
     bytes stdin = 1;
