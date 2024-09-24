@@ -92,7 +92,7 @@ func receiveCommandRPC(_ context.Context, args runCmdArgs) (runCmdArgs, fsm.Stat
 // it returns an error.
 func findDUTCmd(_ context.Context, args runCmdArgs) (runCmdArgs, fsm.State[runCmdArgs], error) {
 	wantDev := args.cmdMsg.GetDevice()
-	wantCmd := args.cmdMsg.GetCmd()
+	wantCmd := args.cmdMsg.GetCommand()
 
 	dev, cmd, err := findCmd(args.deviceList, wantDev, wantCmd)
 	if err != nil {

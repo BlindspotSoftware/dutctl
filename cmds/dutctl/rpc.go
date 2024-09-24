@@ -71,9 +71,9 @@ func (app *application) runRPC(device, command string, cmdArgs []string) error {
 	req := &pb.RunRequest{
 		Msg: &pb.RunRequest_Command{
 			Command: &pb.Command{
-				Device: device,
-				Cmd:    command,
-				Args:   cmdArgs,
+				Device:  device,
+				Command: command,
+				Args:    cmdArgs,
 			},
 		},
 	}
