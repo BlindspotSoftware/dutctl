@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"log"
 	"os"
+	"strings"
 	"sync"
 
 	"connectrpc.com/connect"
@@ -116,6 +117,10 @@ func (app *application) runRPC(device, command string, cmdArgs []string) error {
 				path := msg.FileRequest.GetPath()
 				log.Printf("File request for: %q\n", path)
 
+				if !isPartOfArgs(cmdArgs, path) {
+					log.Fatalf("Invalid file request: Requested file %q was not named in the command's arguments", path)
+				}
+
 				content, err := os.ReadFile(path)
 				if err != nil {
 					log.Fatal(err)
@@ -140,6 +145,10 @@ func (app *application) runRPC(device, command string, cmdArgs []string) error {
 				content := msg.File.GetContent()
 
 				log.Printf("Received file: %q\n", path)
+
+				if !isPartOfArgs(cmdArgs, path) {
+					log.Fatalf("Invalid file transmission: Sent file %q was not named in the command's arguments", path)
+				}
 
 				if len(content) == 0 {
 					log.Println("Received empty file content")
@@ -191,4 +200,14 @@ func (app *application) runRPC(device, command string, cmdArgs []string) error {
 	wg.Wait()
 
 	return nil
+}
+
+func isPartOfArgs(args []string, token string) bool {
+	for _, arg := range args {
+		if strings.Contains(arg, token) {
+			return true
+		}
+	}
+
+	return false
 }
