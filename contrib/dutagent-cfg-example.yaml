@@ -12,7 +12,6 @@ devices:
   device2:
     desc: "Device 2"
     cmds:
-      cmds:
       status:
         desc: "Report status"
         modules:
