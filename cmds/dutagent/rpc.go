@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log"
 
 	"connectrpc.com/connect"
@@ -47,4 +48,11 @@ func (a *rpcService) Commands(
 	log.Print("Commands-RPC finished")
 
 	return res, nil
+}
+
+func (a *rpcService) Details(
+	_ context.Context,
+	_ *connect.Request[pb.DetailsRequest],
+) (*connect.Response[pb.DetailsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("Details RPC not implemented"))
 }
