@@ -50,19 +50,19 @@ jobs:
         if: ${{ steps.release.outputs.release_created }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload ${{ steps.release.outputs.tag_name }} ./dutctl-linux-amd64
+        run: gh release upload ${{ steps.release.outputs.tag_name }} ./dutctl-${{ steps.release.outputs.tag_name }}-linux-amd64
 
       - name: Upload dutagent-linux-amd64
         if: ${{ steps.release.outputs.release_created }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload ${{ steps.release.outputs.tag_name }} ./dutagent-linux-amd64
+        run: gh release upload ${{ steps.release.outputs.tag_name }} ./dutagent-${{ steps.release.outputs.tag_name }}-linux-amd64
 
       - name: Upload dutagent-linux-arm64
         if: ${{ steps.release.outputs.release_created }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload ${{ steps.release.outputs.tag_name }} ./dutagent-linux-arm64
+        run: gh release upload ${{ steps.release.outputs.tag_name }} ./dutagent-${{ steps.release.outputs.tag_name }}-linux-arm64
 
         
 
