@@ -1,12 +1,10 @@
 {
-    "draft": true,
-    "last-release-sha": "c64effa173aaa9a634b186f8f8a938b407504c88",
     "release-type": "go",
     "bump-minor-pre-major": true,
     "pull-request-title-pattern": "chore: release ${version}",
     "include-component-in-tag": false,
     "include-v-in-tag": true,
-    "signoff": "release-please-bot",
+    "signoff": "Jens Drenhaus <jens.drenhaus@blindspot.software>",
     "changelog-sections": [
         {
             "type": "feat",
