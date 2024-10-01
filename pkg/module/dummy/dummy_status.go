@@ -14,7 +14,7 @@ import (
 )
 
 func init() {
-	module.Register(module.Info{
+	module.Register(module.Record{
 		ID:  "dummy-status",
 		New: func() module.Module { return &Status{} },
 	})
