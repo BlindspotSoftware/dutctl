@@ -13,7 +13,7 @@ import (
 )
 
 func init() {
-	module.Register(module.Info{
+	module.Register(module.Record{
 		ID:  "dummy-repeat",
 		New: func() module.Module { return &Repeat{} },
 	})
