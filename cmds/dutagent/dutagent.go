@@ -1,3 +1,7 @@
+// Copyright 2024 Blindspot Software
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
 // dutagent is the server of the DUT Control system.
 // The service ist designed to run on a single board computer,
 // which can handle the wiring to the devices under test (DUTs).
