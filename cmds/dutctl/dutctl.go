@@ -21,9 +21,26 @@ import (
 	"golang.org/x/net/http2"
 )
 
-const usage = `dutctl is the client application of the DUT Control system.
+const usageAbstract = `dutctl - The client application of the DUT Control system.
+`
+const usageSynopsis = `
+SYNOPSIS:
+	dutctl [options] list
+	dutctl [options] <device>
+	dutctl [options] <device> <command> [args...]
+	dutctl [options] <device> <command> help
 
-TODO: Add synopsis here.
+`
+const usageDescription = `
+If a device and a command are provided, dutctl will execute the command on the device.
+The optional args are passed to the command.
+
+To list all available devices, use the list command. If only a device is provided,
+dutctl list all available commands for the device.
+
+If a device, a command and the keyword help are provided, dutctl will show usage 
+information for the command.
+
 `
 
 const serverInfo = `Address and port of the dutagent to connect to in the format: address:port`
@@ -35,12 +52,23 @@ func newApp(stdin io.Reader, stdout, stderr io.Writer, args []string) *applicati
 	app.stderr = stderr
 	app.stdin = stdin
 
-	f := flag.NewFlagSet(args[0], flag.ExitOnError)
-	f.StringVar(&app.serverAddr, "s", "localhost:1024", serverInfo)
-	//nolint:errcheck // flag.Parse always returns no error because of flag.ExitOnError
-	f.Parse(args[1:])
+	fs := flag.NewFlagSet(args[0], flag.ExitOnError)
+	fs.SetOutput(stderr)
 
-	app.args = f.Args()
+	app.printFlagDefaults = func() {
+		fmt.Fprint(stderr, "OPTIONS:\n")
+		fs.PrintDefaults()
+	}
+	fs.Usage = func() {
+		fmt.Fprint(stderr, usageAbstract, usageSynopsis, usageDescription)
+		app.printFlagDefaults()
+	}
+	// Flags
+	fs.StringVar(&app.serverAddr, "s", "localhost:1024", serverInfo)
+
+	//nolint:errcheck // flag.Parse always returns no error because of flag.ExitOnError
+	fs.Parse(args[1:])
+	app.args = fs.Args()
 
 	return &app
 }
@@ -51,8 +79,9 @@ type application struct {
 	stderr io.Writer
 
 	// flags
-	serverAddr string
-	args       []string
+	serverAddr        string
+	args              []string
+	printFlagDefaults func()
 
 	rpcClient dutctlv1connect.DeviceServiceClient
 }
@@ -64,8 +93,6 @@ func (app *application) setupRPCClient() {
 		fmt.Sprintf("http://%s", app.serverAddr),
 		connect.WithGRPC(),
 	)
-
-	fmt.Fprintf(app.stdout, "Connect to dutagent %s\n", app.serverAddr)
 
 	app.rpcClient = client
 }
@@ -94,26 +121,29 @@ func (app *application) start() error {
 	app.setupRPCClient()
 
 	if len(app.args) == 0 {
-		fmt.Fprint(app.stderr, usage)
+		fmt.Fprint(app.stderr, usageSynopsis)
 
 		return ErrInvalidArgs
 	}
 
 	if app.args[0] == "list" {
 		if len(app.args) > 1 {
-			fmt.Fprint(app.stderr, usage)
+			fmt.Fprint(app.stderr, usageSynopsis)
+			app.printFlagDefaults()
 
 			return ErrInvalidArgs
 		}
 
-		fmt.Fprintf(app.stdout, "Calling List-RPC\n")
+		fmt.Fprintf(app.stdout, "Calling List-RPC\non dutagent %s\n",
+			app.serverAddr)
 
 		return app.listRPC()
 	}
 
 	if len(app.args) == 1 {
 		device := app.args[0]
-		fmt.Fprintf(app.stdout, "Calling Commands-RPC with\ndevice=%q\n", device)
+		fmt.Fprintf(app.stdout, "Calling Commands-RPC with\ndevice=%q\non dutagent %s\n",
+			device, app.serverAddr)
 
 		return app.commandsRPC(device)
 	}
@@ -123,12 +153,14 @@ func (app *application) start() error {
 	cmdArgs := app.args[2:]
 
 	if len(cmdArgs) > 0 && cmdArgs[0] == "help" {
-		fmt.Fprintf(app.stdout, "Calling Details-RPC with\ndevice=%q\ncommand=%q\nkeyword=%q\n", device, command, "help")
+		fmt.Fprintf(app.stdout, "Calling Details-RPC with\ndevice=%q\ncommand=%q\nkeyword=%q\non dutagent %s\n",
+			device, command, "help", app.serverAddr)
 
 		return app.detailsRPC(device, command, "help")
 	}
 
-	fmt.Fprintf(app.stdout, "Calling Run-RPC with\ndevice=%q\ncommand=%q\ncmdArgs=%q\n", device, command, cmdArgs)
+	fmt.Fprintf(app.stdout, "Calling Run-RPC with\ndevice=%q\ncommand=%q\ncmdArgs=%q\non dutagent %s\n",
+		device, command, cmdArgs, app.serverAddr)
 
 	return app.runRPC(device, command, cmdArgs)
 }
