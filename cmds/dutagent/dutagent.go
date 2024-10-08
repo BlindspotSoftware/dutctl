@@ -15,6 +15,7 @@ import (
 	"syscall"
 
 	"github.com/BlindspotSoftware/dutctl/internal/dutagent"
+	"github.com/BlindspotSoftware/dutctl/pkg"
 	"github.com/BlindspotSoftware/dutctl/pkg/dut"
 	"github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1/dutctlv1connect"
 	"golang.org/x/net/http2"
@@ -106,6 +107,10 @@ func (agt *agent) watchInterrupt() {
 	}()
 }
 
+var (
+	errMajorVersionMissmatch = errors.New("config version mismatches major application version")
+)
+
 func (agt *agent) loadConfig() error {
 	cfgYAML, err := os.ReadFile(agt.configPath)
 	if err != nil {
@@ -114,6 +119,10 @@ func (agt *agent) loadConfig() error {
 
 	if err := yaml.Unmarshal(cfgYAML, &agt.config); err != nil {
 		return fmt.Errorf("parsing YAML failed: %w", err)
+	}
+
+	if agt.config.Version != pkg.Major {
+		return fmt.Errorf("%w: have: %d, want: %d", errMajorVersionMissmatch, agt.config.Version, pkg.Major)
 	}
 
 	return nil
