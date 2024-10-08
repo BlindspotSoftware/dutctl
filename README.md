@@ -1,4 +1,4 @@
-# DUT Controll
+# DUT Control
 Device-under-Test (DUT) Control is an abstraction layer for remote hardware access.
 
 For details on the system architecture see [docs](./docs).
@@ -31,7 +31,7 @@ This project is in it's kickoff phase. Beta-Versions will be released onece the 
 Until MVP is finished, external contributions most likely won't be handled.
 
 --------
-This project is supported by 
+This project is supported by
 
 ![image](https://github.com/user-attachments/assets/1237fcaa-b3c3-4031-afac-34d789e8c096)
 
