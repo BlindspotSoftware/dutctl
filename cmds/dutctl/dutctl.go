@@ -8,6 +8,7 @@ package main
 
 import (
 	"crypto/tls"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -45,12 +46,13 @@ information for the command.
 
 const serverInfo = `Address and port of the dutagent to connect to in the format: address:port`
 
-func newApp(stdin io.Reader, stdout, stderr io.Writer, args []string) *application {
+func newApp(stdin io.Reader, stdout, stderr io.Writer, exitFunc func(int), args []string) *application {
 	var app application
 
 	app.stdout = stdout
 	app.stderr = stderr
 	app.stdin = stdin
+	app.exitFunc = exitFunc
 
 	fs := flag.NewFlagSet(args[0], flag.ExitOnError)
 	fs.SetOutput(stderr)
@@ -74,9 +76,10 @@ func newApp(stdin io.Reader, stdout, stderr io.Writer, args []string) *applicati
 }
 
 type application struct {
-	stdin  io.Reader
-	stdout io.Writer
-	stderr io.Writer
+	stdin    io.Reader
+	stdout   io.Writer
+	stderr   io.Writer
+	exitFunc func(int)
 
 	// flags
 	serverAddr        string
@@ -112,32 +115,29 @@ func newInsecureClient() *http.Client {
 	}
 }
 
-var ErrInvalidArgs = fmt.Errorf("invalid command-line arguments")
+var errInvalidCmdline = fmt.Errorf("invalid command line")
 
 // start is the entry point of the application.
-func (app *application) start() error {
+func (app *application) start() {
 	log.SetOutput(app.stdout)
 
 	app.setupRPCClient()
 
 	if len(app.args) == 0 {
-		fmt.Fprint(app.stderr, usageSynopsis)
-
-		return ErrInvalidArgs
+		app.exit(errInvalidCmdline)
 	}
 
 	if app.args[0] == "list" {
 		if len(app.args) > 1 {
-			fmt.Fprint(app.stderr, usageSynopsis)
-			app.printFlagDefaults()
 
-			return ErrInvalidArgs
+			app.exit(errInvalidCmdline)
 		}
 
 		fmt.Fprintf(app.stdout, "Calling List-RPC\non dutagent %s\n",
 			app.serverAddr)
 
-		return app.listRPC()
+		err := app.listRPC()
+		app.exit(err)
 	}
 
 	if len(app.args) == 1 {
@@ -145,7 +145,8 @@ func (app *application) start() error {
 		fmt.Fprintf(app.stdout, "Calling Commands-RPC with\ndevice=%q\non dutagent %s\n",
 			device, app.serverAddr)
 
-		return app.commandsRPC(device)
+		err := app.commandsRPC(device)
+		app.exit(err)
 	}
 
 	device := app.args[0]
@@ -156,18 +157,36 @@ func (app *application) start() error {
 		fmt.Fprintf(app.stdout, "Calling Details-RPC with\ndevice=%q\ncommand=%q\nkeyword=%q\non dutagent %s\n",
 			device, command, "help", app.serverAddr)
 
-		return app.detailsRPC(device, command, "help")
+		err := app.detailsRPC(device, command, "help")
+		app.exit(err)
 	}
 
 	fmt.Fprintf(app.stdout, "Calling Run-RPC with\ndevice=%q\ncommand=%q\ncmdArgs=%q\non dutagent %s\n",
 		device, command, cmdArgs, app.serverAddr)
 
-	return app.runRPC(device, command, cmdArgs)
+	err := app.runRPC(device, command, cmdArgs)
+	app.exit(err)
+}
+
+// exit terminates the application. If the provided error is not nil, it is printed to
+// the standard error output. If printUsage is true, the usage information is printed additionally.
+func (app *application) exit(err error) {
+	if err == nil {
+		app.exitFunc(0)
+	}
+
+	if err != nil {
+		log.Print(err)
+	}
+
+	if errors.Is(err, errInvalidCmdline) {
+		fmt.Fprint(app.stderr, usageSynopsis)
+		app.printFlagDefaults()
+	}
+
+	app.exitFunc(1)
 }
 
 func main() {
-	err := newApp(os.Stdin, os.Stdout, os.Stderr, os.Args).start()
-	if err != nil {
-		log.Fatal(err)
-	}
+	newApp(os.Stdin, os.Stdout, os.Stderr, os.Exit, os.Args).start()
 }
