@@ -129,12 +129,12 @@ func (app *application) start() {
 
 	if app.args[0] == "list" {
 		if len(app.args) > 1 {
-
 			app.exit(errInvalidCmdline)
 		}
 
 		fmt.Fprintf(app.stdout, "Calling List-RPC\non dutagent %s\n",
 			app.serverAddr)
+		app.printLine()
 
 		err := app.listRPC()
 		app.exit(err)
@@ -142,8 +142,9 @@ func (app *application) start() {
 
 	if len(app.args) == 1 {
 		device := app.args[0]
-		fmt.Fprintf(app.stdout, "Calling Commands-RPC with\ndevice=%q\non dutagent %s\n",
+		fmt.Fprintf(app.stdout, "Calling Commands-RPC with\ndevice: %q\non dutagent %s\n",
 			device, app.serverAddr)
+		app.printLine()
 
 		err := app.commandsRPC(device)
 		app.exit(err)
@@ -154,15 +155,17 @@ func (app *application) start() {
 	cmdArgs := app.args[2:]
 
 	if len(cmdArgs) > 0 && cmdArgs[0] == "help" {
-		fmt.Fprintf(app.stdout, "Calling Details-RPC with\ndevice=%q\ncommand=%q\nkeyword=%q\non dutagent %s\n",
+		fmt.Fprintf(app.stdout, "Calling Details-RPC with\ndevice: %q, command: %q, keyword: %q\non dutagent %s\n",
 			device, command, "help", app.serverAddr)
+		app.printLine()
 
 		err := app.detailsRPC(device, command, "help")
 		app.exit(err)
 	}
 
-	fmt.Fprintf(app.stdout, "Calling Run-RPC with\ndevice=%q\ncommand=%q\ncmdArgs=%q\non dutagent %s\n",
+	fmt.Fprintf(app.stdout, "Calling Run-RPC with\ndevice: %q, command: %q, cmdArgs: %q\non dutagent %s\n",
 		device, command, cmdArgs, app.serverAddr)
+	app.printLine()
 
 	err := app.runRPC(device, command, cmdArgs)
 	app.exit(err)
@@ -185,6 +188,22 @@ func (app *application) exit(err error) {
 	}
 
 	app.exitFunc(1)
+}
+
+func (app *application) printLine() {
+	const length = 80
+
+	for range length {
+		fmt.Fprint(app.stdout, "-")
+	}
+
+	fmt.Fprint(app.stdout, "\n")
+}
+
+func (app *application) printList(items []string) {
+	for _, i := range items {
+		fmt.Fprintf(app.stdout, "- %s\n", i)
+	}
 }
 
 func main() {
