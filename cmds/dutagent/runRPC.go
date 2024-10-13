@@ -97,9 +97,21 @@ func findDUTCmd(_ context.Context, args runCmdArgs) (runCmdArgs, fsm.State[runCm
 	wantDev := args.cmdMsg.GetDevice()
 	wantCmd := args.cmdMsg.GetCommand()
 
-	dev, cmd, err := findCmd(args.deviceList, wantDev, wantCmd)
+	dev, cmd, err := args.deviceList.FindCmd(wantDev, wantCmd)
 	if err != nil {
-		return args, nil, err
+		var code connect.Code
+		if errors.Is(err, dut.ErrDeviceNotFound) || errors.Is(err, dut.ErrCommandNotFound) {
+			code = connect.CodeInvalidArgument
+		} else {
+			code = connect.CodeInternal
+		}
+
+		e := connect.NewError(
+			code,
+			fmt.Errorf("device %q, command %q: %w", wantDev, wantCmd, err),
+		)
+
+		return args, nil, e
 	}
 
 	args.dev = dev

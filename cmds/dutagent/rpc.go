@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 
@@ -43,9 +44,26 @@ func (a *rpcService) Commands(
 	log.Println("Server received Commands request")
 
 	device := req.Msg.GetDevice()
+	cmds, err := a.devices.CmdNames(device)
+
+	if err != nil {
+		var code connect.Code
+		if errors.Is(err, dut.ErrDeviceNotFound) {
+			code = connect.CodeInvalidArgument
+		} else {
+			code = connect.CodeInternal
+		}
+
+		e := connect.NewError(
+			code,
+			fmt.Errorf("device %q: %w", device, err),
+		)
+
+		return nil, e
+	}
 
 	res := connect.NewResponse(&pb.CommandsResponse{
-		Commands: a.devices.Cmds(device),
+		Commands: cmds,
 	})
 
 	log.Print("Commands-RPC finished")
@@ -53,6 +71,7 @@ func (a *rpcService) Commands(
 	return res, nil
 }
 
+//nolint:funlen
 func (a *rpcService) Details(
 	_ context.Context,
 	req *connect.Request[pb.DetailsRequest],
@@ -63,9 +82,30 @@ func (a *rpcService) Details(
 	wantCmd := req.Msg.GetCmd()
 	keyword := req.Msg.GetKeyword()
 
-	_, cmd, err := findCmd(a.devices, wantDev, wantCmd)
+	if keyword != "help" {
+		e := connect.NewError(
+			connect.CodeInvalidArgument,
+			fmt.Errorf("unknown keyword %q, possible values are: 'help'", keyword),
+		)
+
+		return nil, e
+	}
+
+	_, cmd, err := a.devices.FindCmd(wantDev, wantCmd)
 	if err != nil {
-		return nil, err
+		var code connect.Code
+		if errors.Is(err, dut.ErrDeviceNotFound) || errors.Is(err, dut.ErrCommandNotFound) {
+			code = connect.CodeInvalidArgument
+		} else {
+			code = connect.CodeInternal
+		}
+
+		e := connect.NewError(
+			code,
+			fmt.Errorf("device %q, command %q: %w", wantDev, wantCmd, err),
+		)
+
+		return nil, e
 	}
 
 	var (
@@ -84,15 +124,6 @@ func (a *rpcService) Details(
 		e := connect.NewError(
 			connect.CodeInternal,
 			fmt.Errorf("no main module found for command %q at device %q", wantCmd, wantDev),
-		)
-
-		return nil, e
-	}
-
-	if keyword != "help" {
-		e := connect.NewError(
-			connect.CodeInvalidArgument,
-			fmt.Errorf("unknown keyword %q, possible values are: 'help'", keyword),
 		)
 
 		return nil, e
