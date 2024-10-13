@@ -29,7 +29,7 @@ func (app *application) listRPC() error {
 		return err
 	}
 
-	fmt.Fprintln(app.stdout, res.Msg.GetDevices())
+	app.printList(res.Msg.GetDevices())
 
 	return nil
 }
@@ -43,7 +43,7 @@ func (app *application) commandsRPC(device string) error {
 		return err
 	}
 
-	fmt.Fprintln(app.stdout, res.Msg.GetCommands())
+	app.printList(res.Msg.GetCommands())
 
 	return nil
 }
