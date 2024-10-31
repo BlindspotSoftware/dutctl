@@ -151,8 +151,8 @@ func executeModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State
 
 			if module.Config.Main {
 				moduleArgs = args.cmdMsg.GetArgs()
-			} else if module.Config.Args != nil {
-				moduleArgs = strings.Split(*module.Config.Args, " ")
+			} else {
+				moduleArgs = strings.Split(module.Config.Args, " ")
 			}
 
 			err := module.Run(rpcCtx, moduleSession, moduleArgs...)

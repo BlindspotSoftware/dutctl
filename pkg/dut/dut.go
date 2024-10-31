@@ -120,8 +120,8 @@ func (c *Command) UnmarshalYAML(node *yaml.Node) error {
 
 	// Check for presence of args in non-main modules only
 	for _, mod := range c.Modules {
-		if mod.Config.Main && mod.Config.Args != nil {
-			return errors.New("main module should not have args set, they are passed as command line arguments")
+		if mod.Config.Main && mod.Config.Args != "" {
+			return errors.New("main module should not have args set. They are passed as command line arguments via the dutctl client")
 		}
 	}
 
@@ -150,7 +150,7 @@ type Module struct {
 type ModuleConfig struct {
 	Name    string `yaml:"module"`
 	Main    bool
-	Args    *string
+	Args    string
 	Options map[string]any
 }
 
