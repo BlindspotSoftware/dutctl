@@ -95,15 +95,17 @@ func Register(r Record) {
 	modules[r.ID] = r
 }
 
-// New creates a new instance of a former registered module by its ID.
-func New(id string) (Module, error) {
-	if id == "" {
-		return nil, errors.New("module ID must not be empty")
+// New creates a new instance of a former registered module by its unique name.
+func New(name string) (Module, error) {
+	if name == "" {
+		return nil, errors.New("module name must not be empty")
 	}
 
-	mod, ok := modules[id]
+	mod, ok := modules[name]
 	if !ok {
-		return nil, errors.New("module not found")
+		const helpURL = "https://github.com/BlindspotSoftware/dutctl/blob/main/docs/module_guide.md#registration"
+
+		return nil, fmt.Errorf("module %s not found, maybe not registered, see %s", name, helpURL)
 	}
 
 	return mod.New(), nil
