@@ -24,8 +24,6 @@ import (
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 	"gopkg.in/yaml.v3"
-
-	_ "github.com/BlindspotSoftware/dutctl/pkg/module/dummy"
 )
 
 const (
