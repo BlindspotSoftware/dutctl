@@ -1,0 +1,21 @@
+---
+version: 0
+devices:
+  self:
+    desc: "This device represents no DUT but the dutagent itself"
+    cmds:
+      system-double-check:
+        desc: "Report status twice"
+        modules:
+          - module: agent-status
+            main: true
+          - module: time-wait
+            options:
+              duration: 2s
+          - module: agent-status
+      just-wait:
+        desc: "Do nothing and finish after the provided amount of time"
+        modules:
+          - module: time-wait
+            main: true
+  
