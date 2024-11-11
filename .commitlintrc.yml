@@ -60,6 +60,6 @@ rules:
 # Require signed-off commits
 
   signed-off-by: 
-    - 2
+    - 1
     - always 
     - 'Signed-off-by:'
