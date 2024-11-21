@@ -1,2 +1,6 @@
 .vscode/
 taskfile.yml
+dutctl
+cmds/dutctl/dutctl
+dutagent
+cmds/dutagent/dutagent
