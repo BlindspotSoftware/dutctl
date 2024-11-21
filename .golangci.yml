@@ -177,4 +177,5 @@ linters-settings:
       - tt # Test Table
       - r # Reader
       - fs # FlagSet
+      - "on" # On/Off
 
