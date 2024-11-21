@@ -161,6 +161,9 @@ linters-settings:
   lll:
     line-length: 140
 
+  nestif:
+    min-complexity: 6
+
   varnamelen:
     max-distance: 6
     ignore-type-assert-ok: true
