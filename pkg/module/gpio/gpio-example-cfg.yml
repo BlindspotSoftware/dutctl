@@ -1,0 +1,29 @@
+---
+version: 0
+devices:
+  rocket:
+    desc: "A rocket that can be fired"
+    cmds:
+      fire:
+        desc: "Push the big red button"
+        modules:
+          - module: gpio-button
+            main: true
+            options:
+              pin: 9
+              idle:  0
+      reset:
+        desc: "Reset the rocket"
+        modules:
+          - module: gpio-button
+            main: true
+            options:
+              pin: 10
+              idle:  1
+      light:
+        desc: "Turn on the light"
+        modules:
+          - module: gpio-switch
+            main: true
+            options:
+              pin: 11
