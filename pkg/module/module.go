@@ -105,7 +105,7 @@ func New(name string) (Module, error) {
 	if !ok {
 		const helpURL = "https://github.com/BlindspotSoftware/dutctl/blob/main/docs/module_guide.md#registration"
 
-		return nil, fmt.Errorf("module %s not found, maybe not registered, see %s", name, helpURL)
+		return nil, fmt.Errorf("module %q not found, maybe not registered, see %s", name, helpURL)
 	}
 
 	return mod.New(), nil
