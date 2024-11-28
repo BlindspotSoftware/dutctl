@@ -42,7 +42,7 @@ could look like.
 | --- | --- | --- | --- | --- |
 | module | string |  | The module's name also serves as its identifier and must be unique. | yes |
 | main | bool | false | All arguments to a command are passed to its main module. The main modules usage information is also used as the command help text. | exactly once per command |
-| args | string | nil | If a module is not an commands main module, it does not get any arguments passed at runtime, instead arguments can be passed here.| when main is false |
+| args | []string | nil | If a module is not an commands main module, it does not get any arguments passed at runtime, instead arguments can be passed here.| when main is false |
 | options | map[string]any |  | A module can be configured via key-value pairs. The type of the value is generic and depends on the implementation of the module.| yes |
 
 

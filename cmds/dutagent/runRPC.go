@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"strings"
 
 	"connectrpc.com/connect"
 	"github.com/BlindspotSoftware/dutctl/internal/dutagent"
@@ -152,7 +151,7 @@ func executeModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State
 			if module.Config.Main {
 				moduleArgs = args.cmdMsg.GetArgs()
 			} else {
-				moduleArgs = strings.Split(module.Config.Args, " ")
+				moduleArgs = module.Config.Args
 			}
 
 			err := module.Run(rpcCtx, moduleSession, moduleArgs...)
