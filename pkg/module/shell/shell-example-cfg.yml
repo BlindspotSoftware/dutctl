@@ -1,0 +1,34 @@
+---
+version: 0
+devices:
+  self:
+    desc: |
+      This device represents no DUT but the dutagent itself to demonstrate the shell module. 
+      However, the shell module can of corse be used to take actions on the DUT, depending on what the shell command is.
+    cmds:
+      greet:
+        desc: |
+          Demonstrates the shell module by writing a greeting to a file, giving the user the chance to edit, 
+          then reading it back and deleting the file. E.g try: dutctl self greet "echo 'Hello World' >> /tmp/shell-test.txt"
+        modules:
+          - module: shell
+            options:
+              path: bash
+              quiet: true
+            args:
+              - "echo 'Greetings from the shell module!\n\n' > /tmp/shell-test.txt"
+          - module: shell
+            main: true
+          - module: shell
+            options:
+              path: sh
+              quiet: true
+            args:
+              - "ls /tmp/shell-test.txt"
+          - module: shell
+            options:
+              path: /bin/bash
+            args:
+              - "cat /tmp/shell-test.txt && rm -f /tmp/shell-test.txt"
+
+              
