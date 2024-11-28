@@ -19,8 +19,8 @@ For details on the system architecture see [docs](./docs).
 | SPI Flasher, flashprog       | :x:|
 | SPI Flasher, em100       | :x:|
 | Serial Console       | :x:|
-| Shell Execution       | :x:|
-| Secure Shell (SSH)       | :x:|
+| [Shell Execution](./pkg/module/shell/README.md)       | :white_check_mark:|
+| Secure Shell (SSH)       | ::|
 
 
 
