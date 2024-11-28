@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.3.0](https://github.com/BlindspotSoftware/dutctl/compare/v0.2.0...v0.3.0) (2024-11-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* `args` field of module object in dutagent config is now a string array.
+
+### Bug Fixes
+
+* pass arguments to non-main modules as array ([dc2d224](https://github.com/BlindspotSoftware/dutctl/commit/dc2d224f5014cec742dbb207742121fcbc6eab84))
+
 ## [0.2.0](https://github.com/BlindspotSoftware/dutctl/compare/v0.1.0...v0.2.0) (2024-11-28)
 
 
