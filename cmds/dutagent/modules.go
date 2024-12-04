@@ -14,5 +14,6 @@ package main
 import (
 	_ "github.com/BlindspotSoftware/dutctl/pkg/module/agent"
 	_ "github.com/BlindspotSoftware/dutctl/pkg/module/dummy"
+	_ "github.com/BlindspotSoftware/dutctl/pkg/module/gpio"
 	_ "github.com/BlindspotSoftware/dutctl/pkg/module/time"
 )
