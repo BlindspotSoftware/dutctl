@@ -11,7 +11,6 @@ devices:
             main: true
             options:
               pin: 9
-              idle:  0
       reset:
         desc: "Reset the rocket"
         modules:
@@ -19,7 +18,7 @@ devices:
             main: true
             options:
               pin: 10
-              idle:  1
+              activelow: true
       light:
         desc: "Turn on the light"
         modules:
@@ -27,3 +26,4 @@ devices:
             main: true
             options:
               pin: 11
+              initial: on

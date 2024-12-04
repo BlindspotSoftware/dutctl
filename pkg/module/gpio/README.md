@@ -33,7 +33,7 @@ See [gpio-example-cfg.yml](./gpio-example-cfg.yml) for examples.
 | Option | Value | Description
 |----------|--------|------------------------------------|
 | pin | int | Raw BCM2835/BCM2711 pin number |
-| idle | int | State of the pin when not pressed. 0 for Low, 1 for High. Default is 0 (Low) |
+| activelow | bool | If true, the idle state is high, and low when pressed. Default is false |
 | backend | string | For future use. Name of the backend to use. Default is "devmem" |
 
 # Switch
@@ -57,6 +57,6 @@ See [gpio-example-cfg.yml](./gpio-example-cfg.yml) for examples.
 | Option | Value | Description
 |----------|--------|------------------------------------|
 | pin | int | Raw BCM2835/BCM2711 pin number |
-| initial | int | Initial state of the pin.  0 for On, 1 for Off. Default is Off. |
-| activelow | bool | If true, the switch is active low. Default is false. With active-low, on means 'low' and off means 'high'|
+| initial | string | Initial state of the switch: "on" or "off" (case insensitive). Default and fallback is "off". |
+| activelow | bool | If true, the switch is active low (switch on means gpio pin low). Default is false.|
 | backend | string | For future use. Name of the backend to use. Default is "devmem" |
