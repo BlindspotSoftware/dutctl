@@ -36,6 +36,27 @@ func init() {
 type Pin uint8
 type State uint8
 
+// gpio is an interface for different internal gpio access methods.
+type gpio interface {
+	Low(pin Pin) error
+	High(pin Pin) error
+	Toggle(pin Pin) error
+}
+
+// parseBackend returns the gpio backend based on the name.
+// Currently only "devmem" is supported.
+// If the name is not recognized, the 'devmem' is used as a fallback.
+//
+//nolint:ireturn
+func parseBackend(name string) gpio {
+	switch name {
+	case "devmem":
+		return &devmem{}
+	default:
+		return &devmem{}
+	}
+}
+
 const (
 	Low  State = 0
 	High State = 1
@@ -45,18 +66,11 @@ const DefaultButtonPressDuration = 500 * time.Millisecond
 
 // A Button simulates a button press by changing the state of a GPIO pin.
 type Button struct {
-	Pin     Pin    // Raw BCM2835/BCM2711 pin number
-	Idle    State  // State of the pin when not pressed. 0 for Low, 1 for High. Default is Low
-	Backend string // For future use. Name of the backend to use. Default is "devmem"
+	Pin       Pin    // Raw BCM2835/BCM2711 pin number
+	ActiveLow bool   // If set, the idle state is high, and low when pressed. Default is false
+	Backend   string // For future use. Name of the backend to use. Default and fallback is "devmem"
 
-	button
-}
-
-// button is an interface for a internal button backend.
-type button interface {
-	Init(pin Pin, idle State) error
-	Press(duration time.Duration) error
-	Deinit() error
+	gpio
 }
 
 // Ensure implementing the Module interface.
@@ -95,14 +109,12 @@ func (b *Button) Help() string {
 	help.WriteString(fmt.Sprintf("Default duration is %s.\n", DefaultButtonPressDuration))
 	help.WriteString(description2Button)
 
-	var idleState string
-	if b.Idle == Low {
-		idleState = "Low"
+	if b.ActiveLow {
+		help.WriteString("The button is active low. Thus 'Idle' mean 'High', 'Pressed' means 'Low'\n")
 	} else {
-		idleState = "High"
+		help.WriteString("The button is active high. Thus 'Idle' mean 'Low', 'Pressed' means 'High'\n")
 	}
 
-	help.WriteString(fmt.Sprintf("The idle state (if the not pressed) is %s.\n", idleState))
 	help.WriteString(fmt.Sprintf("The used GPIO pin is pin %d. (Raw BCM2835/BCM2711 pin number)\n", b.Pin))
 	help.WriteString(description3Button)
 
@@ -112,49 +124,46 @@ func (b *Button) Help() string {
 func (b *Button) Init() error {
 	log.Println("gpio.Button module: Init called")
 
-	var backend button
+	b.gpio = parseBackend(b.Backend)
 
-	switch b.Backend {
-	case "devmem":
-		backend = &devmemButton{}
-	default:
-		backend = &devmemButton{}
+	if b.ActiveLow {
+		// with active low, idle is high
+		return b.gpio.High(b.Pin)
 	}
 
-	err := backend.Init(b.Pin, b.Idle)
-	if err != nil {
-		return err
-	}
-
-	b.button = backend
-
-	return nil
+	return b.gpio.Low(b.Pin)
 }
 
 func (b *Button) Deinit() error {
 	log.Println("gpio.Button module: Deinit called")
 
-	return b.button.Deinit()
+	return b.gpio.Low(b.Pin)
 }
 
 func (b *Button) Run(_ context.Context, s module.Session, args ...string) error {
 	log.Println("gpio.Button module: Run called")
 
-	var duration time.Duration
+	var (
+		duration time.Duration
+		err      error
+	)
 
 	if len(args) > 0 {
-		d, err := time.ParseDuration(args[0])
+		duration, err = time.ParseDuration(args[0])
 		if err != nil {
 			return err
 		}
-
-		duration = d
 	} else {
 		duration = DefaultButtonPressDuration
 	}
 
-	err := b.Press(duration)
-	if err != nil {
+	if err := b.gpio.Toggle(b.Pin); err != nil {
+		return err
+	}
+
+	time.Sleep(duration)
+
+	if err := b.gpio.Toggle(b.Pin); err != nil {
 		return err
 	}
 
@@ -163,11 +172,11 @@ func (b *Button) Run(_ context.Context, s module.Session, args ...string) error 
 	return nil
 }
 
-type stateStr string
+type switchState string
 
 const (
-	on  stateStr = "on"
-	off stateStr = "off"
+	on  switchState = "on"
+	off switchState = "off"
 )
 
 // A Switch simulates an on/off switch by changing the state of a GPIO pin.
@@ -175,24 +184,15 @@ const (
 type Switch struct {
 	// Raw BCM2835/BCM2711 pin number
 	Pin Pin
-	// Initial state of the pin.  0 for On, 1 for Off. Default is Off.
-	Initial State
-	// If true, the switch is active low. Default is false.
+	// Initial state of the switch: "on" or "off" (case insensitive). Default and fallback is "off".
+	Initial string
+	// If true, the switch is active low (switch on means gpio pin low). Default is false.
 	ActiveLow bool
 	// For future use. Name of the backend to use. Default is "devmem"
 	Backend string
 
-	switcher
-	state stateStr
-}
-
-// switcher is an interface for a internal button backend.
-type switcher interface {
-	Init(pin Pin, initial State, activeLow bool) error
-	On() error
-	Off() error
-	Toggle() error
-	Deinit() error
+	gpio
+	state switchState
 }
 
 // Ensure implementing the Module interface.
@@ -237,34 +237,22 @@ func (s *Switch) Help() string {
 func (s *Switch) Init() error {
 	log.Println("gpio.Switch module: Init called")
 
-	var backend switcher
+	s.gpio = parseBackend(s.Backend)
 
-	switch s.Backend {
-	case "devmem":
-		backend = &devmemSwitch{}
-	default:
-		backend = &devmemSwitch{}
-	}
-
-	err := backend.Init(s.Pin, s.Initial, s.ActiveLow)
-	if err != nil {
-		return err
-	}
-
-	s.switcher = backend
-	if s.Initial == Low {
-		s.state = off
-	} else {
+	initial := strings.ToLower(s.Initial)
+	if initial == "on" {
 		s.state = on
+
+		return s.on()
 	}
 
-	return nil
+	return s.off()
 }
 
 func (s *Switch) Deinit() error {
 	log.Println("gpio.Switch module: Deinit called")
 
-	return s.switcher.Deinit()
+	return s.gpio.Low(s.Pin)
 }
 
 //nolint:cyclop
@@ -279,7 +267,7 @@ func (s *Switch) Run(_ context.Context, sesh module.Session, args ...string) err
 
 	switch args[0] {
 	case "on":
-		err := s.On()
+		err := s.on()
 		if err != nil {
 			return err
 		}
@@ -294,7 +282,7 @@ func (s *Switch) Run(_ context.Context, sesh module.Session, args ...string) err
 
 		return nil
 	case "off":
-		err := s.Off()
+		err := s.off()
 		if err != nil {
 			return err
 		}
@@ -309,7 +297,7 @@ func (s *Switch) Run(_ context.Context, sesh module.Session, args ...string) err
 
 		return nil
 	case "toggle":
-		err := s.Toggle()
+		err := s.gpio.Toggle(s.Pin)
 		if err != nil {
 			return err
 		}
@@ -328,4 +316,20 @@ func (s *Switch) Run(_ context.Context, sesh module.Session, args ...string) err
 	}
 
 	return nil
+}
+
+func (s *Switch) on() error {
+	if s.ActiveLow {
+		return s.gpio.Low(s.Pin)
+	}
+
+	return s.gpio.High(s.Pin)
+}
+
+func (s *Switch) off() error {
+	if s.ActiveLow {
+		return s.gpio.High(s.Pin)
+	}
+
+	return s.gpio.Low(s.Pin)
 }
