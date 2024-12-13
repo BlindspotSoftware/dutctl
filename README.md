@@ -5,12 +5,12 @@ For details on the system architecture see [docs](./docs).
 
 | Supported Client OS | Supported DUT Agent Hardware |
 |---------------------|------------------------------|
-|  Linux | RaspberryPi 4 (planned :hourglass:)|
+|  Linux | RaspberryPi 4 |
 
 | Modules | Status |
 |-------------------|--------|
-| GPIO Button       | :x:|
-| GPIO Switch       | :x:|
+| [GPIO Button](./pkg/module/gpio/README.md)    | :white_check_mark:|
+| GPIO Switch       | :white_check_mark:|
 | IPMI Power Control | :x:|
 | Power Distribution Unit, Intellinet       | :x:|
 | Power Distribution Unit, Delock       | :x:|
