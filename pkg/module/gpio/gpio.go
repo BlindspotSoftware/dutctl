@@ -22,13 +22,13 @@ func init() {
 	module.Register(module.Record{
 		ID: "gpio-button",
 		New: func() module.Module {
-			return &Button{}
+			return &Button{backendParser: backendFromOption}
 		},
 	})
 	module.Register(module.Record{
 		ID: "gpio-switch",
 		New: func() module.Module {
-			return &Switch{}
+			return &Switch{backendParser: backendFromOption}
 		},
 	})
 }
@@ -43,12 +43,15 @@ type gpio interface {
 	Toggle(pin Pin) error
 }
 
-// parseBackend returns the gpio backend based on the name.
+// backendParser return a gpio backend based on the name.
+type backendParser func(name string) gpio
+
+// backendFromOption is the default [backendParser] function.
 // Currently only "devmem" is supported.
 // If the name is not recognized, the 'devmem' is used as a fallback.
 //
 //nolint:ireturn
-func parseBackend(name string) gpio {
+func backendFromOption(name string) gpio {
 	switch name {
 	case "devmem":
 		return &devmem{}
@@ -70,6 +73,7 @@ type Button struct {
 	ActiveLow bool   // If set, the idle state is high, and low when pressed. Default is false
 	Backend   string // For future use. Name of the backend to use. Default and fallback is "devmem"
 
+	backendParser
 	gpio
 }
 
@@ -124,7 +128,7 @@ func (b *Button) Help() string {
 func (b *Button) Init() error {
 	log.Println("gpio.Button module: Init called")
 
-	b.gpio = parseBackend(b.Backend)
+	b.gpio = b.backendParser(b.Backend)
 
 	if b.ActiveLow {
 		// with active low, idle is high
@@ -192,6 +196,7 @@ type Switch struct {
 	Backend string
 
 	gpio
+	backendParser
 	state switchState
 }
 
@@ -237,7 +242,7 @@ func (s *Switch) Help() string {
 func (s *Switch) Init() error {
 	log.Println("gpio.Switch module: Init called")
 
-	s.gpio = parseBackend(s.Backend)
+	s.gpio = s.backendParser(s.Backend)
 
 	initial := strings.ToLower(s.Initial)
 	if initial == "on" {
