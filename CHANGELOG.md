@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.3.0](https://github.com/BlindspotSoftware/dutctl/compare/v0.2.0...v0.3.0) (2025-02-18)
+
+
+### ⚠ BREAKING CHANGES
+
+* `args` field of module object in dutagent config is now a string array.
+
+### Features
+
+* modules gpio.Button and gpio.Switch ([45d0e17](https://github.com/BlindspotSoftware/dutctl/commit/45d0e1707a00f60bf5f02162c7d7f15c04985679))
+
+
+### Bug Fixes
+
+* pass arguments to non-main modules as array ([dc2d224](https://github.com/BlindspotSoftware/dutctl/commit/dc2d224f5014cec742dbb207742121fcbc6eab84))
+
+
+### Documentation
+
+* improve dutagent config reference ([510e364](https://github.com/BlindspotSoftware/dutctl/commit/510e3646aa65e012ca12cfe457120ee1a68da6c0))
+* update README for GPIO module support ([c781dc5](https://github.com/BlindspotSoftware/dutctl/commit/c781dc50e16c86bcfff910e5942164f6e8ecdb12))
+
+
+### Other Work
+
+* add internal/test pkg with module.Session mock ([a1af652](https://github.com/BlindspotSoftware/dutctl/commit/a1af652acec26a5147bdc248ed11578ae9278825))
+* improve GPIO module backend abstraction ([7718ddf](https://github.com/BlindspotSoftware/dutctl/commit/7718ddff467e889c2e16b959e3b676172ee8ce55))
+
 ## [0.2.0](https://github.com/BlindspotSoftware/dutctl/compare/v0.1.0...v0.2.0) (2024-11-28)
 
 
