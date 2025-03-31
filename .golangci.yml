@@ -47,7 +47,7 @@ linters:
     - gocritic
     - gocyclo
     - godot
-    - godox
+    #- godox - allow "TODO" and "FIXME" comments until v1.0
     - gofmt
     #- gofumpt - no idea what format it checks, output is not helpful
     - goheader
