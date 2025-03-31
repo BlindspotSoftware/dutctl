@@ -9,8 +9,8 @@ For details on the system architecture see [docs](./docs).
 
 | Modules | Status |
 |-------------------|--------|
-| [GPIO Button](./pkg/module/gpio/README.md)    | :white_check_mark:|
-| GPIO Switch       | :white_check_mark:|
+| [GPIO Button](./pkg/module/gpio/README.md) | :white_check_mark:|
+| [GPIO Switch](./pkg/module/gpio/README.md) | :white_check_mark:|
 | IPMI Power Control | :x:|
 | Power Distribution Unit, Intellinet       | :x:|
 | Power Distribution Unit, Delock       | :x:|
