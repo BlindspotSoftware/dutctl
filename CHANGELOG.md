@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/BlindspotSoftware/dutctl/compare/v0.3.0...v0.3.1) (2025-03-31)
+
+
+### Documentation
+
+* add link for switch module in README ([455f4bc](https://github.com/BlindspotSoftware/dutctl/commit/455f4bc080f4069cb43c389bb196ea4b07366779))
+
 ## [0.3.0](https://github.com/BlindspotSoftware/dutctl/compare/v0.2.0...v0.3.0) (2025-02-18)
 
 
