@@ -4,3 +4,4 @@ dutctl
 cmds/dutctl/dutctl
 dutagent
 cmds/dutagent/dutagent
+keys/
