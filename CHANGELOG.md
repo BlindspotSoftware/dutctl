@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/BlindspotSoftware/dutctl/compare/v0.3.1...v0.4.0) (2025-04-03)
+
+
+### Features
+
+* module shell ([5ba103e](https://github.com/BlindspotSoftware/dutctl/commit/5ba103e0f9fb1e7f5666ea9e6143e7fb10f305ae))
+
 ## [0.3.1](https://github.com/BlindspotSoftware/dutctl/compare/v0.3.0...v0.3.1) (2025-03-31)
 
 
