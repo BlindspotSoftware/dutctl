@@ -16,5 +16,6 @@ import (
 	_ "github.com/BlindspotSoftware/dutctl/pkg/module/dummy"
 	_ "github.com/BlindspotSoftware/dutctl/pkg/module/gpio"
 	_ "github.com/BlindspotSoftware/dutctl/pkg/module/shell"
+	_ "github.com/BlindspotSoftware/dutctl/pkg/module/ssh"
 	_ "github.com/BlindspotSoftware/dutctl/pkg/module/time"
 )
