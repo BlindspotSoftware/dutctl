@@ -1,0 +1,16 @@
+---
+version: 0
+devices:
+  xyz:
+    desc: "A mainboard that needs to be flashed during firmware development"
+    cmds:
+      flash:
+        desc: |
+          Basic demo of the Flash module.
+        modules:
+          - module: flash
+            main: true
+            options:
+              tool: "/usr/sbin/flashrom"
+              programmer: "dediprog"
+    

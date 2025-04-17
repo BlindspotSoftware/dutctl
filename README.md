@@ -14,10 +14,8 @@ For details on the system architecture see [docs](./docs).
 | [IPMI Power Control](./pkg/module/gpio/README.md)                 | :white_check_mark: |
 | [Power Distribution Unit, Intellinet](./pkg/module/pdu/README.md) | :white_check_mark: |
 | Power Distribution Unit, Delock                                   | :x:                |
-| SPI Flasher, dediprog                                             | :x:                |
-| SPI Flasher, flashrom                                             | :x:                |
+| [SPI Flasher, flashrom](./pkg/module/flash/README.md)             | :white_check_mark: |
 | SPI Flasher, flashprog                                            | :x:                |
-| SPI Flasher, em100                                                | :x:                |
 | [Serial Console](./pkg/module/serial/README.md)                   | :white_check_mark: |
 | [Shell Execution](./pkg/module/shell/README.md)                   | :white_check_mark: |
 | [Secure Shell (SSH)](./pkg/module/ssh/README.md)                  | :white_check_mark: |
