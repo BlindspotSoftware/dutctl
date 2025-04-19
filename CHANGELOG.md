@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/BlindspotSoftware/dutctl/compare/v0.4.0...v0.5.0) (2025-04-19)
+
+
+### Features
+
+* module ssh ([2adf2b4](https://github.com/BlindspotSoftware/dutctl/commit/2adf2b40bd5f528de78884cd5f05bf4917e485ac))
+
 ## [0.4.0](https://github.com/BlindspotSoftware/dutctl/compare/v0.3.1...v0.4.0) (2025-04-03)
 
 
