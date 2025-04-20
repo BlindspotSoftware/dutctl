@@ -1,0 +1,15 @@
+version: 0
+devices:
+  server:
+    desc: "A server that needs to be observed during boot"
+    cmds:
+      ssh:
+        desc: |
+          Basic demo of the Serial module: After the DUT is powered on, use Serial
+          as the main module to wait for magic strings in the DUT's boot log.
+        modules:
+          - module: serial
+            main: true
+            options:
+              port: /tmp/ttyS0
+              baudrate: 115200
