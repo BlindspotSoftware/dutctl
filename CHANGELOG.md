@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/BlindspotSoftware/dutctl/compare/v0.5.0...v0.6.0) (2025-04-22)
+
+
+### Features
+
+* module serial ([738c176](https://github.com/BlindspotSoftware/dutctl/commit/738c176840cb8dd6b95935b75b3f12b85149161b))
+
 ## [0.5.0](https://github.com/BlindspotSoftware/dutctl/compare/v0.4.0...v0.5.0) (2025-04-19)
 
 
