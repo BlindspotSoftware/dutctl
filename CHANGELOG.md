@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/BlindspotSoftware/dutctl/compare/v0.6.0...v0.6.1) (2025-04-25)
+
+
+### Documentation
+
+* fix typo in README.md ([a0f9ee0](https://github.com/BlindspotSoftware/dutctl/commit/a0f9ee0d6a569110953c23ced4c21a190cb60844))
+
 ## [0.6.0](https://github.com/BlindspotSoftware/dutctl/compare/v0.5.0...v0.6.0) (2025-04-22)
 
 
