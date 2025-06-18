@@ -1,0 +1,15 @@
+version: 0
+devices:
+  fancy-server:
+    desc: "A server with power control via PDU"
+    cmds:
+      power-on:
+        desc: "Turn the power ON via PDU"
+        modules:
+          - module: pdu
+            main: true
+            options:
+              host: http://192.168.1.100
+              user: admin
+              password: admin
+              outlet: 6
