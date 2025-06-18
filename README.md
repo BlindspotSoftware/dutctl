@@ -7,20 +7,20 @@ For details on the system architecture see [docs](./docs).
 | ------------------- | ---------------------------- |
 | Linux               | RaspberryPi 4                |
 
-| Modules                                            | Status             |
-| -------------------------------------------------- | ------------------ |
-| [GPIO Button](./pkg/module/gpio/README.md)         | :white_check_mark: |
-| [GPIO Switch](./pkg/module/gpio/README.md)         | :white_check_mark: |
-| [IPMI Power Control](./pkg/module/gpio/README.md)  | :white_check_mark: |
-| Power Distribution Unit, Intellinet                | :x:                |
-| Power Distribution Unit, Delock                    | :x:                |
-| SPI Flasher, dediprog                              | :x:                |
-| SPI Flasher, flashrom                              | :x:                |
-| SPI Flasher, flashprog                             | :x:                |
-| SPI Flasher, em100                                 | :x:                |
-| [Serial Console](./pkg/module/serial/README.md)    | :white_check_mark: |
-| [Shell Execution](./pkg/module/shell/README.md)    | :white_check_mark: |
-| [Secure Shell (SSH)](./pkg/module/ssh/README.md)   | :white_check_mark: |
+| Modules                                                           | Status             |
+| ----------------------------------------------------------------- | ------------------ |
+| [GPIO Button](./pkg/module/gpio/README.md)                        | :white_check_mark: |
+| [GPIO Switch](./pkg/module/gpio/README.md)                        | :white_check_mark: |
+| [IPMI Power Control](./pkg/module/gpio/README.md)                 | :white_check_mark: |
+| [Power Distribution Unit, Intellinet](./pkg/module/pdu/README.md) | :white_check_mark: |
+| Power Distribution Unit, Delock                                   | :x:                |
+| SPI Flasher, dediprog                                             | :x:                |
+| SPI Flasher, flashrom                                             | :x:                |
+| SPI Flasher, flashprog                                            | :x:                |
+| SPI Flasher, em100                                                | :x:                |
+| [Serial Console](./pkg/module/serial/README.md)                   | :white_check_mark: |
+| [Shell Execution](./pkg/module/shell/README.md)                   | :white_check_mark: |
+| [Secure Shell (SSH)](./pkg/module/ssh/README.md)                  | :white_check_mark: |
 
 
 
