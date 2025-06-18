@@ -1,0 +1,16 @@
+---
+version: 0
+devices:
+  device2:
+    desc: "Device 2"
+    cmds:
+      status:
+        desc: "Report status"
+        modules:
+          - module: dummy-status
+            main: true
+      repeat:
+        desc: "Repeat input"
+        modules:
+          - module: dummy-repeat
+            main: true

@@ -4,4 +4,6 @@ dutctl
 cmds/dutctl/dutctl
 dutagent
 cmds/dutagent/dutagent
+dutserver
+cmds/exp/dutserver/dutserver
 keys/
