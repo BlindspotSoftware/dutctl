@@ -1,0 +1,14 @@
+version: 0
+devices:
+  fancy-server:
+    desc: "A server with IPMI-managed power control"
+    cmds:
+      power:
+        desc: "Power on the server using IPMI"
+        modules:
+          - module: ipmi-power
+            options:
+              host: 192.168.1.100
+              port: 623
+              user: user
+              password: password
