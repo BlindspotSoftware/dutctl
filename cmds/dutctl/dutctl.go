@@ -18,6 +18,7 @@ import (
 	"os"
 
 	"connectrpc.com/connect"
+	"github.com/BlindspotSoftware/dutctl/internal/buildinfo"
 	"github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1/dutctlv1connect"
 	"golang.org/x/net/http2"
 )
@@ -44,7 +45,10 @@ information for the command.
 
 `
 
-const serverInfo = `Address and port of the dutagent to connect to in the format: address:port`
+const (
+	serverAddrInfo  = `Address and port of the dutagent to connect to in the format: address:port`
+	versionFlagInfo = `Print version information and exit`
+)
 
 func newApp(stdin io.Reader, stdout, stderr io.Writer, exitFunc func(int), args []string) *application {
 	var app application
@@ -66,7 +70,8 @@ func newApp(stdin io.Reader, stdout, stderr io.Writer, exitFunc func(int), args 
 		app.printFlagDefaults()
 	}
 	// Flags
-	fs.StringVar(&app.serverAddr, "s", "localhost:1024", serverInfo)
+	fs.StringVar(&app.serverAddr, "s", "localhost:1024", serverAddrInfo)
+	fs.BoolVar(&app.versionFlag, "v", false, versionFlagInfo)
 
 	//nolint:errcheck // flag.Parse always returns no error because of flag.ExitOnError
 	fs.Parse(args[1:])
@@ -82,6 +87,7 @@ type application struct {
 	exitFunc func(int)
 
 	// flags
+	versionFlag       bool
 	serverAddr        string
 	args              []string
 	printFlagDefaults func()
@@ -120,6 +126,11 @@ var errInvalidCmdline = fmt.Errorf("invalid command line")
 // start is the entry point of the application.
 func (app *application) start() {
 	log.SetOutput(app.stdout)
+
+	if app.versionFlag {
+		app.printVersion()
+		app.exit(nil)
+	}
 
 	app.setupRPCClient()
 
@@ -188,6 +199,11 @@ func (app *application) exit(err error) {
 	}
 
 	app.exitFunc(1)
+}
+
+func (app *application) printVersion() {
+	fmt.Fprint(app.stdout, "DUT Control Client\n")
+	fmt.Fprint(app.stdout, buildinfo.VersionString())
 }
 
 func (app *application) printLine() {
