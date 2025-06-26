@@ -11,7 +11,7 @@ For details on the system architecture see [docs](./docs).
 | -------------------------------------------------- | ------------------ |
 | [GPIO Button](./pkg/module/gpio/README.md)         | :white_check_mark: |
 | [GPIO Switch](./pkg/module/gpio/README.md)         | :white_check_mark: |
-| [IPMI Power Control] (./pkg/module/gpio/README.md) | :white_check_mark: |
+| [IPMI Power Control](./pkg/module/gpio/README.md)  | :white_check_mark: |
 | Power Distribution Unit, Intellinet                | :x:                |
 | Power Distribution Unit, Delock                    | :x:                |
 | SPI Flasher, dediprog                              | :x:                |
