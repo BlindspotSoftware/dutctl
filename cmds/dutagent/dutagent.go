@@ -18,6 +18,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/BlindspotSoftware/dutctl/internal/buildinfo"
 	"github.com/BlindspotSoftware/dutctl/internal/dutagent"
 	"github.com/BlindspotSoftware/dutctl/pkg/dut"
 	"github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1/dutctlv1connect"
@@ -31,6 +32,7 @@ const (
 	configPathInfo  = `Path to DUT configuration file`
 	checkConfigInfo = `Only validate the provided DUT configuration, not starting the service`
 	dryRunInfo      = `Only run the initialization phase of the modules, not start the (includes validation of the configuration)`
+	versionFlagInfo = `Print version information and exit`
 )
 
 func newAgent(stdout io.Writer, exitFunc func(int), args []string) *agent {
@@ -39,13 +41,14 @@ func newAgent(stdout io.Writer, exitFunc func(int), args []string) *agent {
 	agt.stdout = stdout
 	agt.exit = exitFunc
 
-	f := flag.NewFlagSet(args[0], flag.ExitOnError)
-	f.StringVar(&agt.address, "a", "localhost:1024", addressInfo)
-	f.StringVar(&agt.configPath, "c", "dutctl.yaml", configPathInfo)
-	f.BoolVar(&agt.checkConfig, "check-config", false, checkConfigInfo)
-	f.BoolVar(&agt.dryRun, "dry-run", false, dryRunInfo)
+	fs := flag.NewFlagSet(args[0], flag.ExitOnError)
+	fs.StringVar(&agt.address, "a", "localhost:1024", addressInfo)
+	fs.StringVar(&agt.configPath, "c", "dutctl.yaml", configPathInfo)
+	fs.BoolVar(&agt.checkConfig, "check-config", false, checkConfigInfo)
+	fs.BoolVar(&agt.dryRun, "dry-run", false, dryRunInfo)
+	fs.BoolVar(&agt.versionFlag, "v", false, versionFlagInfo)
 	//nolint:errcheck // flag.Parse always returns no error because of flag.ExitOnError
-	f.Parse(args[1:])
+	fs.Parse(args[1:])
 
 	return &agt
 }
@@ -56,6 +59,7 @@ type agent struct {
 	exit   func(int)
 
 	// flags
+	versionFlag bool
 	address     string
 	configPath  string
 	checkConfig bool
@@ -162,6 +166,11 @@ func (agt *agent) startRPCService() error {
 func (agt *agent) start() {
 	log.SetOutput(agt.stdout)
 
+	if agt.versionFlag {
+		agt.printVersion()
+		agt.exit(0)
+	}
+
 	// By design dutagent's code does not panic.
 	// But other code could, or *things* happen at runtime. So we catch it here
 	// to do a graceful shutdown
@@ -206,6 +215,11 @@ func (agt *agent) start() {
 	err = agt.startRPCService()
 	log.Printf("internal RPC handler error: %v", err)
 	agt.cleanup(exit1)
+}
+
+func (agt *agent) printVersion() {
+	fmt.Fprint(agt.stdout, "DUT Control Agent\n")
+	fmt.Fprint(agt.stdout, buildinfo.VersionString())
 }
 
 func main() {
