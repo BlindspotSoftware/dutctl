@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/BlindspotSoftware/dutctl/compare/v0.7.0...v0.8.0) (2025-06-26)
+
+
+### Features
+
+* module flash ([f96db16](https://github.com/BlindspotSoftware/dutctl/commit/f96db1691387e092ccc6e236cba85e3e2a5ac797))
+
 ## [0.7.0](https://github.com/BlindspotSoftware/dutctl/compare/v0.6.0...v0.7.0) (2025-06-26)
 
 
