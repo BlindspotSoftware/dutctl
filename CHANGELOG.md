@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.7.0](https://github.com/BlindspotSoftware/dutctl/compare/v0.6.0...v0.7.0) (2025-06-26)
+
+
+### Features
+
+* module IPMI ([5b42fd2](https://github.com/BlindspotSoftware/dutctl/commit/5b42fd290880f6fd6e578143a4f524eb0d3ae3d7))
+* module PDU ([9a99f2a](https://github.com/BlindspotSoftware/dutctl/commit/9a99f2a04b0299058be969be41c95d71f8ac8d37))
+
+
+### Documentation
+
+* fix link in README ([f07fbe2](https://github.com/BlindspotSoftware/dutctl/commit/f07fbe2c27a5e48a0915d6c8f0ab4a14e41560a8))
+* fix typo in README.md ([a0f9ee0](https://github.com/BlindspotSoftware/dutctl/commit/a0f9ee0d6a569110953c23ced4c21a190cb60844))
+
 ## [0.6.0](https://github.com/BlindspotSoftware/dutctl/compare/v0.5.0...v0.6.0) (2025-04-22)
 
 
