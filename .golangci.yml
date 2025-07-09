@@ -31,7 +31,7 @@ linters:
     # - execinquery - deprecated
     #- exhaustive - It's ok not not set every field in a struct
     #- exhaustruct - It's ok not not set every field in a struct
-    - exportloopref
+    #- exportloopref - Deprecated. Replaced by copyloopvar
     - fatcontext
     - forbidigo
     - forcetypeassert
@@ -99,7 +99,7 @@ linters:
     - stylecheck
     - tagalign
     - tagliatelle
-    - tenv
+    #- tenv - Deprecated. Replaced by usetesting.
     - testableexamples
     - testifylint
     #- testpackage - We don't enforce white box testing
@@ -110,6 +110,7 @@ linters:
     - unparam
     - unused
     - usestdlibvars
+    - usetesting
     - varnamelen
     - wastedassign
     - whitespace
