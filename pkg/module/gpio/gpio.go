@@ -49,8 +49,6 @@ type backendParser func(name string) gpio
 // backendFromOption is the default [backendParser] function.
 // Currently only "devmem" is supported.
 // If the name is not recognized, the 'devmem' is used as a fallback.
-//
-//nolint:ireturn
 func backendFromOption(name string) gpio {
 	switch name {
 	case "devmem":
