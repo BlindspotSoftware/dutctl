@@ -3,7 +3,7 @@ module github.com/BlindspotSoftware/dutctl
 go 1.24.5
 
 require (
-	connectrpc.com/connect v1.16.2
+	connectrpc.com/connect v1.18.1
 	github.com/bougou/go-ipmi v0.7.6
 	github.com/go-playground/validator/v10 v10.22.0
 	github.com/stianeikeland/go-rpio/v4 v4.6.0
