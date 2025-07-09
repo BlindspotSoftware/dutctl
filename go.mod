@@ -1,6 +1,6 @@
 module github.com/BlindspotSoftware/dutctl
 
-go 1.22.1
+go 1.24.5
 
 require (
 	connectrpc.com/connect v1.16.2
