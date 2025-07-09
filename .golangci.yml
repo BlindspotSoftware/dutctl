@@ -158,6 +158,7 @@ linters-settings:
       - stdlib
       - generic
       - "Module"
+      - "gpio"
 
   lll:
     line-length: 140
