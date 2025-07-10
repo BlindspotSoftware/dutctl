@@ -1,4 +1,5 @@
-# This workflow will build a golang project
+# This workflow builds and tests a golang project for every commit in a PR
+# 
 # For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-go
 
 name: Go
@@ -15,6 +16,51 @@ permissions:
   # pull-requests: read
 
 jobs:
+  # This job identifies all commits that need to be tested
+  # For push events: only tests the latest commit
+  # For PR events: tests every commit in the PR
+  commit_list:
+    name: Get Commits to Test
+    runs-on: ubuntu-latest
+    steps:
+      # Checkout with full history to enable commit listing
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # For push events: only test the latest commit (GITHUB_SHA)
+      - name: Get commit list (push)
+        id: get_commit_list_push
+        if: ${{ github.event_name == 'push' }}
+        run: |
+          # Create a single output variable with the latest commit
+          echo "id0=$GITHUB_SHA" > $GITHUB_OUTPUT
+          # Add commit URL to the workflow summary for visibility
+          echo "List of tested commits:" > $GITHUB_STEP_SUMMARY
+          echo "- https://github.com/${{ github.repository }}/commit/$GITHUB_SHA" >> $GITHUB_STEP_SUMMARY
+
+      # For PR events: get all commits in the PR
+      - name: Get commit list (PR)
+        id: get_commit_list_pr
+        if: ${{ github.event_name == 'pull_request' }}
+        run: |
+          # Get all commits between base branch and PR head, in oldest to newest order
+          git rev-list --reverse refs/remotes/origin/${{ github.base_ref }}..${{ github.event.pull_request.head.sha }} | 
+            awk '{ print "id" NR "=" $1 }' > $GITHUB_OUTPUT
+          
+          # If the merge commit differs from the PR head, also test the merge commit
+          git diff --quiet ${{ github.event.pull_request.head.sha }} ${{ github.sha }} || 
+            echo "id0=$GITHUB_SHA" >> $GITHUB_OUTPUT
+          
+          # Create a summary with links to all commits
+          echo "List of tested commits:" > $GITHUB_STEP_SUMMARY
+          sed -n 's,^id[0-9]\+=\(.*\),- https://github.com/${{ github.repository }}/commit/\1,p' -- $GITHUB_OUTPUT >> $GITHUB_STEP_SUMMARY
+
+    # Make the list of commits available to downstream jobs
+    outputs:
+      commits: ${{ toJSON(steps.*.outputs.*) }}
+
+  # Lint job - runs once per workflow execution, not per commit
   golangci-lint:
     name: Lint
     runs-on: ubuntu-latest
@@ -33,55 +79,39 @@ jobs:
         with:
           version: v1.64.8
 
-  build_amd64:
-    name: Build AMD64
+  # Build and test each commit for both architectures
+  # Uses a matrix strategy to create separate job runs for each combination of commit and architecture
+  per_commit_build_test:
+    name: Build & Test  ${{ matrix.arch }}
     runs-on: ubuntu-latest
+    needs: commit_list
+    strategy:
+      # Don't stop all tests if one commit/arch fails
+      fail-fast: false
+      matrix:
+        # Create matrix entries for each combination of commit and architecture
+        commit: ${{ fromJSON(needs.commit_list.outputs.commits) }}
+        arch: [amd64, arm64]
     steps:
-    - uses: actions/checkout@v4
+      # Checkout the specific commit to test
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.commit }}
 
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version-file: 'go.mod'
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
 
-    - run: go version
+      - run: go version
 
-    - name: Build for amd64
-      run: GOARCH=amd64 go build -v ./...
+      - name: Build ${{ matrix.commit }} for ${{ matrix.arch }}
+        run: GOARCH=${{ matrix.arch }} go build -v ./...
+        
+      - name: Unit test ${{ matrix.commit }} for ${{ matrix.arch }}
+        run: go test -v ./...
 
-  build_arm64:
-    name: Build ARM64
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version-file: 'go.mod'
-
-    - run: go version
-
-    - name: Build for arm64
-      run: GOARCH=arm64 go build -v ./...
-
-  test:
-    name: Unit Tests
-    runs-on: ubuntu-latest
-    needs: build_amd64
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version-file: 'go.mod'
-
-    - run: go version
-
-    - name: Run Tests
-      run: go test -v ./...
-
+  # License check runs once per workflow execution
   check-license-lines:
     name: Check License Lines
     runs-on: ubuntu-latest
