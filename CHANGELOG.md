@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/BlindspotSoftware/dutctl/compare/v0.8.0...v0.9.0) (2025-07-14)
+
+
+### Features
+
+* version flag ([c3e04f4](https://github.com/BlindspotSoftware/dutctl/commit/c3e04f40ed993c30dd473230f085475f5cc80282))
+
 ## [0.8.0](https://github.com/BlindspotSoftware/dutctl/compare/v0.7.0...v0.8.0) (2025-06-26)
 
 
