@@ -23,6 +23,8 @@ const _ = connect.IsAtLeastVersion1_13_0
 const (
 	// DeviceServiceName is the fully-qualified name of the DeviceService service.
 	DeviceServiceName = "dutctl.v1.DeviceService"
+	// RelayServiceName is the fully-qualified name of the RelayService service.
+	RelayServiceName = "dutctl.v1.RelayService"
 )
 
 // These constants are the fully-qualified names of the RPCs defined in this package. They're
@@ -41,6 +43,8 @@ const (
 	DeviceServiceDetailsProcedure = "/dutctl.v1.DeviceService/Details"
 	// DeviceServiceRunProcedure is the fully-qualified name of the DeviceService's Run RPC.
 	DeviceServiceRunProcedure = "/dutctl.v1.DeviceService/Run"
+	// RelayServiceRegisterProcedure is the fully-qualified name of the RelayService's Register RPC.
+	RelayServiceRegisterProcedure = "/dutctl.v1.RelayService/Register"
 )
 
 // These variables are the protoreflect.Descriptor objects for the RPCs defined in this package.
@@ -50,6 +54,8 @@ var (
 	deviceServiceCommandsMethodDescriptor = deviceServiceServiceDescriptor.Methods().ByName("Commands")
 	deviceServiceDetailsMethodDescriptor  = deviceServiceServiceDescriptor.Methods().ByName("Details")
 	deviceServiceRunMethodDescriptor      = deviceServiceServiceDescriptor.Methods().ByName("Run")
+	relayServiceServiceDescriptor         = v1.File_dutctl_v1_dutctl_proto.Services().ByName("RelayService")
+	relayServiceRegisterMethodDescriptor  = relayServiceServiceDescriptor.Methods().ByName("Register")
 )
 
 // DeviceServiceClient is a client for the dutctl.v1.DeviceService service.
@@ -196,4 +202,72 @@ func (UnimplementedDeviceServiceHandler) Details(context.Context, *connect.Reque
 
 func (UnimplementedDeviceServiceHandler) Run(context.Context, *connect.BidiStream[v1.RunRequest, v1.RunResponse]) error {
 	return connect.NewError(connect.CodeUnimplemented, errors.New("dutctl.v1.DeviceService.Run is not implemented"))
+}
+
+// RelayServiceClient is a client for the dutctl.v1.RelayService service.
+type RelayServiceClient interface {
+	Register(context.Context, *connect.Request[v1.RegisterRequest]) (*connect.Response[v1.RegisterResponse], error)
+}
+
+// NewRelayServiceClient constructs a client for the dutctl.v1.RelayService service. By default, it
+// uses the Connect protocol with the binary Protobuf Codec, asks for gzipped responses, and sends
+// uncompressed requests. To use the gRPC or gRPC-Web protocols, supply the connect.WithGRPC() or
+// connect.WithGRPCWeb() options.
+//
+// The URL supplied here should be the base URL for the Connect or gRPC server (for example,
+// http://api.acme.com or https://acme.com/grpc).
+func NewRelayServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) RelayServiceClient {
+	baseURL = strings.TrimRight(baseURL, "/")
+	return &relayServiceClient{
+		register: connect.NewClient[v1.RegisterRequest, v1.RegisterResponse](
+			httpClient,
+			baseURL+RelayServiceRegisterProcedure,
+			connect.WithSchema(relayServiceRegisterMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+	}
+}
+
+// relayServiceClient implements RelayServiceClient.
+type relayServiceClient struct {
+	register *connect.Client[v1.RegisterRequest, v1.RegisterResponse]
+}
+
+// Register calls dutctl.v1.RelayService.Register.
+func (c *relayServiceClient) Register(ctx context.Context, req *connect.Request[v1.RegisterRequest]) (*connect.Response[v1.RegisterResponse], error) {
+	return c.register.CallUnary(ctx, req)
+}
+
+// RelayServiceHandler is an implementation of the dutctl.v1.RelayService service.
+type RelayServiceHandler interface {
+	Register(context.Context, *connect.Request[v1.RegisterRequest]) (*connect.Response[v1.RegisterResponse], error)
+}
+
+// NewRelayServiceHandler builds an HTTP handler from the service implementation. It returns the
+// path on which to mount the handler and the handler itself.
+//
+// By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
+// and JSON codecs. They also support gzip compression.
+func NewRelayServiceHandler(svc RelayServiceHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	relayServiceRegisterHandler := connect.NewUnaryHandler(
+		RelayServiceRegisterProcedure,
+		svc.Register,
+		connect.WithSchema(relayServiceRegisterMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	return "/dutctl.v1.RelayService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case RelayServiceRegisterProcedure:
+			relayServiceRegisterHandler.ServeHTTP(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+}
+
+// UnimplementedRelayServiceHandler returns CodeUnimplemented from all methods.
+type UnimplementedRelayServiceHandler struct{}
+
+func (UnimplementedRelayServiceHandler) Register(context.Context, *connect.Request[v1.RegisterRequest]) (*connect.Response[v1.RegisterResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("dutctl.v1.RelayService.Register is not implemented"))
 }
