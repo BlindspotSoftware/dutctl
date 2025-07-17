@@ -13,8 +13,7 @@ service DeviceService {
 }
 
 // ListRequest is sent by the client to request a list of devices connected to the agent.
-message ListRequest {
-}
+message ListRequest {}
 
 // ListResponse is sent by the agent in response to a ListRequest.
 message ListResponse {
@@ -32,7 +31,7 @@ message CommandsResponse {
   repeated string commands = 1;
 }
 
-// DetailsRequest is sent by the client to request further information for specific 
+// DetailsRequest is sent by the client to request further information for specific
 // device or a specific command. The type of information is defined by keyword.
 message DetailsRequest {
   string device = 1;
@@ -44,7 +43,6 @@ message DetailsRequest {
 message DetailsResponse {
   string details = 1;
 }
-
 
 // RunRequest is sent by the client to start a command execution on a device and optionally
 // to further interact with the agent during the command execution.
@@ -101,5 +99,19 @@ message File {
   bytes content = 2;
 }
 
+// RelayService defines the service for forwarding communication via relay server.
+// NOTE: This is an experimental service and may change in the future.
+service RelayService {
+  rpc Register(RegisterRequest) returns (RegisterResponse) {}
+}
 
+// RegisterRequest is sent by a device agent to register with the relay server.
+// NOTE: This is an experimental service and may change in the future.
+message RegisterRequest {
+  repeated string devices = 1; // List of devices the agent is connected to.
+  string address = 2; // Address of the agent sending the request.
+}
 
+// RegisterResponse is sent by the relay server in response to a sucsessful RegisterRequest.
+// NOTE: This is an experimental service and may change in the future.
+message RegisterResponse {}
