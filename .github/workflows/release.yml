@@ -39,11 +39,11 @@ jobs:
 
       - name: Build dutagent for amd64
         if: ${{ steps.release.outputs.release_created }}
-        run: GOOS=linux GOARCH=amd64 go build -o dutagent-${{ steps.release.outputs.tag_name }}-linux-amd64 ./cmds/dutctl 
+        run: GOOS=linux GOARCH=amd64 go build -o dutagent-${{ steps.release.outputs.tag_name }}-linux-amd64 ./cmds/dutagent 
         
       - name: Build dutagent for arm64
         if: ${{ steps.release.outputs.release_created }}
-        run: GOOS=linux GOARCH=arm64 go build -o dutagent-${{ steps.release.outputs.tag_name }}-linux-arm64 ./cmds/dutctl
+        run: GOOS=linux GOARCH=arm64 go build -o dutagent-${{ steps.release.outputs.tag_name }}-linux-arm64 ./cmds/dutagent
 
 
       - name: Upload dutctl-linux-amd64
