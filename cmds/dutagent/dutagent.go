@@ -8,16 +8,20 @@
 package main
 
 import (
+	"context"
+	"crypto/tls"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 
+	"connectrpc.com/connect"
 	"github.com/BlindspotSoftware/dutctl/internal/buildinfo"
 	"github.com/BlindspotSoftware/dutctl/internal/dutagent"
 	"github.com/BlindspotSoftware/dutctl/pkg/dut"
@@ -25,13 +29,16 @@ import (
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 	"gopkg.in/yaml.v3"
+
+	pb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1"
 )
 
 const (
-	addressInfo     = `Server address and port in the format: address:port`
+	addressInfo     = `Address and port to run the agent in the format: address:port`
 	configPathInfo  = `Path to DUT configuration file`
 	checkConfigInfo = `Only validate the provided DUT configuration, not starting the service`
 	dryRunInfo      = `Only run the initialization phase of the modules, not start the (includes validation of the configuration)`
+	serverInfo      = `Optional DUT Server address and port to register with in the format: address:port`
 	versionFlagInfo = `Print version information and exit`
 )
 
@@ -46,6 +53,7 @@ func newAgent(stdout io.Writer, exitFunc func(int), args []string) *agent {
 	fs.StringVar(&agt.configPath, "c", "dutctl.yaml", configPathInfo)
 	fs.BoolVar(&agt.checkConfig, "check-config", false, checkConfigInfo)
 	fs.BoolVar(&agt.dryRun, "dry-run", false, dryRunInfo)
+	fs.StringVar(&agt.server, "server", "", serverInfo)
 	fs.BoolVar(&agt.versionFlag, "v", false, versionFlagInfo)
 	//nolint:errcheck // flag.Parse always returns no error because of flag.ExitOnError
 	fs.Parse(args[1:])
@@ -64,6 +72,7 @@ type agent struct {
 	configPath  string
 	checkConfig bool
 	dryRun      bool
+	server      string
 
 	// state
 	config
@@ -162,7 +171,59 @@ func (agt *agent) startRPCService() error {
 	)
 }
 
+func (agt *agent) registerWithServer() error {
+	log.Printf("Registering with server %q", agt.server)
+
+	client := spawnClient(agt.server)
+	req := connect.NewRequest(&pb.RegisterRequest{
+		Devices: agt.config.Devices.Names(),
+		Address: agt.address,
+	})
+
+	_, err := client.Register(context.Background(), req)
+	if err != nil {
+		return fmt.Errorf("registering with server %q failed: %w", agt.server, err)
+	}
+
+	log.Printf("Successfully registered with server %q", agt.server)
+
+	return nil
+}
+
+// spawnClient creates a new client to the DUT server specified by the server address.
+// TODO: refactor into pkg and reuse in dutctl and dutserver.
+//
+//nolint:ireturn
+func spawnClient(agendURL string) dutctlv1connect.RelayServiceClient {
+	log.Printf("Spawning new client for agent %q", agendURL)
+
+	return dutctlv1connect.NewRelayServiceClient(
+		// Instead of http.DefaultClient, use the HTTP/2 protocol without TLS
+		newInsecureClient(),
+		fmt.Sprintf("http://%s", agendURL),
+		connect.WithGRPC(),
+	)
+}
+
+// TODO: refactor into pkg and reuse in dutctl and dutserver.
+func newInsecureClient() *http.Client {
+	return &http.Client{
+		Transport: &http2.Transport{
+			AllowHTTP: true,
+			DialTLS: func(network, addr string, _ *tls.Config) (net.Conn, error) {
+				// If you're also using this client for non-h2c traffic, you may want
+				// to delegate to tls.Dial if the network isn't TCP or the addr isn't
+				// in an allowlist.
+				return net.Dial(network, addr)
+			},
+			// TODO: Don't forget timeouts!
+		},
+	}
+}
+
 // start orchestrates the dutagent execution.
+//
+//nolint:cyclop
 func (agt *agent) start() {
 	log.SetOutput(agt.stdout)
 
@@ -210,6 +271,13 @@ func (agt *agent) start() {
 	} else if err != nil {
 		printInitErr(err)
 		agt.cleanup(exit1)
+	}
+
+	if agt.server != "" {
+		if err := agt.registerWithServer(); err != nil {
+			log.Printf("Registering with server %q failed: %v", agt.server, err)
+			agt.cleanup(exit1)
+		}
 	}
 
 	err = agt.startRPCService()
