@@ -45,6 +45,14 @@ jobs:
         if: ${{ steps.release.outputs.release_created }}
         run: GOOS=linux GOARCH=arm64 go build -o dutagent-${{ steps.release.outputs.tag_name }}-linux-arm64 ./cmds/dutagent
 
+      - name: Build dutserver for amd64
+        if: ${{ steps.release.outputs.release_created }}
+        run: GOOS=linux GOARCH=amd64 go build -o dutserver-${{ steps.release.outputs.tag_name }}-linux-amd64 ./cmds/exp/dutserver 
+        
+      - name: Build dutserver for arm64
+        if: ${{ steps.release.outputs.release_created }}
+        run: GOOS=linux GOARCH=arm64 go build -o dutserver-${{ steps.release.outputs.tag_name }}-linux-arm64 ./cmds/exp/dutserver
+
 
       - name: Upload dutctl-linux-amd64
         if: ${{ steps.release.outputs.release_created }}
@@ -63,6 +71,18 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload ${{ steps.release.outputs.tag_name }} ./dutagent-${{ steps.release.outputs.tag_name }}-linux-arm64
+
+      - name: Upload dutserver-linux-amd64
+        if: ${{ steps.release.outputs.release_created }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload ${{ steps.release.outputs.tag_name }} ./dutserver-${{ steps.release.outputs.tag_name }}-linux-amd64
+
+      - name: Upload dutserver-linux-arm64
+        if: ${{ steps.release.outputs.release_created }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload ${{ steps.release.outputs.tag_name }} ./dutserver-${{ steps.release.outputs.tag_name }}-linux-arm64
 
         
 
