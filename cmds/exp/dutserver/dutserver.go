@@ -79,21 +79,19 @@ func (svr *server) watchInterrupt() {
 // startRPCService starts the RPC service, that ideally listens for incoming
 // connections forever. It always returns an non-nil error.
 func (svr *server) startRPCService() error {
-	// TODO: populate agents map with registered DUT agents.
-	// For now, it is hardcoded test data.
+	// TODO: load registered DUTs from a file.
 	service := &rpcService{
-		agents: map[string]*agent{
-			"device1": {
-				address: "localhost:1025",
-			},
-			"device2": {
-				address: "localhost:1026",
-			},
-		},
+		agents: make(map[string]*agent),
 	}
 
 	mux := http.NewServeMux()
+	// Register the RPC service handler used by the dutctl client to
+	// communicate with the server.
 	path, handler := dutctlv1connect.NewDeviceServiceHandler(service)
+	mux.Handle(path, handler)
+	// Register the RPC service handler used by dut agents to register themselves
+	// and their devices with the server.
+	path, handler = dutctlv1connect.NewRelayServiceHandler(service)
 	mux.Handle(path, handler)
 
 	//nolint:gosec

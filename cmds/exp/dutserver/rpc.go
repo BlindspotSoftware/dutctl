@@ -48,6 +48,8 @@ func (a *agent) conn() dutctlv1connect.DeviceServiceClient {
 }
 
 // rpcService is the service implementation for the RPCs provided by dutserver.
+// It implements both, the DeviceService used by clients as they would use with dutagents
+// and the RelayService used by agents to register with the server.
 type rpcService struct {
 	// agents holds handles of the registered DUT agents.
 	agents map[string]*agent
@@ -65,6 +67,25 @@ func (s *rpcService) findAgent(device string) (*agent, error) {
 	}
 
 	return nil, errors.New("device not found: " + device)
+}
+
+// addAgent tries to register devices handled by an agent with address.
+// If one of the provided devices already exists an error is returned and none of the deviced will be stored.
+func (s *rpcService) addAgent(address string, devices []string) error {
+	s.Lock()
+	defer s.Unlock()
+
+	for _, device := range devices {
+		if _, exists := s.agents[device]; exists {
+			return fmt.Errorf("device %q already registered", device)
+		}
+	}
+
+	for _, device := range devices {
+		s.agents[device] = &agent{address: address}
+	}
+
+	return nil
 }
 
 // List is the handler for the List RPC.
@@ -363,4 +384,38 @@ func newInsecureClient() *http.Client {
 			// TODO: Don't forget timeouts!
 		},
 	}
+}
+
+func (s *rpcService) Register(
+	_ context.Context,
+	req *connect.Request[pb.RegisterRequest],
+) (*connect.Response[pb.RegisterResponse], error) {
+	log.Println("Server received Register request")
+
+	addr := req.Msg.GetAddress()
+	if addr == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("agent address is not set"))
+	}
+
+	if len(req.Msg.GetDevices()) == 0 {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("empty device list"))
+	}
+
+	for i, dev := range req.Msg.GetDevices() {
+		if dev == "" {
+			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("device %d has empty name", i+1))
+		}
+	}
+
+	log.Printf("Registering agent %q with devices %v", addr, req.Msg.GetDevices())
+
+	if err := s.addAgent(addr, req.Msg.GetDevices()); err != nil {
+		return nil, connect.NewError(connect.CodeAlreadyExists, fmt.Errorf("adding agent %q: %w", addr, err))
+	}
+
+	res := connect.NewResponse(&pb.RegisterResponse{})
+
+	log.Print("Register-RPC finished")
+
+	return res, nil
 }
