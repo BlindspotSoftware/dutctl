@@ -37,8 +37,7 @@
         },
         {
             "type": "chore",
-            "section": "Chore",
-            "hidden": true
+            "section": "Other Work"
         },
         {
             "type": "revert",
