@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.9.0](https://github.com/BlindspotSoftware/dutctl/compare/v0.8.0...v0.9.0) (2025-07-20)
+
+
+### Features
+
+* version flag ([c3e04f4](https://github.com/BlindspotSoftware/dutctl/commit/c3e04f40ed993c30dd473230f085475f5cc80282))
+
+
+### Other Work
+
+* bump connectrpc.com/connect from 1.16.2 to 1.18.1 ([1d0fe99](https://github.com/BlindspotSoftware/dutctl/commit/1d0fe997e550b552a31a554910fca440163638b1))
+* bump github.com/bougou/go-ipmi from 0.7.6 to 0.7.7 ([545d85c](https://github.com/BlindspotSoftware/dutctl/commit/545d85c1653bf784925634b7a7596f5b3129fb94))
+* bump github.com/go-playground/validator/v10 ([ba24a08](https://github.com/BlindspotSoftware/dutctl/commit/ba24a0811cd26bd1531d7b88addd375ed8c44a4e))
+* bump go version to 1.24 ([32aed17](https://github.com/BlindspotSoftware/dutctl/commit/32aed176c8ada72faa160dc5fcd245d13c9b5fdb))
+* bump golang.org/x/crypto from 0.39.0 to 0.40.0 ([3948244](https://github.com/BlindspotSoftware/dutctl/commit/3948244842553cec38099cc9b64802a0af6f5b27))
+* bump golang.org/x/net from 0.28.0 to 0.41.0 ([d121903](https://github.com/BlindspotSoftware/dutctl/commit/d121903dab7fc62f27bfab87c8efec6d446fbbab))
+* bump golang.org/x/net from 0.41.0 to 0.42.0 ([bc911e1](https://github.com/BlindspotSoftware/dutctl/commit/bc911e128badbfe4f8eb033450a530dfc41de864))
+* bump google.golang.org/protobuf from 1.34.2 to 1.36.6 ([5afb05a](https://github.com/BlindspotSoftware/dutctl/commit/5afb05ad2010756cf45840e10d6f4a09a1d71f34))
+* create dependabot.yml ([828519b](https://github.com/BlindspotSoftware/dutctl/commit/828519be937a8e1b73976dfd1f6d8edf00a3e046))
+
 ## [0.8.0](https://github.com/BlindspotSoftware/dutctl/compare/v0.7.0...v0.8.0) (2025-06-26)
 
 
