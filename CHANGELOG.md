@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.10.0](https://github.com/BlindspotSoftware/dutctl/compare/v0.9.0...v0.10.0) (2025-07-20)
+
+
+### Features
+
+* dutagent provides flag to register with dutserver ([9bab513](https://github.com/BlindspotSoftware/dutctl/commit/9bab51376c634784a9b3622390ba50e4109734be))
+* dutserver device registration ([21c1088](https://github.com/BlindspotSoftware/dutctl/commit/21c10882bf3d3539acc1bcc4cff00c79daa7999d))
+* dutserver PoC (experimental) ([6b92edf](https://github.com/BlindspotSoftware/dutctl/commit/6b92edf468f480e70ba96e3690aa3d9f1b114fca))
+* protobuf RelayService ([a406935](https://github.com/BlindspotSoftware/dutctl/commit/a40693505f9d01f4504d5ee66d9e862491a75aad))
+
+
+### Documentation
+
+* add DUT server information ([87faf07](https://github.com/BlindspotSoftware/dutctl/commit/87faf07d1c325c44b97e9fe29e5872f7ebeac6d0))
+
 ## [0.9.0](https://github.com/BlindspotSoftware/dutctl/compare/v0.8.0...v0.9.0) (2025-07-20)
 
 
