@@ -1,35 +1,111 @@
-# DUT Control
-Device-under-Test (DUT) Control is an abstraction layer for remote hardware access.
 
-For details on the system architecture see [docs](./docs).
+# DUT Control: Unified Device Management for Open Firmware Development
 
-| Supported Client OS | Supported DUT Agent Hardware |
-| ------------------- | ---------------------------- |
-| Linux               | RaspberryPi 4                |
+dutctl stands for "Device-under-Test Control" and is an open-source command-line utility and service ecosystem for managing development and test devices in firmware environments. By providing a unified interface to interact with boards and test fixtures across platforms, dutctl eliminates the fragmentation of device management tools that has long plagued firmware workflows. The project features remote device control, command streaming, multi-architecture testing, and a flexible plugin architecture for extensibility.
 
-| Modules                                                           | Status             |
-| ----------------------------------------------------------------- | ------------------ |
-| [GPIO Button](./pkg/module/gpio/README.md)                        | :white_check_mark: |
-| [GPIO Switch](./pkg/module/gpio/README.md)                        | :white_check_mark: |
-| [IPMI Power Control](./pkg/module/gpio/README.md)                 | :white_check_mark: |
-| [Power Distribution Unit, Intellinet](./pkg/module/pdu/README.md) | :white_check_mark: |
-| Power Distribution Unit, Delock                                   | :x:                |
-| [SPI Flasher, flashrom](./pkg/module/flash/README.md)             | :white_check_mark: |
-| SPI Flasher, flashprog                                            | :x:                |
-| [Serial Console](./pkg/module/serial/README.md)                   | :white_check_mark: |
-| [Shell Execution](./pkg/module/shell/README.md)                   | :white_check_mark: |
-| [Secure Shell (SSH)](./pkg/module/ssh/README.md)                  | :white_check_mark: |
+[![GitHub Release](https://img.shields.io/github/v/release/BlindspotSoftware/dutctl?include_prereleases&sort=semver&display_name=release)](https://github.com/BlindspotSoftware/dutctl/releases) ![Build Status](https://img.shields.io/github/actions/workflow/status/BlindspotSoftware/dutctl/go.yml?branch=main)[![License](https://img.shields.io/github/license/BlindspotSoftware/dutctl)](https://github.com/BlindspotSoftware/dutctl/blob/main/LICENSE) [![Go Report Card](https://goreportcard.com/badge/github.com/BlindspotSoftware/dutctl)](https://goreportcard.com/report/github.com/BlindspotSoftware/dutctl)
 
 
+---
 
-# Roadmap
-This project is in it's kickoff phase. Beta-Versions will be released onece the initial system architecture is set up and and the first module is implemented. More modules will then follow in further beta versions until a set of features is supported to control a DUT for a basic development cycle. See the project's [milstones](https://github.com/BlindspotSoftware/dutctl/milestones?direction=asc&sort=due_date&state=open) for more details.
+## Overview
 
-# Contributing
-Until MVP is finished, external contributions most likely won't be handled.
+dutctl is designed for firmware developers, QA teams, and CI/CD pipelines, simplifying complex device interactions through intuitive commands, easy configuration and scalability. The platform supports both local and remote device management through its agent-server architecture, enabling efficient collaboration in distributed teams. 
 
---------
-This project is supported by
+```
+┌────────────┐        ┌────────────┐        ┌───────────┐
+│ Client     │        │ Agent      │        │ Device-   │
+│ (e.g.      │ Network│ (e.g. RPi4)│  Wired │ under-    │
+│ Laptop)    │───────▶│            │───────▶│ Test      │
+└────────────┘  RPC   └────────────┘        └───────────┘
+                
+```
 
-![image](https://github.com/user-attachments/assets/1237fcaa-b3c3-4031-afac-34d789e8c096)
+Key features include:
+- Unified command interface for diverse devices
+- Remote device management and command streaming
+- Multi-architecture and distributed testing
+- Extensible plugin system for new hardware and protocols
+
+For detailed information on the system architecture, see the [Documentation](./docs/README.md).
+
+| Supported Client OS | Recommended DUT Agent Hardware |
+| ------------------- | ------------------------------ |
+| Linux               | RaspberryPi 4                  |
+
+## Getting Started
+
+Download the [latest release](https://github.com/BlindspotSoftware/dutctl/releases) or use the [go toolchain](https://go.dev/) to install the components: `go install github.com/BlindspotSoftware/dutctl/cmds/dutctl@latest github.com/BlindspotSoftware/dutctl/cmds/dutagent@latest`
+
+
+1. **Start the DUT Agent**
+   ```bash
+   dutagent -a localhost:1024 -c ./contrib/dutagent-cfg-example.yaml
+   ```
+   Run the DUT Agent locally with an example configuration in a separate terminal session.
+   This test configuration does not require a connected DUT.
+
+2. **Play around with the DUT Client**
+   ```bash
+   # dutctl connect to localhost:1024 by default.
+   # Use 'list' to see the available devices that are managed be the agent:
+   dutctl list
+
+   # You can discover the available commands per device and run them. 
+   # Check out the usage information to learn how:
+   dutctl -h
+   ```
+
+## Public Interfaces
+
+With the current pre-release state, we are working towards a stable and backwards compatible v1. Therefore we identified the following public interfaces, which will become stable with the first major release:
+
+1) The command line interfaces of the project's apps
+   - The client, see `dutctl -h`
+   - The agent, see `dutagent -h`
+   - The relay server (upcoming, currently PoC)
+
+2) The configuring the agents
+   - [YAML specification](./docs/dutagent-config.md)
+
+3) The RPC communication protocol for calling agents
+   - [Protobuf definitions](./protobuf/dutctl/v1/dutctl.proto)
+
+## Individual Setup
+
+If you are ready to get your hands dirty, hook up your DUT to a singel board computer (we recomend RPi4) and launch the DUT agent on it. Below you can find the currently supported modules with example configurations. Read on [here](./docs/dutagent-config.md), to learn how you can adapt the agent's configuration to your needs
+
+| Modules                                                           | Status                   |
+| ----------------------------------------------------------------- | ------------------------ |
+| [GPIO Button](./pkg/module/gpio/README.md)                        | :white_check_mark:       |
+| [GPIO Switch](./pkg/module/gpio/README.md)                        | :white_check_mark:       |
+| [IPMI Power Control](./pkg/module/gpio/README.md)                 | :white_check_mark:       |
+| [Power Distribution Unit, Intellinet](./pkg/module/pdu/README.md) | :white_check_mark:       |
+| Power Distribution Unit, Delock                                   | :hourglass_flowing_sand: |
+| [SPI Flasher, flashrom](./pkg/module/flash/README.md)             | :white_check_mark:       |
+| SPI Flasher, flashprog                                            | :hourglass_flowing_sand: |
+| [Serial Console](./pkg/module/serial/README.md)                   | :white_check_mark:       |
+| [Shell Execution](./pkg/module/shell/README.md)                   | :white_check_mark:       |
+| [Secure Shell (SSH)](./pkg/module/ssh/README.md)                  | :white_check_mark:       |
+
+
+If you have special needs, you can extend the system with your own modules. Read about the [module plugin system](./docs/module_guide.md).
+
+## DUT Control at Scale
+
+If you have multiple devices hooked up to multiple agents at differen location, you may wounder if you can handle them without connecting to the respective agents every time.
+[DUT server]((./cmds/exp/dutserver/README.md)) is there for the rescue: It is at proof-of-concept state right now, but you can already [try it out](./cmds/exp/dutserver/README.md).
+
+## Contributing
+
+Contributions are welcome! Please see our [Contributing Guide](./CONTRIBUTING.md) for details on how to get involved.
+
+
+---
+
+This project is supported by the [NLnet Foundation](https://nlnet.nl/) and the Next Generation Internet (NGI) Zero Commons Fund. The NGI0 Commons Fund is made possible with financial support from the European Commission's [Next Generation Internet](https://ngi.eu/) programme.
+
+|                                                            |                  |               |
+| -------------------------------------------------------------- | ------------------------ | ---- |
+| ![nlnet](./assets/nlnet.png) | ![European Union](./assets/EU.png) | ![NGI0](./assets/NGI0.png)|
 
