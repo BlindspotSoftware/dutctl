@@ -37,7 +37,7 @@ rules:
 # test:     Add tests, increase coverage, (if not initially committed with a fix or feat)
 
   type-enum:
-    - 2
+    - 2 # 0 disables the rule. For 1 it will be considered a warning for 2 an error
     - always
     - - build
       - chore
@@ -54,12 +54,12 @@ rules:
 # then one package.
 
   scope-empty: 
-    - 2
+    - 2 # 0 disables the rule. For 1 it will be considered a warning for 2 an error
     - always
     
 # Require signed-off commits
 
   signed-off-by: 
-    - 1
+    - 1 # 0 disables the rule. For 1 it will be considered a warning for 2 an error
     - always 
     - 'Signed-off-by:'
