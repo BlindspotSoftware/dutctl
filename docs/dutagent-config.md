@@ -34,15 +34,15 @@ could look like.
 | Attribute | Type | Default | Description | Mandatory |
 | --- | --- | --- | --- | --- |
 | description | string |  | Command description | no |
-| Modules | [] [Module](#Module) |  | A command may be composed of multiple steps to achieve its purpose. The list of modules represent these steps.The order of this list is important, though. Exactly one of the modules must be set as the main module. All arguments to a command are passed to its main module. The main modules usage information is also used as the command help text.| yes |
+| Modules | [] [Module](#Module) |  | A command may be composed of multiple steps to achieve its purpose. The list of modules represent these steps.The order of this list is important, though. Exactly one of the modules must be set as the main module. All arguments to a command are passed to its main module. The main modules usage information is also used as the command help text. If a Command is composed of only one module, this module becomes the main module implicitly.| yes |
 
 ### Module
 
 | Attribute | Type | Default | Description | Mandatory |
 | --- | --- | --- | --- | --- |
 | module | string |  | The module's name also serves as its identifier and must be unique. | yes |
-| main | bool | false | All arguments to a command are passed to its main module. The main modules usage information is also used as the command help text. | exactly once per command |
-| args | []string | nil | If a module is not an commands main module, it does not get any arguments passed at runtime, instead arguments can be passed here.| when main is false |
+| main | bool | false | All arguments to a command are passed to its main module. The main modules usage information is also used as the command help text. Can be omitted, if only one modules exists within the command.| exactly once per command |
+| args | []string | nil | If a module is **not** an commands main module, it does not get any arguments passed at runtime, instead arguments can be passed here.| no, only applies if `main` is set |
 | options | map[string]any |  | A module can be configured via key-value pairs. The type of the value is generic and depends on the implementation of the module.| yes |
 
 > [!IMPORTANT]  
