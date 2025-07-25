@@ -54,6 +54,19 @@ Unsure where to begin contributing to dutctl? You can start by looking through t
    - Install golangci-lint (see Code Quality section below)
    - Set up commit hooks for conventional commits (see Conventional Commits section below)
 
+### Developer Certificate of Origin
+
+The [Developer Certificate of Origin (DCO)](https://developercertificate.org/) is a lightweight way for contributors to certify that they wrote or otherwise have the right to submit the code they are contributing to the .
+
+By adding a _Signed-off-by_ line to commit messages, you adhere to these requirements:
+```
+This is my commit message
+
+Signed-off-by: Random J Developer <random@developer.example.org>
+```
+> [!TIP]
+> Use the '-s' flag on git commits to append this automatically.
+
 ### Conventional Commits
 
 This project uses [Conventional Commits](https://www.conventionalcommits.org/) for its commit message format.
