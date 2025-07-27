@@ -1,8 +1,6 @@
 {
     "release-type": "go",
     "bump-minor-pre-major": true,
-    "prerelease": true,
-    "prerelease-type": "alpha",
     "pull-request-title-pattern": "chore: release ${version}",
     "include-component-in-tag": false,
     "include-v-in-tag": true,
