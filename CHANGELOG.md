@@ -1,5 +1,29 @@
 # Changelog
 
+## [1.0.0-alpha.1](https://github.com/BlindspotSoftware/dutctl/compare/v0.10.0...v1.0.0-alpha.1) (2025-07-27)
+
+
+### Documentation
+
+* clarify args field of dutagent config ([f7c0dca](https://github.com/BlindspotSoftware/dutctl/commit/f7c0dca49db11f39373b18136d940008fb9c464a))
+* update README for pre-release ([e438733](https://github.com/BlindspotSoftware/dutctl/commit/e43873318484723198e5bb4ae2063237aa28f15e))
+
+
+### Other Work
+
+* add blank issue templates ([8b33468](https://github.com/BlindspotSoftware/dutctl/commit/8b33468a532558abb8a6d18bee30615c4eea8ba4))
+* add CODE_OF_CONDUCT.md ([9c273fa](https://github.com/BlindspotSoftware/dutctl/commit/9c273faee5e93eb9949e3f29659e754f5b1bb431))
+* add GOVERNANCE.md ([d02511e](https://github.com/BlindspotSoftware/dutctl/commit/d02511e498270dc5d38e867f3350bc93851770a1))
+* add issue template for bugs ([4459842](https://github.com/BlindspotSoftware/dutctl/commit/4459842ec8ff1cbc6b43f6959750a1ff78df1caa))
+* add issue templates for feature requests ([a8896b2](https://github.com/BlindspotSoftware/dutctl/commit/a8896b27fe90554c696c5fdbf096328e4f7a9022))
+* create SECURITY.md ([c7f7ec1](https://github.com/BlindspotSoftware/dutctl/commit/c7f7ec104394b557fbed8cc7a744c16e7f661da3))
+* fix release-please config ([32cf2e3](https://github.com/BlindspotSoftware/dutctl/commit/32cf2e32b02af543cddac769735352a016b0ef0e))
+* set pre-release tag manually ([c46e090](https://github.com/BlindspotSoftware/dutctl/commit/c46e090af56ac651955f0bedb957e14109cc3f77))
+* set release strategy to alpha pre-release ([a9792f7](https://github.com/BlindspotSoftware/dutctl/commit/a9792f7a24d84ccb149cc794b1287781a5839af7))
+* update CONTRIBUTING.md ([8fc6586](https://github.com/BlindspotSoftware/dutctl/commit/8fc658614b09392677fe56eaa4301fcd544a0e8e))
+* update DCO check ([49ed28f](https://github.com/BlindspotSoftware/dutctl/commit/49ed28fe720d87fa6da61f8203b33923ded8be4c))
+* update license to 2025 ([25667d9](https://github.com/BlindspotSoftware/dutctl/commit/25667d9550fd941b9f5642678ca3d727d2a0b14d))
+
 ## [0.10.0](https://github.com/BlindspotSoftware/dutctl/compare/v0.9.0...v0.10.0) (2025-07-20)
 
 
