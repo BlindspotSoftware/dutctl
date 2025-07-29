@@ -7,7 +7,6 @@ package dummy
 
 import (
 	"context"
-	"fmt"
 	"log"
 
 	"github.com/BlindspotSoftware/dutctl/pkg/module"
@@ -48,14 +47,11 @@ func (d *Status) Deinit() error {
 func (d *Status) Run(_ context.Context, s module.Session, args ...string) error {
 	log.Println("dummy.Status module: Run called")
 
-	s.Print("Hello from dummy status module")
-
-	str := fmt.Sprintf("Called with %d arguments", len(args))
-	s.Print(str)
+	s.Println("Hello from dummy status module")
+	s.Printf("Called with %d arguments\n", len(args))
 
 	for i, arg := range args {
-		str := fmt.Sprintf("Arg %d: %s", i, arg)
-		s.Print(str)
+		s.Printf("Arg %d: %s\n", i, arg)
 	}
 
 	return nil
