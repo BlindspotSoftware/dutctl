@@ -169,7 +169,7 @@ func (b *Button) Run(_ context.Context, s module.Session, args ...string) error 
 		return err
 	}
 
-	s.Print(fmt.Sprintf("Button pressed for %s", duration))
+	s.Printf("Button pressed for %s\n", duration)
 
 	return nil
 }

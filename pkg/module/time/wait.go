@@ -104,8 +104,7 @@ func (w *Wait) Run(_ context.Context, s module.Session, args ...string) error {
 		duration = w.duration
 	}
 
-	str := fmt.Sprintf("Waiting for %s", duration)
-	s.Print(str)
+	s.Printf("Waiting for %s\n", duration)
 
 	time.Sleep(duration)
 

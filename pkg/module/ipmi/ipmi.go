@@ -134,7 +134,7 @@ func (i *IPMI) Run(ctx context.Context, s module.Session, args ...string) error 
 	}
 
 	if len(args) == 0 {
-		s.Print("No command specified. Try 'help' for usage.")
+		s.Println("No command specified. Try 'help' for usage.")
 
 		return nil
 	}
@@ -147,8 +147,8 @@ func (i *IPMI) Run(ctx context.Context, s module.Session, args ...string) error 
 	case status:
 		return i.handleStatusCommand(ctx, s)
 	default:
-		s.Print("Unknown command: " + command)
-		s.Print("Available commands: on, off, cycle, reset, status")
+		s.Println("Unknown command: " + command)
+		s.Println("Available commands: on, off, cycle, reset, status")
 
 		return nil
 	}
@@ -180,7 +180,7 @@ func (i *IPMI) handlePowerCommand(ctx context.Context, s module.Session, command
 		return fmt.Errorf("power %s command failed: %v", command, err)
 	}
 
-	s.Print(message)
+	s.Println(message)
 
 	return nil
 }
@@ -196,7 +196,7 @@ func (i *IPMI) handleStatusCommand(ctx context.Context, s module.Session) error 
 		powerStatus = "On"
 	}
 
-	s.Print(fmt.Sprintf("Device power status: %s", powerStatus))
+	s.Printf("Device power status: %s\n", powerStatus)
 
 	return nil
 }

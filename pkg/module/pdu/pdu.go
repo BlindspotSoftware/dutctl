@@ -113,7 +113,7 @@ func (p *PDU) Run(ctx context.Context, s module.Session, args ...string) error {
 	}
 
 	if len(args) == 0 {
-		s.Print("No command specified. Call 'help' for usage.")
+		s.Println("No command specified. Call 'help' for usage.")
 
 		return nil
 	}
@@ -126,8 +126,8 @@ func (p *PDU) Run(ctx context.Context, s module.Session, args ...string) error {
 	case status:
 		return p.status(ctx, s)
 	default:
-		s.Print("Unknown command: " + cmd)
-		s.Print("Available commands: on, off, toggle, status")
+		s.Println("Unknown command: " + cmd)
+		s.Println("Available commands: on, off, toggle, status")
 
 		return nil
 	}
@@ -176,7 +176,7 @@ func (p *PDU) setPower(ctx context.Context, s module.Session, state string) erro
 	}
 	defer resp.Body.Close()
 
-	s.Print(fmt.Sprintf("PDU outlet%d power set to '%s' successfully", p.Outlet, state))
+	s.Printf("PDU outlet%d power set to '%s' successfully\n", p.Outlet, state)
 
 	return nil
 }
@@ -198,7 +198,7 @@ func (p *PDU) status(ctx context.Context, s module.Session) error {
 		return err
 	}
 
-	s.Print(fmt.Sprintf("PDU outlet%d state: %s", p.Outlet, outletValue))
+	s.Printf("PDU outlet%d state: %s\n", p.Outlet, outletValue)
 
 	return nil
 }

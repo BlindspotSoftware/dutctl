@@ -51,10 +51,8 @@ func (d *FT) Deinit() error {
 func (d *FT) Run(_ context.Context, s module.Session, args ...string) error {
 	log.Println("dummy.FT module: Run called")
 
-	s.Print("Hello from dummy file transfer module")
-
-	str := fmt.Sprintf("Called with %d arguments", len(args))
-	s.Print(str)
+	s.Println("Hello from dummy file transfer module")
+	s.Printf("Called with %d arguments\n", len(args))
 
 	const expectedArgsCnt = 2
 	if len(args) != expectedArgsCnt {
@@ -62,8 +60,7 @@ func (d *FT) Run(_ context.Context, s module.Session, args ...string) error {
 	}
 
 	inFile := args[0]
-	str = fmt.Sprintf("Requesting file %q passed in arg[0] as input", inFile)
-	s.Print(str)
+	s.Printf("Requesting file %q passed in arg[0] as input\n", inFile)
 
 	fileReader, err := s.RequestFile(inFile)
 	if err != nil {
@@ -95,8 +92,7 @@ func (d *FT) Run(_ context.Context, s module.Session, args ...string) error {
 		return fmt.Errorf("failed to send file: %v", err)
 	}
 
-	str = fmt.Sprintf("File operated successfully, delivered %q as passed in arg[1] as output", outFile)
-	s.Print(str)
+	s.Printf("File operated successfully, delivered %q as passed in arg[1] as output\n", outFile)
 
 	return nil
 }

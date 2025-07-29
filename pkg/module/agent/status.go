@@ -58,7 +58,7 @@ func (m *Status) Run(_ context.Context, s module.Session, _ ...string) error {
 		return fmt.Errorf("failed to run uname: %v", err)
 	}
 
-	s.Print(out.String())
+	s.Println(out.String())
 
 	return nil
 }
