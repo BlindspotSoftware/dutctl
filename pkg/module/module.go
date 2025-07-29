@@ -51,9 +51,17 @@ type Module interface {
 // Session provides an environment / a context for a module.
 // Via the Session interface, modules can interact with the client during execution.
 type Session interface {
+	// Print sends a message to the client.
+	// The message is displayed in the console or GUI of the client.
 	Print(text string)
+	// Console returns the stdin, stdout and stderr streams for the module.
+	// It thus indicates to the client that the module may wants to interact with the user
+	// via standard input and output streams.
 	Console() (stdin io.Reader, stdout, stderr io.Writer)
+	// RequestFile requests a file from the client.
+	// The file is identified by its name and is made available to the module via the returned io.Reader.
 	RequestFile(name string) (io.Reader, error)
+	// SendFile sends a file to the client.
 	SendFile(name string, r io.Reader) error
 }
 
