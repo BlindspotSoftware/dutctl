@@ -4,6 +4,7 @@
 package dutagent
 
 import (
+	"fmt"
 	"io"
 	"log"
 
@@ -25,8 +26,16 @@ type session struct {
 	currentFile string
 }
 
-func (s *session) Print(text string) {
-	s.printCh <- text
+func (s *session) Print(a ...any) {
+	s.printCh <- fmt.Sprint(a...)
+}
+
+func (s *session) Printf(format string, a ...any) {
+	s.printCh <- fmt.Sprintf(format, a...)
+}
+
+func (s *session) Println(a ...any) {
+	s.printCh <- fmt.Sprintln(a...)
 }
 
 //nolint:nonamedreturns

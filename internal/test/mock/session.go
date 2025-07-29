@@ -6,6 +6,7 @@
 package mock
 
 import (
+	"fmt"
 	"io"
 
 	"github.com/BlindspotSoftware/dutctl/pkg/module"
@@ -29,9 +30,19 @@ type Session struct {
 
 var _ module.Session = &Session{}
 
-func (m *Session) Print(text string) {
+func (m *Session) Print(a ...any) {
 	m.PrintCalled = true
-	m.PrintText = text
+	m.PrintText = fmt.Sprint(a...)
+}
+
+func (m *Session) Printf(format string, a ...any) {
+	m.PrintCalled = true
+	m.PrintText = fmt.Sprintf(format, a...)
+}
+
+func (m *Session) Println(a ...any) {
+	m.PrintCalled = true
+	m.PrintText = fmt.Sprintln(a...)
 }
 
 //nolint:nonamedreturns
