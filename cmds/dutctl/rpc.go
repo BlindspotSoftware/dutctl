@@ -106,7 +106,7 @@ func (app *application) runRPC(device, command string, cmdArgs []string) error {
 			//nolint:protogetter
 			switch msg := res.Msg.(type) {
 			case *pb.RunResponse_Print:
-				fmt.Fprintln(app.stdout, string(msg.Print.GetText()))
+				fmt.Fprint(app.stdout, string(msg.Print.GetText()))
 			case *pb.RunResponse_Console:
 				switch consoleData := msg.Console.Data.(type) {
 				case *pb.Console_Stdout:
