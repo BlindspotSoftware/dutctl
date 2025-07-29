@@ -51,9 +51,15 @@ type Module interface {
 // Session provides an environment / a context for a module.
 // Via the Session interface, modules can interact with the client during execution.
 type Session interface {
-	// Print sends a message to the client.
+	// Print sends a message to the client. Implementations should wrap [fmt.Sprint].
 	// The message is displayed in the console or GUI of the client.
-	Print(text string)
+	Print(a ...any)
+	// Printf sends a formatted message to the client. Implementations should wrap [fmt.Sprintf].
+	// The message is displayed in the console or GUI of the client.
+	Printf(format string, a ...any)
+	// Println sends a message with appended newline to the client. Implementations should wrap [fmt.Sprintln].
+	// The message is displayed in the console or GUI of the client.
+	Println(a ...any)
 	// Console returns the stdin, stdout and stderr streams for the module.
 	// It thus indicates to the client that the module may wants to interact with the user
 	// via standard input and output streams.
