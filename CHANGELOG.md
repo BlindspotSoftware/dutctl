@@ -1,5 +1,31 @@
 # Changelog
 
+## [2.0.0-alpha.1](https://github.com/BlindspotSoftware/dutctl/compare/v1.0.0-alpha.1...v2.0.0-alpha.1) (2025-07-30)
+
+
+### ⚠ BREAKING CHANGES
+
+* The client does not add an extra newline to received Print messages anymore.
+
+### Features
+
+* extend module.Session interface  with fmt-style print functions ([3432675](https://github.com/BlindspotSoftware/dutctl/commit/34326753a2a6afc4722329d5e87a8ca6caa89ba4))
+
+
+### Bug Fixes
+
+* remove extra newline for print messages ([afe31fe](https://github.com/BlindspotSoftware/dutctl/commit/afe31fe40513d431ab9ecf5cef24c9620d332255))
+
+
+### Documentation
+
+* explain module.Session interface ([3e9612e](https://github.com/BlindspotSoftware/dutctl/commit/3e9612eb677d904b3ea634c0d6a5f28e1afabcaf))
+
+
+### Other Work
+
+* modules use session.Print/f/ln functions ([a5acb8f](https://github.com/BlindspotSoftware/dutctl/commit/a5acb8fca7a7499bbc7af76c03e47ad63e791c19))
+
 ## [1.0.0-alpha.1](https://github.com/BlindspotSoftware/dutctl/compare/v0.10.0...v1.0.0-alpha.1) (2025-07-27)
 
 
