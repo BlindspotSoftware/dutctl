@@ -19,6 +19,7 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/BlindspotSoftware/dutctl/internal/buildinfo"
+	"github.com/BlindspotSoftware/dutctl/internal/output"
 	"github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1/dutctlv1connect"
 	"golang.org/x/net/http2"
 )
@@ -77,6 +78,13 @@ func newApp(stdin io.Reader, stdout, stderr io.Writer, exitFunc func(int), args 
 	fs.Parse(args[1:])
 	app.args = fs.Args()
 
+	// Setup output formatter
+	app.formatter = output.New(output.Config{
+		Stdout:  stdout,
+		Stderr:  stderr,
+		Verbose: true,
+	})
+
 	return &app
 }
 
@@ -93,6 +101,7 @@ type application struct {
 	printFlagDefaults func()
 
 	rpcClient dutctlv1connect.DeviceServiceClient
+	formatter output.Formatter
 }
 
 func (app *application) setupRPCClient() {
@@ -143,20 +152,12 @@ func (app *application) start() {
 			app.exit(errInvalidCmdline)
 		}
 
-		fmt.Fprintf(app.stdout, "Calling List-RPC\non dutagent %s\n",
-			app.serverAddr)
-		app.printLine()
-
 		err := app.listRPC()
 		app.exit(err)
 	}
 
 	if len(app.args) == 1 {
 		device := app.args[0]
-		fmt.Fprintf(app.stdout, "Calling Commands-RPC with\ndevice: %q\non dutagent %s\n",
-			device, app.serverAddr)
-		app.printLine()
-
 		err := app.commandsRPC(device)
 		app.exit(err)
 	}
@@ -166,17 +167,9 @@ func (app *application) start() {
 	cmdArgs := app.args[2:]
 
 	if len(cmdArgs) > 0 && cmdArgs[0] == "help" {
-		fmt.Fprintf(app.stdout, "Calling Details-RPC with\ndevice: %q, command: %q, keyword: %q\non dutagent %s\n",
-			device, command, "help", app.serverAddr)
-		app.printLine()
-
 		err := app.detailsRPC(device, command, "help")
 		app.exit(err)
 	}
-
-	fmt.Fprintf(app.stdout, "Calling Run-RPC with\ndevice: %q, command: %q, cmdArgs: %q\non dutagent %s\n",
-		device, command, cmdArgs, app.serverAddr)
-	app.printLine()
 
 	err := app.runRPC(device, command, cmdArgs)
 	app.exit(err)
@@ -186,6 +179,11 @@ func (app *application) start() {
 // the standard error output. If printUsage is true, the usage information is printed additionally.
 func (app *application) exit(err error) {
 	if err == nil {
+		// Flush any buffered output before exiting
+		if app.formatter != nil {
+			_ = app.formatter.Flush()
+		}
+
 		app.exitFunc(0)
 	}
 
@@ -198,28 +196,19 @@ func (app *application) exit(err error) {
 		app.printFlagDefaults()
 	}
 
+	// Flush any buffered output before exiting with error
+	if app.formatter != nil {
+		_ = app.formatter.Flush()
+	}
+
 	app.exitFunc(1)
 }
 
 func (app *application) printVersion() {
-	fmt.Fprint(app.stdout, "DUT Control Client\n")
-	fmt.Fprint(app.stdout, buildinfo.VersionString())
-}
-
-func (app *application) printLine() {
-	const length = 80
-
-	for range length {
-		fmt.Fprint(app.stdout, "-")
-	}
-
-	fmt.Fprint(app.stdout, "\n")
-}
-
-func (app *application) printList(items []string) {
-	for _, i := range items {
-		fmt.Fprintf(app.stdout, "- %s\n", i)
-	}
+	app.formatter.WriteContent(output.Content{
+		Type: output.TypeVersion,
+		Data: "DUT Control Client\n" + buildinfo.VersionString(),
+	})
 }
 
 func main() {

@@ -7,7 +7,6 @@ import (
 	"bufio"
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"io/fs"
 	"log"
@@ -16,6 +15,7 @@ import (
 	"sync"
 
 	"connectrpc.com/connect"
+	"github.com/BlindspotSoftware/dutctl/internal/output"
 
 	pb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1"
 )
@@ -29,7 +29,14 @@ func (app *application) listRPC() error {
 		return err
 	}
 
-	app.printList(res.Msg.GetDevices())
+	app.formatter.WriteContent(output.Content{
+		Type: output.TypeDeviceList,
+		Data: res.Msg.GetDevices(),
+		Metadata: map[string]string{
+			"server": app.serverAddr,
+			"msg":    "List Response",
+		},
+	})
 
 	return nil
 }
@@ -43,7 +50,15 @@ func (app *application) commandsRPC(device string) error {
 		return err
 	}
 
-	app.printList(res.Msg.GetCommands())
+	app.formatter.WriteContent(output.Content{
+		Type: output.TypeCommandList,
+		Data: res.Msg.GetCommands(),
+		Metadata: map[string]string{
+			"server": app.serverAddr,
+			"msg":    "Commands Response",
+			"device": device,
+		},
+	})
 
 	return nil
 }
@@ -61,7 +76,17 @@ func (app *application) detailsRPC(device, command, keyword string) error {
 		return err
 	}
 
-	fmt.Fprintln(app.stdout, res.Msg.GetDetails())
+	app.formatter.WriteContent(output.Content{
+		Type: output.TypeCommandDetail,
+		Data: res.Msg.GetDetails(),
+		Metadata: map[string]string{
+			"server":  app.serverAddr,
+			"rpc":     "Details Response",
+			"device":  device,
+			"command": command,
+			"keyword": keyword,
+		},
+	})
 
 	return nil
 }
@@ -69,8 +94,8 @@ func (app *application) detailsRPC(device, command, keyword string) error {
 //nolint:funlen,cyclop,gocognit
 func (app *application) runRPC(device, command string, cmdArgs []string) error {
 	wg := sync.WaitGroup{}
-
 	ctx := context.Background()
+
 	stream := app.rpcClient.Run(ctx)
 	req := &pb.RunRequest{
 		Msg: &pb.RunRequest_Command{
@@ -85,6 +110,14 @@ func (app *application) runRPC(device, command string, cmdArgs []string) error {
 	err := stream.Send(req)
 	if err != nil {
 		return err
+	}
+
+	metadata := map[string]string{
+		"server":  app.serverAddr,
+		"msg":     "Run Response",
+		"device":  device,
+		"command": command,
+		"args":    strings.Join(cmdArgs, " "),
 	}
 
 	// Receive routine
@@ -106,13 +139,26 @@ func (app *application) runRPC(device, command string, cmdArgs []string) error {
 			//nolint:protogetter
 			switch msg := res.Msg.(type) {
 			case *pb.RunResponse_Print:
-				fmt.Fprint(app.stdout, string(msg.Print.GetText()))
+				app.formatter.WriteContent(output.Content{
+					Type:     output.TypeModuleOutput,
+					Data:     string(msg.Print.GetText()),
+					Metadata: metadata,
+				})
 			case *pb.RunResponse_Console:
 				switch consoleData := msg.Console.Data.(type) {
 				case *pb.Console_Stdout:
-					fmt.Fprint(app.stdout, string(consoleData.Stdout))
+					app.formatter.WriteContent(output.Content{
+						Type:     output.TypeModuleOutput,
+						Data:     string(consoleData.Stdout),
+						Metadata: metadata,
+					})
 				case *pb.Console_Stderr:
-					fmt.Fprint(app.stdout, string(consoleData.Stderr))
+					app.formatter.WriteContent(output.Content{
+						Type:     output.TypeModuleOutput,
+						Data:     string(consoleData.Stderr),
+						IsError:  true,
+						Metadata: metadata,
+					})
 				case *pb.Console_Stdin:
 					log.Printf("Unexpected Console Stdin %q", string(consoleData.Stdin))
 				}
@@ -142,7 +188,7 @@ func (app *application) runRPC(device, command string, cmdArgs []string) error {
 					log.Fatal(err)
 				}
 
-				log.Printf("Sent file: %q\n", "file.txt")
+				log.Printf("Sent file: %q\n", path)
 			case *pb.RunResponse_File:
 				path := msg.File.GetPath()
 				content := msg.File.GetContent()
