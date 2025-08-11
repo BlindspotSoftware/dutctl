@@ -32,6 +32,7 @@ SYNOPSIS:
 	dutctl [options] <device>
 	dutctl [options] <device> <command> [args...]
 	dutctl [options] <device> <command> help
+	dutctl version
 
 `
 const usageDescription = `
@@ -47,8 +48,8 @@ information for the command.
 `
 
 const (
-	serverAddrInfo  = `Address and port of the dutagent to connect to in the format: address:port`
-	versionFlagInfo = `Print version information and exit`
+	serverAddrInfo   = `Address and port of the dutagent to connect to in the format: address:port`
+	verboseInfo      = `Enable verbose output`
 )
 
 func newApp(stdin io.Reader, stdout, stderr io.Writer, exitFunc func(int), args []string) *application {
@@ -72,7 +73,7 @@ func newApp(stdin io.Reader, stdout, stderr io.Writer, exitFunc func(int), args 
 	}
 	// Flags
 	fs.StringVar(&app.serverAddr, "s", "localhost:1024", serverAddrInfo)
-	fs.BoolVar(&app.versionFlag, "v", false, versionFlagInfo)
+	fs.BoolVar(&app.verbose, "v", false, "verbose output")
 
 	//nolint:errcheck // flag.Parse always returns no error because of flag.ExitOnError
 	fs.Parse(args[1:])
@@ -82,7 +83,7 @@ func newApp(stdin io.Reader, stdout, stderr io.Writer, exitFunc func(int), args 
 	app.formatter = output.New(output.Config{
 		Stdout:  stdout,
 		Stderr:  stderr,
-		Verbose: true,
+		Verbose: app.verbose,
 	})
 
 	return &app
@@ -95,8 +96,8 @@ type application struct {
 	exitFunc func(int)
 
 	// flags
-	versionFlag       bool
 	serverAddr        string
+	verbose           bool
 	args              []string
 	printFlagDefaults func()
 
@@ -136,16 +137,16 @@ var errInvalidCmdline = fmt.Errorf("invalid command line")
 func (app *application) start() {
 	log.SetOutput(app.stdout)
 
-	if app.versionFlag {
+	if len(app.args) == 0 {
+		app.exit(errInvalidCmdline)
+	}
+
+	if app.args[0] == "version" {
 		app.printVersion()
 		app.exit(nil)
 	}
 
 	app.setupRPCClient()
-
-	if len(app.args) == 0 {
-		app.exit(errInvalidCmdline)
-	}
 
 	if app.args[0] == "list" {
 		if len(app.args) > 1 {
