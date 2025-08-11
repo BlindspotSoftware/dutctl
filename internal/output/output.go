@@ -96,6 +96,14 @@ type Config struct {
 //
 //nolint:ireturn
 func New(config Config) Formatter {
-	// Selection by config for future extensibility
-	return newTextFormatter(config)
+	switch config.Format {
+	case "json":
+		return newJSONFormatter(config)
+	case "yaml":
+		return newYAMLFormatter(config)
+	case "csv", "oneline":
+		return newOneLineFormatter(config)
+	default:
+		return newTextFormatter(config)
+	}
 }

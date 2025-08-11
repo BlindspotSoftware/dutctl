@@ -49,6 +49,7 @@ information for the command.
 
 const (
 	serverAddrInfo   = `Address and port of the dutagent to connect to in the format: address:port`
+	outputFormatInfo = `Output format: text, json, or yaml`
 	verboseInfo      = `Enable verbose output`
 )
 
@@ -73,6 +74,7 @@ func newApp(stdin io.Reader, stdout, stderr io.Writer, exitFunc func(int), args 
 	}
 	// Flags
 	fs.StringVar(&app.serverAddr, "s", "localhost:1024", serverAddrInfo)
+	fs.StringVar(&app.outputFormat, "f", "", "output format, text|json|yaml|oneline, default is text")
 	fs.BoolVar(&app.verbose, "v", false, "verbose output")
 
 	//nolint:errcheck // flag.Parse always returns no error because of flag.ExitOnError
@@ -83,6 +85,7 @@ func newApp(stdin io.Reader, stdout, stderr io.Writer, exitFunc func(int), args 
 	app.formatter = output.New(output.Config{
 		Stdout:  stdout,
 		Stderr:  stderr,
+		Format:  app.outputFormat,
 		Verbose: app.verbose,
 	})
 
@@ -97,6 +100,7 @@ type application struct {
 
 	// flags
 	serverAddr        string
+	outputFormat      string
 	verbose           bool
 	args              []string
 	printFlagDefaults func()
