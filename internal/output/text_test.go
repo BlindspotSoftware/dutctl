@@ -35,7 +35,7 @@ func TestWriteMetadata(t *testing.T) {
 			metadata: map[string]string{
 				"server": "localhost:1024",
 			},
-			wantOutput: "connected to localhost:1024\n\n",
+			wantOutput: "# connected to localhost:1024\n",
 		},
 		{
 			name:    "message only",
@@ -43,7 +43,7 @@ func TestWriteMetadata(t *testing.T) {
 			metadata: map[string]string{
 				"msg": "test message",
 			},
-			wantOutput: "(test message)\n\n",
+			wantOutput: "# (test message)\n",
 		},
 		{
 			name:    "device only",
@@ -51,7 +51,7 @@ func TestWriteMetadata(t *testing.T) {
 			metadata: map[string]string{
 				"device": "device1",
 			},
-			wantOutput: "device \"device1\"\n\n",
+			wantOutput: "# device \"device1\"\n",
 		},
 		{
 			name:    "command only",
@@ -59,7 +59,7 @@ func TestWriteMetadata(t *testing.T) {
 			metadata: map[string]string{
 				"command": "status",
 			},
-			wantOutput: "executing 'status'\n\n",
+			wantOutput: "# executing 'status'\n",
 		},
 		{
 			name:    "command with args",
@@ -68,7 +68,7 @@ func TestWriteMetadata(t *testing.T) {
 				"command": "flash",
 				"args":    "firmware.bin",
 			},
-			wantOutput: "executing 'flash firmware.bin'\n\n",
+			wantOutput: "# executing 'flash firmware.bin'\n",
 		},
 		{
 			name:    "device and command",
@@ -77,7 +77,7 @@ func TestWriteMetadata(t *testing.T) {
 				"device":  "device1",
 				"command": "power",
 			},
-			wantOutput: "device \"device1\" executing 'power'\n\n",
+			wantOutput: "# device \"device1\" executing 'power'\n",
 		},
 		{
 			name:    "device with command",
@@ -86,7 +86,7 @@ func TestWriteMetadata(t *testing.T) {
 				"device":  "device1",
 				"command": "status",
 			},
-			wantOutput: "device \"device1\" executing 'status'\n\n",
+			wantOutput: "# device \"device1\" executing 'status'\n",
 		},
 		{
 			name:    "device with command and args",
@@ -96,7 +96,7 @@ func TestWriteMetadata(t *testing.T) {
 				"command": "exec",
 				"args":    "--verbose",
 			},
-			wantOutput: "device \"device1\" executing 'exec --verbose'\n\n",
+			wantOutput: "# device \"device1\" executing 'exec --verbose'\n",
 		},
 		{
 			name:    "server with device and command",
@@ -106,7 +106,7 @@ func TestWriteMetadata(t *testing.T) {
 				"device":  "device1",
 				"command": "status",
 			},
-			wantOutput: "connected to localhost:1024 device \"device1\" executing 'status'\n\n",
+			wantOutput: "# connected to localhost:1024 device \"device1\" executing 'status'\n",
 		},
 		{
 			name:    "full known key sentence",
@@ -118,7 +118,7 @@ func TestWriteMetadata(t *testing.T) {
 				"command": "exec",
 				"args":    "--verbose",
 			},
-			wantOutput: "connected to localhost:1024 (test message) device \"device1\" executing 'exec --verbose'\n\n",
+			wantOutput: "# connected to localhost:1024 (test message) device \"device1\" executing 'exec --verbose'\n",
 		},
 		{
 			name:    "only other keys",
@@ -128,7 +128,7 @@ func TestWriteMetadata(t *testing.T) {
 				"key2": "value2",
 				"key3": "value3",
 			},
-			wantOutput: "key1: value1\nkey2: value2\nkey3: value3\n\n",
+			wantOutput: "# key1: value1\n# key2: value2\n# key3: value3\n",
 		},
 		{
 			name:    "mixed known and other keys",
@@ -141,7 +141,7 @@ func TestWriteMetadata(t *testing.T) {
 				"key2":    "value2",
 				"key3":    "value3",
 			},
-			wantOutput: "connected to localhost:1024 device \"device1\" executing 'exec'\nkey1: value1\nkey2: value2\nkey3: value3\n\n",
+			wantOutput: "# connected to localhost:1024 device \"device1\" executing 'exec'\n# key1: value1\n# key2: value2\n# key3: value3\n",
 		},
 	}
 
@@ -276,9 +276,9 @@ func TestMetadataCaching(t *testing.T) {
 	formatter.WriteContent(clearCacheContent)
 	fifthOutput := stdoutBuf.String()[len(firstOutput)+len(secondOutput)+len(thirdOutput)+len(fourthOutput):] // Get newest content
 
-	// Verify test case 1: First output contains metadata
-	if !strings.Contains(firstOutput, "test-server") || !strings.Contains(firstOutput, "test-device") || !strings.Contains(firstOutput, "test-command") {
-		t.Errorf("First output should contain metadata. Got: %q", firstOutput)
+	// Verify test case 1: First output contains metadata (with # prefix)
+	if !strings.Contains(firstOutput, "# ") || !strings.Contains(firstOutput, "test-server") || !strings.Contains(firstOutput, "test-device") || !strings.Contains(firstOutput, "test-command") {
+		t.Errorf("First output should contain metadata with # prefix. Got: %q", firstOutput)
 	}
 
 	// Verify test case 2: Second output does NOT contain metadata (cached)
@@ -288,23 +288,23 @@ func TestMetadataCaching(t *testing.T) {
 		t.Errorf("Second output missing message content. Got: %q", secondOutput)
 	}
 
-	// Verify test case 3: Third output contains changed metadata
-	if !strings.Contains(thirdOutput, "different-server") {
-		t.Errorf("Third output missing expected changed metadata. Got: %q", thirdOutput)
+	// Verify test case 3: Third output contains changed metadata (with # prefix)
+	if !strings.Contains(thirdOutput, "# ") || !strings.Contains(thirdOutput, "different-server") {
+		t.Errorf("Third output missing expected changed metadata with # prefix. Got: %q", thirdOutput)
 	}
 
-	// Verify test case 4: Stderr output includes metadata
-	if !strings.Contains(stderrOutput, "different-server") {
-		t.Errorf("Stderr output missing expected metadata. Got: %q", stderrOutput)
+	// Verify test case 4: Stderr output includes metadata (with # prefix)
+	if !strings.Contains(stderrOutput, "# ") || !strings.Contains(stderrOutput, "different-server") {
+		t.Errorf("Stderr output missing expected metadata with # prefix. Got: %q", stderrOutput)
 	}
 
-	// Verify test case 5: Fourth output includes metadata due to writer change
-	if !strings.Contains(fourthOutput, "different-server") {
-		t.Errorf("Fourth output should include metadata (due to writer change). Got: %q", fourthOutput)
+	// Verify test case 5: Fourth output includes metadata due to writer change (with # prefix)
+	if !strings.Contains(fourthOutput, "# ") || !strings.Contains(fourthOutput, "different-server") {
+		t.Errorf("Fourth output should include metadata (with # prefix) due to writer change. Got: %q", fourthOutput)
 	}
 
-	// Verify test case 6: Fifth output includes metadata due to cache clear
-	if !strings.Contains(fifthOutput, "different-server") {
-		t.Errorf("Fifth output should include metadata (due to cache clear). Got: %q", fifthOutput)
+	// Verify test case 6: Fifth output includes metadata due to cache clear (with # prefix)
+	if !strings.Contains(fifthOutput, "# ") || !strings.Contains(fifthOutput, "different-server") {
+		t.Errorf("Fifth output should include metadata (with # prefix) due to cache clear. Got: %q", fifthOutput)
 	}
 }

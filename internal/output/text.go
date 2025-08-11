@@ -28,6 +28,7 @@ type TextFormatter struct {
 	errBuffer           bytes.Buffer
 	metadataCache       map[string]string // Cache to remember last printed metadata
 	isLastWriteToStderr bool              // Tracks if the last metadata write was to stderr (true) or stdout (false)
+	invertedMetadata    bool              // Controls whether metadata is displayed with inverted colors
 }
 
 // newTextFormatter creates a new TextFormatter instance configured according to the provided Config.
@@ -43,11 +44,12 @@ func newTextFormatter(config Config) *TextFormatter {
 	}
 
 	return &TextFormatter{
-		stdout:        config.Stdout,
-		stderr:        config.Stderr,
-		verbose:       config.Verbose,
-		buffering:     false,
-		metadataCache: make(map[string]string),
+		stdout:           config.Stdout,
+		stderr:           config.Stderr,
+		verbose:          config.Verbose,
+		buffering:        false,
+		metadataCache:    make(map[string]string),
+		invertedMetadata: !config.NoColor, // Enable inverted metadata by default unless NoColor is set
 	}
 }
 
@@ -236,18 +238,26 @@ func (f *TextFormatter) writeMetadata(content Content, writer io.Writer) {
 		return
 	}
 
-	// Check if metadata has changed since last time
-	hasChanged := f.hasMetadataChanged(content.Metadata, writer)
-	if !hasChanged {
+	if !f.hasMetadataChanged(content.Metadata, writer) {
 		// No change, no output
 		return
 	}
+
+	// ANSI escape codes for inverted text and reset - only used if invertedMetadata is true
+	const (
+		invertCode = "\033[7m" // Invert colors
+		resetCode  = "\033[0m" // Reset formatting
+	)
 
 	// Process metadata that should be printed
 	knownMetadata, otherMetadata := splitMetadata(content.Metadata)
 
 	if sentence := metadataText(knownMetadata); sentence != "" {
-		fmt.Fprintln(writer, sentence)
+		if f.invertedMetadata {
+			fmt.Fprintf(writer, "%s# %s%s\n", invertCode, sentence, resetCode)
+		} else {
+			fmt.Fprintf(writer, "# %s\n", sentence)
+		}
 	}
 
 	// Print all remaining metadata on a single line, sorted by keys
@@ -260,14 +270,14 @@ func (f *TextFormatter) writeMetadata(content Content, writer io.Writer) {
 		slices.Sort(keys)
 
 		for _, key := range keys {
-			fmt.Fprintln(writer, key+": "+otherMetadata[key])
+			if f.invertedMetadata {
+				fmt.Fprintf(writer, "%s# %s: %s%s\n", invertCode, key, otherMetadata[key], resetCode)
+			} else {
+				fmt.Fprintf(writer, "# %s: %s\n", key, otherMetadata[key])
+			}
 		}
 	}
 
-	// Add a blank line after metadata
-	fmt.Fprintln(writer)
-
-	// Update the cache with current metadata
 	f.updateMetadataCache(content.Metadata)
 }
 
@@ -346,7 +356,7 @@ func (f *TextFormatter) clearMetadataCache() {
 }
 
 // hasMetadataChanged checks if the metadata has changed since the last time it was printed.
-// It returns true if metadata should be printed (is different from cache).
+// It returns true if metadata should be printed (is different from cache) or if the writer has changed.
 func (f *TextFormatter) hasMetadataChanged(metadata map[string]string, writer io.Writer) bool {
 	// Always print metadata if the cache is empty
 	if len(f.metadataCache) == 0 {

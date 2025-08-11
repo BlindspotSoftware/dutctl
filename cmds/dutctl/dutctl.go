@@ -51,6 +51,7 @@ const (
 	serverAddrInfo   = `Address and port of the dutagent to connect to in the format: address:port`
 	outputFormatInfo = `Output format: text, json, or yaml`
 	verboseInfo      = `Enable verbose output`
+	noColorInfo      = `Disable colored output`
 )
 
 func newApp(stdin io.Reader, stdout, stderr io.Writer, exitFunc func(int), args []string) *application {
@@ -76,6 +77,7 @@ func newApp(stdin io.Reader, stdout, stderr io.Writer, exitFunc func(int), args 
 	fs.StringVar(&app.serverAddr, "s", "localhost:1024", serverAddrInfo)
 	fs.StringVar(&app.outputFormat, "f", "", "output format, text|json|yaml|oneline, default is text")
 	fs.BoolVar(&app.verbose, "v", false, "verbose output")
+	fs.BoolVar(&app.noColor, "no-color", false, "disable colored output")
 
 	//nolint:errcheck // flag.Parse always returns no error because of flag.ExitOnError
 	fs.Parse(args[1:])
@@ -87,6 +89,7 @@ func newApp(stdin io.Reader, stdout, stderr io.Writer, exitFunc func(int), args 
 		Stderr:  stderr,
 		Format:  app.outputFormat,
 		Verbose: app.verbose,
+		NoColor: app.noColor,
 	})
 
 	return &app
@@ -102,6 +105,7 @@ type application struct {
 	serverAddr        string
 	outputFormat      string
 	verbose           bool
+	noColor           bool
 	args              []string
 	printFlagDefaults func()
 
