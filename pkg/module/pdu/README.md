@@ -1,6 +1,6 @@
 # PDU
 
-The **PDU** module provides basic power control of a Power Distribution Unit (PDU) via HTTP requests. It supports turning a power outlet on, off, toggling its state, and querying the current status.
+The _PDU_ module provides basic power control of a Power Distribution Unit (PDU) via HTTP requests. It supports turning a power outlet on, off, toggling its state, and querying the current status.
 
 **Note**: This module currently supports only Intellinet ATM PDUs.
 
@@ -15,7 +15,7 @@ pdu [on|off|toggle|status]
 ### Commands
 
 | Command  | Description                    |
-| -------- | ------------------------------ |
+|----------|--------------------------------|
 | `on`     | Power on the outlet            |
 | `off`    | Power off the outlet           |
 | `toggle` | Toggle the current power state |
@@ -28,7 +28,7 @@ See [pdu-example-cfg.yml](./pdu-example-cfg.yml) for examples.
 ## Configuration Options
 
 | Option     | Type   | Description                                    |
-| ---------- | ------ | ---------------------------------------------- |
+|------------|--------|------------------------------------------------|
 | `host`     | string | Base URL of the PDU (e.g. `10.0.0.5`)          |
 | `user`     | string | (Optional) Username for HTTP Basic Auth        |
 | `password` | string | (Optional) Password for HTTP Basic Auth        |

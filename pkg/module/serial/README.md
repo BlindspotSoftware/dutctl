@@ -2,7 +2,7 @@ The serial package provides a single module:
 
 # Serial
 
-This module establishes an serial connection to the DUT from the dutagent and  forwards the output.
+This module establishes a serial connection to the DUT from the _dutagent_ and forwards the output.
 
 ```
 ARGUMENTS:
@@ -18,15 +18,15 @@ Quote the regex if it contains spaces or special characters. E.g.: "(?i)hello\s+
 
 The syntax of the regular expressions accepted is the syntax accepted by RE2 and described at https://golang.org/s/re2syntax.
 
-The module is read-only at that time and does not support, sending bytes over the serial connection.
+The module is read-only at that time and does not support sending bytes over the serial connection.
 
 See [serial-example-cfg.yml](./serial-example-cfg.yml) for examples. 
 
 ## Configuration Options
 
-| Option | Value | Description
-|----------|--------|------------------------------------|
-| port | string | Hostname or IP address of the DUT |
-| baud | int | Port number of the SSH server on the DUT (default: 22) |
+| Option | Value  | Description                                            |
+|--------|--------|--------------------------------------------------------|
+| port   | string | Hostname or IP address of the DUT                      |
+| baud   | int    | Port number of the SSH server on the DUT (default: 22) |
 
 

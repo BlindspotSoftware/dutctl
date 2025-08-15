@@ -2,7 +2,7 @@ The _ssh_ package provides a single module:
 
 # SSH
 
-This module establishes an SSH connection to the DUT from the dutagent and executes a command.
+This module establishes an SSH connection to the DUT from the _dutagent_ and executes a command.
 
 ```
 ARGUMENTS:
@@ -21,12 +21,11 @@ See [ssh-example-cfg.yml](./ssh-example-cfg.yml) for examples.
 
 ## Configuration Options
 
-| Option | Value | Description
-|----------|--------|------------------------------------|
-| host | string | Hostname or IP address of the DUT |
-| port | int | Port number of the SSH server on the DUT (default: 22) |
-| user | string | Username for the SSH connection (default: "root") |
-| password | string | Password for the SSH connection |
-| privatekey | string | Path to the dutagent's private key file |
-| hostkey | string | Server's host key in the format [key_type] [base64_encoded_key] |
-
+| Option     | Value  | Description                                                     |
+|------------|--------|-----------------------------------------------------------------|
+| host       | string | Hostname or IP address of the DUT                               |
+| port       | int    | Port number of the SSH server on the DUT (default: 22)          |
+| user       | string | Username for the SSH connection (default: "root")               |
+| password   | string | Password for the SSH connection                                 |
+| privatekey | string | Path to the dutagent's private key file                         |
+| hostkey    | string | Server's host key in the format [key_type] [base64_encoded_key] |
