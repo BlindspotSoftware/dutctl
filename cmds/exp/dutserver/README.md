@@ -14,7 +14,7 @@ The DUT Server acts as a centralized proxy for multiple Device Under Test (DUT) 
 └─────────┘      └───────────┘      └─────────┘      └────────┘
 ```
 
-The main goal of the DUT server is to provide a single access point for all registered devices, regardless of their physical location i.e. regardless of the DUT agent devices are connected to.
+The main goal of the DUT Server is to provide a single access point for all registered devices, regardless of their physical location, i.e., regardless of the DUT Agent devices are connected to.
 
 ## Implemented Features
 
@@ -35,7 +35,7 @@ As a proof of concept, this implementation has several limitations that would ne
 
 ## Demo
 
-In the project root dir, make sure client, agent and server are built:
+In the project root dir, make sure the DUT Client, DUT agent and DUT Server are built:
 ```
 go build ./cmds/dutctl
 go build ./cmds/dutagent
@@ -44,7 +44,7 @@ go build ./cmds/exp/dutserver
 Open up four terminal sessions referred to as `T1`, `T2`, `T3`, `T4`,
 
 ### Starting the Server
-In `T1` start the DUT server with default settings:
+In `T1` start the DUT Server with default settings:
 
 ```bash
 # Start the DUT Server locally on default port (1024)
@@ -53,7 +53,7 @@ In `T1` start the DUT server with default settings:
 
 ### Registering Devices
 
-Start a first agent in `T3` using a basic example configuration with one device and set the optional `-server` flag to register with the running DUT server:
+Start a first agent in `T3` using a basic example configuration with one device and set the optional `-server` flag to register with the running DUT Server:
 
 ```bash
 # Configure the agent to connect to the server
@@ -61,7 +61,7 @@ Start a first agent in `T3` using a basic example configuration with one device 
 
 ```
 
-In `T4` start a secound agent with different port and another basic example configuration with another device:
+In `T4` start a second agent with different port and another basic example configuration with another device:
 
 ```bash
 # Configure the agent to connect to the server
@@ -71,7 +71,7 @@ In `T4` start a secound agent with different port and another basic example conf
 
 ### Connecting with a Client
 
-Play around with the DUT client in `T2`
+Play around with the DUT Client in `T2`
 
 ```bash
 # List available devices using the default address localhost:1024 which is the DUT server
@@ -84,5 +84,5 @@ Play around with the DUT client in `T2`
 ./dutctl device2 repeat
 ```
 
-The complete functionality of the client is available via the DUT server, see `./dutctl -h`
+The complete functionality of the client is available via the DUT Server, see `./dutctl -h`
 

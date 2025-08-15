@@ -112,6 +112,6 @@ message RegisterRequest {
   string address = 2; // Address of the agent sending the request.
 }
 
-// RegisterResponse is sent by the relay server in response to a sucsessful RegisterRequest.
+// RegisterResponse is sent by the relay server in response to a successful RegisterRequest.
 // NOTE: This is an experimental service and may change in the future.
 message RegisterResponse {}

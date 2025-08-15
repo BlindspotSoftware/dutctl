@@ -2,7 +2,7 @@ The _shell_ package provides a single module:
 
 # Shell
 
-This module executes a shell command on the DUT agent.
+This module executes a shell command on the DUT Agent.
 
 ```
 ARGUMENTS:
@@ -17,7 +17,7 @@ See [shell-example-cfg.yml](./shell-example-cfg.yml) for examples.
 
 ## Configuration Options
 
-| Option | Value | Description
-|----------|--------|------------------------------------|
-| path | string | Path is th path to the shell executable on the dutagent. Defaults to the system default shell  |
-| quiet | bool | Suppress forwarding stout, but not sterr |
+| Option | Value  | Description                                                                                   |
+|--------|--------|-----------------------------------------------------------------------------------------------|
+| path   | string | Path is th path to the shell executable on the dutagent. Defaults to the system default shell |
+| quiet  | bool   | Suppress forwarding to stdout, but not stderr                                                 |
