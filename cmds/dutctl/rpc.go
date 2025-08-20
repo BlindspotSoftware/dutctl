@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -183,12 +184,11 @@ func (app *application) runRPC(device, command string, cmdArgs []string) error {
 						},
 					},
 				})
-
 				if err != nil {
 					log.Fatal(err)
 				}
 
-				log.Printf("Sent file: %q\n", path)
+				log.Printf("Sent file: %q\n", filepath.Base(path))
 			case *pb.RunResponse_File:
 				path := msg.File.GetPath()
 				content := msg.File.GetContent()
@@ -203,7 +203,7 @@ func (app *application) runRPC(device, command string, cmdArgs []string) error {
 					log.Println("Received empty file content")
 				}
 
-				perm := 0600
+				perm := 0o600
 
 				err = os.WriteFile(path, content, fs.FileMode(perm))
 				if err != nil {
