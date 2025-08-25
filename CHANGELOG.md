@@ -1,5 +1,37 @@
 # Changelog
 
+## [2.0.0-alpha.1](https://github.com/BlindspotSoftware/dutctl/compare/v1.0.0-alpha.1...v2.0.0-alpha.1) (2025-08-25)
+
+
+### ⚠ BREAKING CHANGES
+
+* The -v flag now enabled verbose output, while version information is printed with the 'dutctl version' command.
+* The client does not add an extra newline to received Print messages anymore.
+
+### Features
+
+* add further output options to dutctl ([5c027cc](https://github.com/BlindspotSoftware/dutctl/commit/5c027ccb170f37eb35a64ac16596872674ba936d))
+* dutctl verbose output flag ([abb8d67](https://github.com/BlindspotSoftware/dutctl/commit/abb8d67afcfc56a7d713a9c64e2329503d5340f4))
+* extend module.Session interface  with fmt-style print functions ([3432675](https://github.com/BlindspotSoftware/dutctl/commit/34326753a2a6afc4722329d5e87a8ca6caa89ba4))
+
+
+### Bug Fixes
+
+* remove extra newline for print messages ([afe31fe](https://github.com/BlindspotSoftware/dutctl/commit/afe31fe40513d431ab9ecf5cef24c9620d332255))
+
+
+### Documentation
+
+* explain module.Session interface ([3e9612e](https://github.com/BlindspotSoftware/dutctl/commit/3e9612eb677d904b3ea634c0d6a5f28e1afabcaf))
+* fix typos, spelling and tables ([c1dbf9b](https://github.com/BlindspotSoftware/dutctl/commit/c1dbf9b840f91a3c6f22332a704839fe2374e2c6))
+
+
+### Other Work
+
+* dutctl output formatter ([923f673](https://github.com/BlindspotSoftware/dutctl/commit/923f673ad62424d6aabc0833dc76f8a918a40705))
+* improve default output of dutctl ([46817ce](https://github.com/BlindspotSoftware/dutctl/commit/46817ce15923363133216170ab1d2b5b92af6199))
+* modules use session.Print/f/ln functions ([a5acb8f](https://github.com/BlindspotSoftware/dutctl/commit/a5acb8fca7a7499bbc7af76c03e47ad63e791c19))
+
 ## [1.0.0-alpha.1](https://github.com/BlindspotSoftware/dutctl/compare/v0.10.0...v1.0.0-alpha.1) (2025-07-27)
 
 
