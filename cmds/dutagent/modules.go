@@ -22,4 +22,5 @@ import (
 	_ "github.com/BlindspotSoftware/dutctl/pkg/module/shell"
 	_ "github.com/BlindspotSoftware/dutctl/pkg/module/ssh"
 	_ "github.com/BlindspotSoftware/dutctl/pkg/module/time"
+	_ "github.com/BlindspotSoftware/dutctl/pkg/module/wifisocket"
 )
