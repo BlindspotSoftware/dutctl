@@ -15,7 +15,7 @@ pdu [on|off|toggle|status]
 ### Commands
 
 | Command  | Description                    |
-|----------|--------------------------------|
+| -------- | ------------------------------ |
 | `on`     | Power on the outlet            |
 | `off`    | Power off the outlet           |
 | `toggle` | Toggle the current power state |
@@ -28,7 +28,7 @@ See [pdu-example-cfg.yml](./pdu-example-cfg.yml) for examples.
 ## Configuration Options
 
 | Option     | Type   | Description                                    |
-|------------|--------|------------------------------------------------|
+| ---------- | ------ | ---------------------------------------------- |
 | `host`     | string | Base URL of the PDU (e.g. `10.0.0.5`)          |
 | `user`     | string | (Optional) Username for HTTP Basic Auth        |
 | `password` | string | (Optional) Password for HTTP Basic Auth        |
