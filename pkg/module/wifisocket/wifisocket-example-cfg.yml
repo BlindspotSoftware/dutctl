@@ -1,0 +1,15 @@
+version: 0
+devices:
+  nous-a1t:
+    desc: "Device powered via Tasmota NOUS A1T WiFi socket"
+    cmds:
+      power:
+        desc: "Control the power via WiFi socket"
+        modules:
+          - module: wifisocket
+            main: true
+            options:
+              host: http://192.168.1.60
+              user: "user"
+              password: "password"
+              channel: 1
