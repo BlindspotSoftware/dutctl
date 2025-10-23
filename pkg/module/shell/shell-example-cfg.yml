@@ -30,5 +30,3 @@ devices:
               path: /bin/bash
             args:
               - "cat /tmp/shell-test.txt && rm -f /tmp/shell-test.txt"
-
-              
