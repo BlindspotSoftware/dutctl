@@ -15,4 +15,4 @@ devices:
             options:
               host: enigma
               user: oscar
-              privatekey: ./keys/id_ed25519        
+              privatekey: ./keys/id_ed25519

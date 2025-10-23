@@ -13,4 +13,3 @@ devices:
             options:
               tool: "/usr/sbin/flashrom"
               programmer: "dediprog"
-    
