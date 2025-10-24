@@ -7,12 +7,12 @@ import (
 	"bufio"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"log"
 	"os"
 	"strings"
-	"sync"
 
 	"connectrpc.com/connect"
 	"github.com/BlindspotSoftware/dutctl/internal/output"
@@ -93,10 +93,15 @@ func (app *application) detailsRPC(device, command, keyword string) error {
 
 //nolint:funlen,cyclop,gocognit
 func (app *application) runRPC(device, command string, cmdArgs []string) error {
-	wg := sync.WaitGroup{}
 	ctx := context.Background()
+	runCtx, cancel := context.WithCancel(ctx)
 
-	stream := app.rpcClient.Run(ctx)
+	defer cancel()
+
+	const numWorkers = 2
+	errChan := make(chan error, numWorkers) // Each oft the two goroutines can send an error.
+
+	stream := app.rpcClient.Run(runCtx)
 	req := &pb.RunRequest{
 		Msg: &pb.RunRequest_Command{
 			Command: &pb.Command{
@@ -121,19 +126,27 @@ func (app *application) runRPC(device, command string, cmdArgs []string) error {
 	}
 
 	// Receive routine
-	wg.Add(1)
-
 	go func() {
-		defer wg.Done()
+		defer cancel()
 
 		for {
+			select {
+			case <-runCtx.Done():
+				log.Println("Receive routine terminating: Run-Context cancelled")
+
+				return
+			default: // Unblock select, continue with the forwarding logic.
+			}
+
 			res, err := stream.Receive()
 			if errors.Is(err, io.EOF) {
 				log.Println("Receive routine terminating: Stream closed by agent")
 
 				return
 			} else if err != nil {
-				log.Fatalln(err)
+				errChan <- fmt.Errorf("receiving RPC message: %w", err)
+
+				return
 			}
 
 			//nolint:protogetter
@@ -167,12 +180,16 @@ func (app *application) runRPC(device, command string, cmdArgs []string) error {
 				log.Printf("File request for: %q\n", path)
 
 				if !isPartOfArgs(cmdArgs, path) {
-					log.Fatalf("Invalid file request: Requested file %q was not named in the command's arguments", path)
+					errChan <- fmt.Errorf("invalid file request: requested file %q was not named in the command's arguments", path)
+
+					return
 				}
 
 				content, err := os.ReadFile(path)
 				if err != nil {
-					log.Fatal(err)
+					errChan <- fmt.Errorf("reading requested file %q: %w", path, err)
+
+					return
 				}
 
 				err = stream.Send(&pb.RunRequest{
@@ -185,7 +202,9 @@ func (app *application) runRPC(device, command string, cmdArgs []string) error {
 				})
 
 				if err != nil {
-					log.Fatal(err)
+					errChan <- fmt.Errorf("sending requested file %q: %w", path, err)
+
+					return
 				}
 
 				log.Printf("Sent file: %q\n", path)
@@ -196,7 +215,9 @@ func (app *application) runRPC(device, command string, cmdArgs []string) error {
 				log.Printf("Received file: %q\n", path)
 
 				if !isPartOfArgs(cmdArgs, path) {
-					log.Fatalf("Invalid file transmission: Sent file %q was not named in the command's arguments", path)
+					errChan <- fmt.Errorf("invalid file transmission: received file %q was not named in the command's arguments", path)
+
+					return
 				}
 
 				if len(content) == 0 {
@@ -207,7 +228,9 @@ func (app *application) runRPC(device, command string, cmdArgs []string) error {
 
 				err = os.WriteFile(path, content, fs.FileMode(perm))
 				if err != nil {
-					log.Fatal(err)
+					errChan <- fmt.Errorf("saving received file %q: %w", path, err)
+
+					return
 				}
 
 			default:
@@ -217,18 +240,27 @@ func (app *application) runRPC(device, command string, cmdArgs []string) error {
 	}()
 
 	// Send routine
-	// No wg.Add(1) as this routine blocks on reading input, so waiting on this routine
-	// is a deadlock. It will be killed, when the applications exits.
-	//
-	// No clue how to signal the send routine to stop, as it will block on the reader.
-	// Maybe set the source of the reader to nil to unblock and check some condition / done-channel?
 	go func() {
+		defer cancel()
+
 		reader := bufio.NewReader(app.stdin)
 
 		for {
+			select {
+			case <-runCtx.Done():
+				log.Println("Send routine terminating: Run-Context cancelled")
+
+				return
+			default:
+			}
+
 			text, err := reader.ReadString('\n')
 			if err != nil {
-				log.Fatalln(err)
+				if !errors.Is(err, io.EOF) {
+					errChan <- fmt.Errorf("reading stdin: %w", err)
+				}
+
+				return
 			}
 
 			err = stream.Send(&pb.RunRequest{
@@ -241,14 +273,20 @@ func (app *application) runRPC(device, command string, cmdArgs []string) error {
 				},
 			})
 			if err != nil {
-				log.Fatalln(err)
+				errChan <- fmt.Errorf("sending RPC message: %w", err)
+
+				return
 			}
 		}
 	}()
 
-	wg.Wait()
-
-	return nil
+	// Wait for completion or error
+	select {
+	case <-runCtx.Done():
+		return nil
+	case err := <-errChan:
+		return err
+	}
 }
 
 func isPartOfArgs(args []string, token string) bool {
