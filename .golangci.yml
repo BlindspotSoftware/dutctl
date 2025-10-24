@@ -1,13 +1,18 @@
 # Linter selection and configuration file for golangci-lint.
+version: "2"
+run:
+  # Include test files or not.
+  # Default: true
+  tests: false
 linters:
   # Disable all linters. It's important to have reproducible CI: don't start to fail all builds at the same time.
   # With golangci-lint this can happen if you use option --enable-all and a new linter is added
   # or when one upstream linter is upgraded.
-  # Default: false
-  disable-all: true
+  default: none
   # Enable specific linter
   # If linters should be disabled, comment out the respective line with explaination.
   enable:
+    - arangolint
     - asasalint
     - asciicheck
     - bidichk
@@ -23,20 +28,20 @@ linters:
     - dupl
     - dupword
     - durationcheck
+    - embeddedstructfieldcheck
     #- err113 - enable after refactoring
     - errcheck
     - errchkjson
     - errname
     #- errorlint - enable after refactoring
-    # - execinquery - deprecated
     #- exhaustive - It's ok not not set every field in a struct
     #- exhaustruct - It's ok not not set every field in a struct
-    #- exportloopref - Deprecated. Replaced by copyloopvar
+    - exptostd
     - fatcontext
     - forbidigo
     - forcetypeassert
+    - funcorder
     - funlen
-    - gci
     - ginkgolinter
     - gocheckcompilerdirectives
     - gochecknoglobals
@@ -46,25 +51,24 @@ linters:
     - goconst
     - gocritic
     - gocyclo
+    - godoclint
     - godot
     #- godox - allow "TODO" and "FIXME" comments until v1.0
-    - gofmt
-    #- gofumpt - no idea what format it checks, output is not helpful
     - goheader
-    - goimports
     - gomoddirectives
     - gomodguard
     - goprintffuncname
     - gosec
-    - gosimple
     - gosmopolitan
     - govet
     - grouper
+    - iface
     - importas
     - inamedparam
     - ineffassign
     - interfacebloat
     - intrange
+    - iotamixing
     - ireturn
     - lll
     - loggercheck
@@ -77,9 +81,11 @@ linters:
     - nakedret
     - nestif
     - nilerr
+    - nilnesserr
     - nilnil
     - nlreturn
     - noctx
+    - noinlineerr
     - nolintlint
     - nonamedreturns
     - nosprintfhostport
@@ -90,24 +96,23 @@ linters:
     - promlinter
     - protogetter
     - reassign
+    - recvcheck
     - revive
     - rowserrcheck
     - sloglint
     - spancheck
     - sqlclosecheck
     - staticcheck
-    - stylecheck
     - tagalign
     - tagliatelle
-    #- tenv - Deprecated. Replaced by usetesting.
     - testableexamples
     - testifylint
     #- testpackage - We don't enforce white box testing
     - thelper
     - tparallel
-    - typecheck
     - unconvert
     - unparam
+    - unqueryvet
     - unused
     - usestdlibvars
     - usetesting
@@ -115,69 +120,97 @@ linters:
     - wastedassign
     - whitespace
     #- wrapcheck - Not ALL error should be wrapped, as they become part of the function API then.
-    - wsl
+    - wsl_v5
     - zerologlint
 
-# Options for analysis running.
-run:
-  # Include test files or not.
-  # Default: true
-  tests: false
+  settings:
+    funcorder:
+      # Checks if the exported methods of a structure are placed before the non-exported ones.
+      # Default: true
+      struct-method: false
 
-# Settings of specific linters.
-linters-settings:
-  gci:
-    # Section configuration to compare against.
-    # Section names are case-insensitive and may contain parameters in ().
-    # The default order of sections is `standard > default > custom > blank > dot > alias > localmodule`,
-    # If `custom-order` is `true`, it follows the order of `sections` option.
-    # Default: ["standard", "default"]
-    sections:
-      - standard # Standard section: captures all standard packages.
-      - default # Default section: contains all imports that could not be matched to another section type.
-      - blank # Blank section: contains all blank imports. This section is not present unless explicitly enabled.
-      - alias # Alias section: contains all alias imports. This section is not present unless explicitly enabled.
-      
-  ireturn:
-    # List of interfaces to allow.
-    # Lists of the keywords and regular expressions matched to interface or package names can be used.
-    # `allow` and `reject` settings cannot be used at the same time.
-    #
-    # Keywords:
-    # - `empty` for `interface{}`
-    # - `error` for errors
-    # - `stdlib` for standard library
-    # - `anon` for anonymous interfaces
-    # - `generic` for generic interfaces added in go 1.18
-    #
-    # Default: [anon, error, empty, stdlib]
-    allow:
-      - anon
-      - error
-      - empty
-      - stdlib
-      - generic
-      - "Module"
-      - "gpio"
+    ireturn:
+      # List of interfaces to allow.
+      # Lists of the keywords and regular expressions matched to interface or package names can be used.
+      # `allow` and `reject` settings cannot be used at the same time.
+      #
+      # Keywords:
+      # - `empty` for `interface{}`
+      # - `error` for errors
+      # - `stdlib` for standard library
+      # - `anon` for anonymous interfaces
+      # - `generic` for generic interfaces added in go 1.18
+      #
+      # Default: [anon, error, empty, stdlib]
+      allow:
+        - anon
+        - error
+        - empty
+        - stdlib
+        - generic
+        - Module
+        - DeviceServiceClient
+        - Formatter
+        - gpio
 
-  lll:
-    line-length: 140
+    lll:
+      line-length: 140
 
-  nestif:
-    min-complexity: 6
+    nestif:
+      min-complexity: 6
 
-  varnamelen:
-    max-distance: 6
-    ignore-type-assert-ok: true
-    ignore-map-index-ok: true
-    ignore-chan-recv-ok: true
-    ignore-names:
-      - err
-      - wg # WaitGroup
-      - s # Session
-      - ch # Channel
-      - tt # Test Table
-      - r # Reader
-      - fs # FlagSet
-      - "on" # On/Off
+    varnamelen:
+      max-distance: 6
+      ignore-names:
+        - err
+        - wg
+        - s
+        - ch
+        - tt
+        - r
+        - fs
+        - "on"
+        - op
+      ignore-type-assert-ok: true
+      ignore-map-index-ok: true
+      ignore-chan-recv-ok: true
 
+    wsl_v5:
+      disable:
+        - send
+
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+
+formatters:
+  enable:
+    - gci
+    - gofmt
+    - goimports
+  settings:
+    gci:
+      # Section configuration to compare against.
+      # Section names are case-insensitive and may contain parameters in ().
+      # The default order of sections is `standard > default > custom > blank > dot > alias > localmodule`,
+      # If `custom-order` is `true`, it follows the order of `sections` option.
+      # Default: ["standard", "default"]
+      sections:
+        - standard # Standard section: captures all standard packages.
+        - default # Default section: contains all imports that could not be matched to another section type.
+        - blank # Blank section: contains all blank imports. This section is not present unless explicitly enabled.
+        - alias # Alias section: contains all alias imports. This section is not present unless explicitly enabled.
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

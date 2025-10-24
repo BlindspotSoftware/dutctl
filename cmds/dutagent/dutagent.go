@@ -75,7 +75,7 @@ type agent struct {
 	server      string
 
 	// state
-	config
+	config config
 }
 
 // config holds the dutagent configuration that is parsed from YAML data.
@@ -127,7 +127,8 @@ func (agt *agent) loadConfig() error {
 		return err
 	}
 
-	if err := yaml.Unmarshal(cfgYAML, &agt.config); err != nil {
+	err = yaml.Unmarshal(cfgYAML, &agt.config)
+	if err != nil {
 		return fmt.Errorf("parsing YAML failed: %w", err)
 	}
 
@@ -214,6 +215,8 @@ func newInsecureClient() *http.Client {
 				// If you're also using this client for non-h2c traffic, you may want
 				// to delegate to tls.Dial if the network isn't TCP or the addr isn't
 				// in an allowlist.
+
+				//nolint:noctx
 				return net.Dial(network, addr)
 			},
 			// TODO: Don't forget timeouts!
@@ -274,7 +277,8 @@ func (agt *agent) start() {
 	}
 
 	if agt.server != "" {
-		if err := agt.registerWithServer(); err != nil {
+		err := agt.registerWithServer()
+		if err != nil {
 			log.Printf("Registering with server %q failed: %v", agt.server, err)
 			agt.cleanup(exit1)
 		}

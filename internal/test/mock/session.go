@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// The mock package provides implementations of dutctl entities that can be used for unit-testing modules.
+// Package mock provides implementations of dutctl entities that can be used for unit-testing modules.
 package mock
 
 import (
@@ -78,8 +78,8 @@ func (m *Session) RequestFile(name string) (io.Reader, error) {
 func (m *Session) SendFile(name string, r io.Reader) error {
 	m.SendFileCalled = true
 	m.SentFileName = name
-	content, err := io.ReadAll(r)
 
+	content, err := io.ReadAll(r)
 	if err != nil {
 		return err
 	}

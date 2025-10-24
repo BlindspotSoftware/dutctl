@@ -56,7 +56,7 @@ type Flash struct {
 	// Currently only fashrom is supported.
 	Tool string
 
-	op                       // op holds the current flash operation
+	op              op       // op holds the current flash operation
 	localImagePath  string   // localImagePath is the path to SPI image file at the dutagent
 	clientImagePath string   // clientImagePath is image path named by the client
 	supportedTools  []string // supportedTools is a list of base names of supported flash tools
@@ -157,7 +157,8 @@ func (f *Flash) Run(_ context.Context, sesh module.Session, args ...string) erro
 	f.localImagePath = localImagePath
 
 	if f.op == opWrite {
-		if err := uploadImage(sesh, f.clientImagePath, f.localImagePath); err != nil {
+		err := uploadImage(sesh, f.clientImagePath, f.localImagePath)
+		if err != nil {
 			return err
 		}
 	}
@@ -167,7 +168,8 @@ func (f *Flash) Run(_ context.Context, sesh module.Session, args ...string) erro
 	log.Printf("flash module: Executing command: %s", cmdStr)
 	sesh.Print(fmt.Sprintf("Executing: %s", cmdStr))
 
-	if err := execute(f.Tool, f.cmdline()...); err != nil {
+	err := execute(f.Tool, f.cmdline()...)
+	if err != nil {
 		return fmt.Errorf("flash operation failed: %w", err)
 	}
 
@@ -176,7 +178,8 @@ func (f *Flash) Run(_ context.Context, sesh module.Session, args ...string) erro
 	time.Sleep(1 * time.Second)
 
 	if f.op == opRead {
-		if err := downloadImage(sesh, f.localImagePath, f.clientImagePath); err != nil {
+		err := downloadImage(sesh, f.localImagePath, f.clientImagePath)
+		if err != nil {
 			return err
 		}
 	}
@@ -185,9 +188,10 @@ func (f *Flash) Run(_ context.Context, sesh module.Session, args ...string) erro
 }
 
 func execute(tool string, args ...string) error {
+	//nolint:noctx
 	shell := exec.Command(tool, args...)
-	output, err := shell.CombinedOutput()
 
+	output, err := shell.CombinedOutput()
 	if err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
@@ -246,7 +250,8 @@ func downloadImage(sesh module.Session, local, remote string) error {
 		return fmt.Errorf("open flash image on dutagent after read operation: %w", err)
 	}
 
-	if err := sesh.SendFile(remote, file); err != nil {
+	err = sesh.SendFile(remote, file)
+	if err != nil {
 		return fmt.Errorf("send flash image to client after read operation: %w", err)
 	}
 

@@ -105,7 +105,8 @@ func (s *Serial) Deinit() error {
 func (s *Serial) Run(ctx context.Context, session module.Session, args ...string) error {
 	log.Println("serial module: Run called")
 
-	if err := s.evalArgs(args); err != nil {
+	err := s.evalArgs(args)
+	if err != nil {
 		return err
 	}
 
@@ -128,6 +129,7 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 	}
 
 	const bufferSize = 4096
+
 	readBuffer := make([]byte, bufferSize)
 	lineBuffer := &bytes.Buffer{}
 
@@ -187,7 +189,8 @@ func (s *Serial) evalArgs(args []string) error {
 	fs.SetOutput(io.Discard) // Suppress default error output
 	fs.DurationVar(&s.timeout, "t", 0, "timeout duration (e.g. 3m, 30s)")
 
-	if err := fs.Parse(args); err != nil {
+	err := fs.Parse(args)
+	if err != nil {
 		return fmt.Errorf("failed to parse arguments: %w", err)
 	}
 

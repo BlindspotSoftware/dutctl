@@ -75,9 +75,9 @@ jobs:
       - run: go version
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v8
         with:
-          version: v1.64.8
+          version: v2.6.1
 
   # Build and test each commit for both architectures
   # Uses a matrix strategy to create separate job runs for each combination of commit and architecture

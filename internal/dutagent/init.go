@@ -1,6 +1,7 @@
 // Copyright 2025 Blindspot Software
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
+
 package dutagent
 
 import (
@@ -66,7 +67,7 @@ func Init(devices dut.Devlist) error {
 	return nil
 }
 
-// Denit runs the Deinit function of all modules for all commands of the provided
+// Deinit runs the Deinit function of all modules for all commands of the provided
 // devices. All Deinit functions are called, even if an error occurs. In this case
 // the an ModuleInitErr is returned that holds all errors reported by the modules.
 func Deinit(devices dut.Devlist) error {

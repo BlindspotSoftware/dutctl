@@ -132,6 +132,8 @@ func newInsecureClient() *http.Client {
 				// If you're also using this client for non-h2c traffic, you may want
 				// to delegate to tls.Dial if the network isn't TCP or the addr isn't
 				// in an allowlist.
+
+				//nolint:noctx
 				return net.Dial(network, addr)
 			},
 			// Don't forget timeouts!

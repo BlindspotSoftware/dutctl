@@ -99,7 +99,9 @@ type commandAlias Command
 // UnmarshalYAML unmarshals a Command from a YAML node and adds custom validation.
 func (c *Command) UnmarshalYAML(node *yaml.Node) error {
 	var cmd commandAlias
-	if err := node.Decode(&cmd); err != nil {
+
+	err := node.Decode(&cmd)
+	if err != nil {
 		return err
 	}
 
@@ -142,9 +144,9 @@ func (c *Command) countMain() int {
 
 // Module is a wrapper for any module implementation.
 type Module struct {
-	Config ModuleConfig
-
 	module.Module
+
+	Config ModuleConfig
 }
 
 type ModuleConfig struct {
@@ -156,12 +158,13 @@ type ModuleConfig struct {
 
 // UnmarshalYAML unmarshals a Module from a YAML node and adds custom validation.
 func (m *Module) UnmarshalYAML(node *yaml.Node) error {
-	if err := node.Decode(&m.Config); err != nil {
+	err := node.Decode(&m.Config)
+	if err != nil {
 		return err
 	}
 
-	var err error
-	if m.Module, err = module.New(m.Config.Name); err != nil {
+	m.Module, err = module.New(m.Config.Name)
+	if err != nil {
 		return err
 	}
 
@@ -170,13 +173,16 @@ func (m *Module) UnmarshalYAML(node *yaml.Node) error {
 		return err
 	}
 
-	if err := yaml.Unmarshal(options, m.Module); err != nil {
+	err = yaml.Unmarshal(options, m.Module)
+	if err != nil {
 		return err
 	}
 
 	// validate Module options
 	validate := validator.New()
-	if err := validate.Struct(m.Module); err != nil {
+
+	err = validate.Struct(m.Module)
+	if err != nil {
 		return wrapValidatorErrors(err, node)
 	}
 

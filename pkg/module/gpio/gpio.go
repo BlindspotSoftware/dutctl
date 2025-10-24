@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// The gpio package provides two modules that simulate buttons and switches respectively, using the GPIO pins of
+// Package gpio provides two modules that simulate buttons and switches respectively, using the GPIO pins of
 // the Raspberry Pi. Used pins of Raspberry Pi needs to be wired to respective pads/connections on the DUT.
 //
 // E.g. this module can be used to pull down the reset line of the DUT.
@@ -67,12 +67,12 @@ const DefaultButtonPressDuration = 500 * time.Millisecond
 
 // A Button simulates a button press by changing the state of a GPIO pin.
 type Button struct {
+	gpio
+	backendParser
+
 	Pin       Pin    // Raw BCM2835/BCM2711 pin number
 	ActiveLow bool   // If set, the idle state is high, and low when pressed. Default is false
 	Backend   string // For future use. Name of the backend to use. Default and fallback is "devmem"
-
-	backendParser
-	gpio
 }
 
 // Ensure implementing the Module interface.
@@ -130,16 +130,16 @@ func (b *Button) Init() error {
 
 	if b.ActiveLow {
 		// with active low, idle is high
-		return b.gpio.High(b.Pin)
+		return b.High(b.Pin)
 	}
 
-	return b.gpio.Low(b.Pin)
+	return b.Low(b.Pin)
 }
 
 func (b *Button) Deinit() error {
 	log.Println("gpio.Button module: Deinit called")
 
-	return b.gpio.Low(b.Pin)
+	return b.Low(b.Pin)
 }
 
 func (b *Button) Run(_ context.Context, s module.Session, args ...string) error {
@@ -159,13 +159,15 @@ func (b *Button) Run(_ context.Context, s module.Session, args ...string) error 
 		duration = DefaultButtonPressDuration
 	}
 
-	if err := b.gpio.Toggle(b.Pin); err != nil {
+	err = b.Toggle(b.Pin)
+	if err != nil {
 		return err
 	}
 
 	time.Sleep(duration)
 
-	if err := b.gpio.Toggle(b.Pin); err != nil {
+	err = b.Toggle(b.Pin)
+	if err != nil {
 		return err
 	}
 
@@ -184,6 +186,9 @@ const (
 // A Switch simulates an on/off switch by changing the state of a GPIO pin.
 // By default, the switch is off and off means the pin is low.
 type Switch struct {
+	gpio
+	backendParser
+
 	// Raw BCM2835/BCM2711 pin number
 	Pin Pin
 	// Initial state of the switch: "on" or "off" (case insensitive). Default and fallback is "off".
@@ -193,8 +198,6 @@ type Switch struct {
 	// For future use. Name of the backend to use. Default is "devmem"
 	Backend string
 
-	gpio
-	backendParser
 	state switchState
 }
 
@@ -255,7 +258,7 @@ func (s *Switch) Init() error {
 func (s *Switch) Deinit() error {
 	log.Println("gpio.Switch module: Deinit called")
 
-	return s.gpio.Low(s.Pin)
+	return s.Low(s.Pin)
 }
 
 //nolint:cyclop
@@ -300,7 +303,7 @@ func (s *Switch) Run(_ context.Context, sesh module.Session, args ...string) err
 
 		return nil
 	case "toggle":
-		err := s.gpio.Toggle(s.Pin)
+		err := s.Toggle(s.Pin)
 		if err != nil {
 			return err
 		}
@@ -323,16 +326,16 @@ func (s *Switch) Run(_ context.Context, sesh module.Session, args ...string) err
 
 func (s *Switch) on() error {
 	if s.ActiveLow {
-		return s.gpio.Low(s.Pin)
+		return s.Low(s.Pin)
 	}
 
-	return s.gpio.High(s.Pin)
+	return s.High(s.Pin)
 }
 
 func (s *Switch) off() error {
 	if s.ActiveLow {
-		return s.gpio.High(s.Pin)
+		return s.High(s.Pin)
 	}
 
-	return s.gpio.Low(s.Pin)
+	return s.Low(s.Pin)
 }

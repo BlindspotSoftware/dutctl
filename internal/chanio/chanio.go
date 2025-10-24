@@ -11,8 +11,7 @@ import (
 	"log"
 )
 
-// Read implements io.Reader.
-//
+// ChanReader implements io.Reader that reads from a channel of byte slices.
 // Use NewChanReader to obtain a new ChanReader.
 type ChanReader struct {
 	ch  <-chan []byte
@@ -88,8 +87,7 @@ func (r *ChanReader) Read(bytes []byte) (int, error) {
 	return nBuf + nChan, nil
 }
 
-// Write implements io.Writer.
-//
+// ChanWriter implements io.Writer that writes to a channel of byte slices.
 // Use NewChanWriter to obtain a new ChanWriter.
 type ChanWriter struct {
 	ch chan<- []byte

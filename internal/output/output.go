@@ -93,8 +93,6 @@ type Config struct {
 }
 
 // New creates an appropriate output formatter based on the provided configuration.
-//
-//nolint:ireturn
 func New(config Config) Formatter {
 	switch config.Format {
 	case "json":
