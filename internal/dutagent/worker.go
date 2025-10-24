@@ -1,6 +1,7 @@
 // Copyright 2025 Blindspot Software
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
+
 package dutagent
 
 import (
@@ -162,6 +163,7 @@ func fromClientWorker(ctx context.Context, stream Stream, s *session) error {
 				file := make(chan []byte, 1)
 				s.fileCh <- file
 				file <- content
+
 				close(file) // indicate EOF.
 
 				log.Println("Passed file to module (buffered in the session)")

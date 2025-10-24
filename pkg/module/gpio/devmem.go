@@ -39,9 +39,11 @@ func (d *devmem) Toggle(pin Pin) error {
 }
 
 func memmapDo(op func()) error {
-	if err := rpio.Open(); err != nil {
+	err := rpio.Open()
+	if err != nil {
 		return fmt.Errorf("memory map GPIO via /dev/mem is not supported: %v", err)
 	}
+
 	defer rpio.Close()
 
 	op()

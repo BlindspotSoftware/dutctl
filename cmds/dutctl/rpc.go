@@ -1,6 +1,7 @@
 // Copyright 2025 Blindspot Software
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
+
 package main
 
 import (
@@ -93,13 +94,12 @@ func (app *application) detailsRPC(device, command, keyword string) error {
 
 //nolint:funlen,cyclop,gocognit
 func (app *application) runRPC(device, command string, cmdArgs []string) error {
-	ctx := context.Background()
-	runCtx, cancel := context.WithCancel(ctx)
+	const numWorkers = 2 // The send and receive worker goroutines
 
+	runCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	const numWorkers = 2
-	errChan := make(chan error, numWorkers) // Each oft the two goroutines can send an error.
+	errChan := make(chan error, numWorkers)
 
 	stream := app.rpcClient.Run(runCtx)
 	req := &pb.RunRequest{
@@ -200,7 +200,6 @@ func (app *application) runRPC(device, command string, cmdArgs []string) error {
 						},
 					},
 				})
-
 				if err != nil {
 					errChan <- fmt.Errorf("sending requested file %q: %w", path, err)
 

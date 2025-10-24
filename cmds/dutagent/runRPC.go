@@ -1,6 +1,7 @@
 // Copyright 2025 Blindspot Software
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
+
 package main
 
 import (
@@ -47,8 +48,7 @@ func (a *rpcService) Run(
 		moduleErr:  make(chan error, 1),
 	}
 
-	var err error
-	_, err = fsm.Run(ctx, args, receiveCommandRPC)
+	_, err := fsm.Run(ctx, args, receiveCommandRPC)
 
 	var connectErr *connect.Error
 	if err != nil && !errors.As(err, &connectErr) {
@@ -157,6 +157,7 @@ func executeModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State
 			err := module.Run(rpcCtx, moduleSession, moduleArgs...)
 			if err != nil {
 				args.moduleErr <- err
+
 				log.Printf("Module %q failed: %v", module.Config.Name, err)
 				modCtxCancel()
 

@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package IPMI provides a dutagent module that allows IPMI commands to be sent to a DUT's BMC.
+// Package ipmi provides a dutagent module that allows IPMI commands to be sent to a DUT's BMC.
 package ipmi
 
 import (
@@ -85,7 +85,8 @@ func (i *IPMI) Init() error {
 	timeout := defaultTimeout
 
 	if i.Timeout != "" {
-		if parsedTimeout, err := time.ParseDuration(i.Timeout); err == nil {
+		parsedTimeout, err := time.ParseDuration(i.Timeout)
+		if err == nil {
 			timeout = parsedTimeout
 			log.Printf("ipmi module: Using custom timeout %v", timeout)
 		} else {
@@ -105,7 +106,8 @@ func (i *IPMI) Init() error {
 	ipmiClient.WithTimeout(timeout)
 	ipmiClient.WithRetry(trials, time.Second)
 
-	if err := ipmiClient.Connect(context.Background()); err != nil {
+	err = ipmiClient.Connect(context.Background())
+	if err != nil {
 		return fmt.Errorf("failed to connect to IPMI BMC %s:%d: %v", i.Host, port, err)
 	}
 

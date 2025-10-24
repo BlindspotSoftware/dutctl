@@ -72,7 +72,8 @@ func (s *SSH) Help() string {
 func (s *SSH) Init() error {
 	log.Println("ssh module: Init called")
 
-	if err := s.evalConfiguration(); err != nil {
+	err := s.evalConfiguration()
+	if err != nil {
 		return err
 	}
 

@@ -50,6 +50,7 @@ func (m *Status) Run(_ context.Context, s module.Session, _ ...string) error {
 
 	var out strings.Builder
 
+	//nolint:noctx
 	cmd := exec.Command("uname", "-a")
 	cmd.Stdout = &out
 

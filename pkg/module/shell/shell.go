@@ -100,6 +100,7 @@ func (s *Shell) Run(_ context.Context, sesh module.Session, args ...string) erro
 	cmdStr := args[0]
 	binary := s.Path
 
+	//nolint:noctx
 	shell := exec.Command(binary, "-c", cmdStr)
 
 	out, err := shell.CombinedOutput()

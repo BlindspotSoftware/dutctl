@@ -1,6 +1,7 @@
 // Copyright 2025 Blindspot Software
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
+
 package main
 
 import (
@@ -24,18 +25,16 @@ import (
 )
 
 type agent struct {
+	sync.Mutex
+
 	// address is the address of the DUT agent.
 	address string
 	// client is the Connect RPC client for the DUT agent.
 	// Do not use this client directly, but use agent's conn method.
 	client dutctlv1connect.DeviceServiceClient
-
-	sync.Mutex
 }
 
 // conn returns the RPC client that connetcs to the DUT agent.
-//
-//nolint:ireturn
 func (a *agent) conn() dutctlv1connect.DeviceServiceClient {
 	a.Lock()
 	defer a.Unlock()
@@ -51,10 +50,10 @@ func (a *agent) conn() dutctlv1connect.DeviceServiceClient {
 // It implements both, the DeviceService used by clients as they would use with dutagents
 // and the RelayService used by agents to register with the server.
 type rpcService struct {
+	sync.RWMutex
+
 	// agents holds handles of the registered DUT agents.
 	agents map[string]*agent
-
-	sync.RWMutex
 }
 
 // findAgent returns the handle for the DUT agent, that controls the device with the given name.
@@ -199,7 +198,8 @@ func (s *rpcService) Run(
 	log.Println("Run request has a command message - starting new stream to DUT agent")
 
 	// Forward the initial request to the DUT agent.
-	if err := upstream.Send(donwnStreamRequest); err != nil {
+	err = upstream.Send(donwnStreamRequest)
+	if err != nil {
 		return connect.NewError(
 			connect.CodeInternal,
 			fmt.Errorf("sending initial request to agent %q: %w", device, err),
@@ -208,6 +208,7 @@ func (s *rpcService) Run(
 
 	// TODO: consider refactoring and use context.WithCancelCause(ctx)
 	const numForwardingWorkers = 2
+
 	errChan := make(chan error, numForwardingWorkers) // Each oft the two goroutines can send an error.
 
 	runCtx, cancel := context.WithCancel(ctx)
@@ -244,7 +245,8 @@ func (s *rpcService) Run(
 
 			log.Printf("Forwarding response to client: %v", res)
 
-			if err := downstream.Send(res); err != nil {
+			err = downstream.Send(res)
+			if err != nil {
 				log.Printf("Agent to client forwarding terminating as sending has been cancelled: %v", err)
 				errChan <- err
 
@@ -284,7 +286,8 @@ func (s *rpcService) Run(
 
 			log.Printf("Forwarding request to agent %q: %v", device, req)
 
-			if err := upstream.Send(req); err != nil {
+			err = upstream.Send(req)
+			if err != nil {
 				log.Printf("Client to agent forwarding terminating as sending has been cancelled: %v", err)
 				errChan <- err
 
@@ -357,8 +360,6 @@ func forwardDetailsReq(
 
 // spawnClient creates a new client to the DUT agent specified by the agent address.
 // TODO: refactor into pkg and reuse in dutctl and dutserver.
-//
-//nolint:ireturn
 func spawnClient(agendURL string) dutctlv1connect.DeviceServiceClient {
 	log.Printf("Spawning new client for agent %q", agendURL)
 
@@ -379,6 +380,8 @@ func newInsecureClient() *http.Client {
 				// If you're also using this client for non-h2c traffic, you may want
 				// to delegate to tls.Dial if the network isn't TCP or the addr isn't
 				// in an allowlist.
+
+				//nolint:noctx
 				return net.Dial(network, addr)
 			},
 			// TODO: Don't forget timeouts!
@@ -409,7 +412,8 @@ func (s *rpcService) Register(
 
 	log.Printf("Registering agent %q with devices %v", addr, req.Msg.GetDevices())
 
-	if err := s.addAgent(addr, req.Msg.GetDevices()); err != nil {
+	err := s.addAgent(addr, req.Msg.GetDevices())
+	if err != nil {
 		return nil, connect.NewError(connect.CodeAlreadyExists, fmt.Errorf("adding agent %q: %w", addr, err))
 	}
 
