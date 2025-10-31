@@ -18,9 +18,9 @@ import (
 	pb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1"
 )
 
-// runCmdArgs arguments for the state machine in the Run RPC.
+// runCmdArgs are arguments for the finite state machine in the Run RPC.
 type runCmdArgs struct {
-	// dependencies for the state machine
+	// dependencies of the state machine
 
 	stream     *connect.BidiStream[pb.RunRequest, pb.RunResponse]
 	broker     *dutagent.Broker
@@ -32,33 +32,6 @@ type runCmdArgs struct {
 	dev       dut.Device
 	cmd       dut.Command
 	moduleErr chan error
-}
-
-// Run is the handler for the Run RPC.
-func (a *rpcService) Run(
-	ctx context.Context,
-	stream *connect.BidiStream[pb.RunRequest, pb.RunResponse],
-) error {
-	log.Println("Server received Run request")
-
-	args := runCmdArgs{
-		stream:     stream,
-		broker:     &dutagent.Broker{},
-		deviceList: a.devices,
-		moduleErr:  make(chan error, 1),
-	}
-
-	_, err := fsm.Run(ctx, args, receiveCommandRPC)
-
-	var connectErr *connect.Error
-	if err != nil && !errors.As(err, &connectErr) {
-		// Wrap the error in a connect.Error if not done yet.
-		err = connect.NewError(connect.CodeInternal, err)
-	}
-
-	log.Print("Run-RPC finished with error: ", err)
-
-	return err
 }
 
 // receiveCommandRPC is the first state of the Run RPC.
