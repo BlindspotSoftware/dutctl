@@ -11,14 +11,7 @@ import (
 	"sync"
 
 	"github.com/BlindspotSoftware/dutctl/pkg/module"
-
-	pb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1"
 )
-
-type Stream interface {
-	Send(msg *pb.RunResponse) error
-	Receive() (*pb.RunRequest, error)
-}
 
 // Broker mediates between a module and its environment while the module is executed.
 // This concerns communication and data exchange.
