@@ -1,9 +1,9 @@
 .vscode/
 taskfile.yml
-dutctl
-cmds/dutctl/dutctl
-dutagent
-cmds/dutagent/dutagent
-dutserver
-cmds/exp/dutserver/dutserver
-keys/
+/dutctl
+/cmds/dutctl/dutctl
+/dutagent
+/cmds/dutagent/dutagent
+/dutserver
+/cmds/exp/dutserver/dutserver
+/keys/
