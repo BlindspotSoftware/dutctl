@@ -143,6 +143,14 @@ func (a *rpcService) Details(
 	return res, nil
 }
 
+// streamAdapter decoupls a connect.BidiStream to the dutagent.Stream interface.
+type streamAdapter struct {
+	inner *connect.BidiStream[pb.RunRequest, pb.RunResponse]
+}
+
+func (a *streamAdapter) Send(msg *pb.RunResponse) error   { return a.inner.Send(msg) }
+func (a *streamAdapter) Receive() (*pb.RunRequest, error) { return a.inner.Receive() }
+
 // Run is the handler for the Run RPC.
 func (a *rpcService) Run(
 	ctx context.Context,
@@ -151,7 +159,7 @@ func (a *rpcService) Run(
 	log.Println("Server received Run request")
 
 	fsmArgs := runCmdArgs{
-		stream:     stream,
+		stream:     &streamAdapter{inner: stream},
 		broker:     &dutagent.Broker{},
 		deviceList: a.devices,
 		moduleErr:  make(chan error, 1),

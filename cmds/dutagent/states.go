@@ -22,7 +22,7 @@ import (
 type runCmdArgs struct {
 	// dependencies of the state machine
 
-	stream     *connect.BidiStream[pb.RunRequest, pb.RunResponse]
+	stream     dutagent.Stream
 	broker     *dutagent.Broker
 	deviceList dut.Devlist
 
