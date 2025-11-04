@@ -21,13 +21,11 @@ import (
 // runCmdArgs are arguments for the finite state machine in the Run RPC.
 type runCmdArgs struct {
 	// dependencies of the state machine
-
 	stream     dutagent.Stream
 	broker     *dutagent.Broker
 	deviceList dut.Devlist
 
 	// fields for the states used during execution
-
 	cmdMsg    *pb.Command
 	dev       dut.Device
 	cmd       dut.Command
@@ -117,10 +115,16 @@ func executeModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State
 		cnt := len(args.cmd.Modules)
 
 		for idx, module := range args.cmd.Modules {
+			if ctx.Err() != nil {
+				log.Printf("Execution aborted, %d of %d modules done: %v", idx, cnt, ctx.Err())
+				modCtxCancel()
+
+				return
+			}
+
 			log.Printf("Running module %d of %d: %q", idx+1, cnt, module.Config.Name)
 
 			var moduleArgs []string
-
 			if module.Config.Main {
 				moduleArgs = args.cmdMsg.GetArgs()
 			} else {
@@ -132,13 +136,6 @@ func executeModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State
 				args.moduleErr <- err
 
 				log.Printf("Module %q failed: %v", module.Config.Name, err)
-				modCtxCancel()
-
-				return
-			}
-
-			if ctx.Err() != nil {
-				log.Printf("Module execution aborted, %d of %d done: %v", idx+1, cnt, ctx.Err())
 				modCtxCancel()
 
 				return
