@@ -176,7 +176,7 @@ func waitModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State[ru
 			brokerDone = true
 
 			if brokerErr != nil {
-				// An error occurred with the communication to the module during the module execution.
+				// Communication error in module environment.
 				e := connect.NewError(connect.CodeInternal, fmt.Errorf("module environment error: %v", brokerErr))
 				log.Printf("Wait for Modules to finish: Broker issue: %v", e)
 
@@ -186,19 +186,18 @@ func waitModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State[ru
 			moduleDone = true
 
 			if moduleErr != nil {
-				// The module execution failed.
+				// Module execution failed.
 				e := connect.NewError(connect.CodeAborted, fmt.Errorf("module execution failed: %v", moduleErr))
 				log.Printf("Wait for Modules to finish: A module failed: %v", e)
 
 				return args, nil, e
 			}
-		default:
-			// If the modules are done, we also need to wait for the broker to finish any remaining communication.
-			if brokerDone && moduleDone {
-				log.Println("Module execution finished successfully")
+		}
 
-				return args, nil, nil
-			}
+		if brokerDone && moduleDone {
+			log.Println("Module execution finished successfully")
+
+			return args, nil, nil
 		}
 	}
 }
