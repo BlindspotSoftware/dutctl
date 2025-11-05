@@ -10,6 +10,7 @@ import (
 	"log"
 
 	"connectrpc.com/connect"
+	"github.com/BlindspotSoftware/dutctl/internal/fsm"
 	"github.com/BlindspotSoftware/dutctl/pkg/dut"
 
 	pb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1"
@@ -71,6 +72,8 @@ func (a *rpcService) Commands(
 	return res, nil
 }
 
+// Details is the handler for the Details RPC.
+//
 //nolint:funlen
 func (a *rpcService) Details(
 	_ context.Context,
@@ -136,4 +139,38 @@ func (a *rpcService) Details(
 	log.Print("Details-RPC finished")
 
 	return res, nil
+}
+
+// streamAdapter decoupls a connect.BidiStream to the dutagent.Stream interface.
+type streamAdapter struct {
+	inner *connect.BidiStream[pb.RunRequest, pb.RunResponse]
+}
+
+func (a *streamAdapter) Send(msg *pb.RunResponse) error   { return a.inner.Send(msg) }
+func (a *streamAdapter) Receive() (*pb.RunRequest, error) { return a.inner.Receive() }
+
+// Run is the handler for the Run RPC.
+func (a *rpcService) Run(
+	ctx context.Context,
+	stream *connect.BidiStream[pb.RunRequest, pb.RunResponse],
+) error {
+	log.Println("Server received Run request")
+
+	fsmArgs := runCmdArgs{
+		stream:     &streamAdapter{inner: stream},
+		deviceList: a.devices,
+	}
+
+	var err error
+	_, err = fsm.Run(ctx, fsmArgs, receiveCommandRPC)
+
+	var connectErr *connect.Error
+	if err != nil && !errors.As(err, &connectErr) {
+		// Wrap the error in a connect.Error if not done yet.
+		err = connect.NewError(connect.CodeInternal, err)
+	}
+
+	log.Print("Run-RPC finished with error: ", err)
+
+	return err
 }

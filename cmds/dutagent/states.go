@@ -13,52 +13,24 @@ import (
 	"github.com/BlindspotSoftware/dutctl/internal/dutagent"
 	"github.com/BlindspotSoftware/dutctl/internal/fsm"
 	"github.com/BlindspotSoftware/dutctl/pkg/dut"
+	"github.com/BlindspotSoftware/dutctl/pkg/module"
 
 	pb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1"
 )
 
-// runCmdArgs arguments for the state machine in the Run RPC.
+// runCmdArgs are arguments for the finite state machine in the Run RPC.
 type runCmdArgs struct {
-	// dependencies for the state machine
-
-	stream     *connect.BidiStream[pb.RunRequest, pb.RunResponse]
-	broker     *dutagent.Broker
+	// dependencies of the state machine
+	stream     dutagent.Stream
 	deviceList dut.Devlist
 
 	// fields for the states used during execution
-
-	cmdMsg    *pb.Command
-	dev       dut.Device
-	cmd       dut.Command
-	moduleErr chan error
-}
-
-// Run is the handler for the Run RPC.
-func (a *rpcService) Run(
-	ctx context.Context,
-	stream *connect.BidiStream[pb.RunRequest, pb.RunResponse],
-) error {
-	log.Println("Server received Run request")
-
-	args := runCmdArgs{
-		stream:     stream,
-		broker:     &dutagent.Broker{},
-		deviceList: a.devices,
-		moduleErr:  make(chan error, 1),
-	}
-
-	var err error
-	_, err = fsm.Run(ctx, args, receiveCommandRPC)
-
-	var connectErr *connect.Error
-	if err != nil && !errors.As(err, &connectErr) {
-		// Wrap the error in a connect.Error if not done yet.
-		err = connect.NewError(connect.CodeInternal, err)
-	}
-
-	log.Print("Run-RPC finished with error: ", err)
-
-	return err
+	cmdMsg      *pb.Command
+	dev         dut.Device
+	cmd         dut.Command
+	session     module.Session
+	moduleErrCh chan error
+	brokerErrCh <-chan error
 }
 
 // receiveCommandRPC is the first state of the Run RPC.
@@ -126,17 +98,20 @@ func findDUTCmd(_ context.Context, args runCmdArgs) (runCmdArgs, fsm.State[runCm
 // Further, worker goroutines will be started to serve the module-to-client communication
 // during the module execution.
 func executeModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State[runCmdArgs], error) {
-	if args.broker == nil {
-		e := connect.NewError(connect.CodeInternal, errors.New("broker is not initialized"))
+	broker := &dutagent.Broker{}
 
-		return args, nil, e
+	// Deferred initialization of the moduleErr channel: only create if not already provided
+	// (tests may still pass a custom channel).
+	if args.moduleErrCh == nil {
+		args.moduleErrCh = make(chan error, 1)
 	}
 
 	rpcCtx := ctx
 	modCtx, modCtxCancel := context.WithCancel(rpcCtx)
 
-	args.broker.Start(modCtx, args.stream)
-	moduleSession := args.broker.ModuleSession()
+	moduleSession, brokerErrCh := broker.Start(modCtx, args.stream)
+	args.brokerErrCh = brokerErrCh
+	args.session = moduleSession
 
 	// Run the modules in a goroutine.
 	// The termination of the module execution is signaled by sending a result to the args.moduleErr channel.
@@ -144,10 +119,16 @@ func executeModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State
 		cnt := len(args.cmd.Modules)
 
 		for idx, module := range args.cmd.Modules {
+			if ctx.Err() != nil {
+				log.Printf("Execution aborted, %d of %d modules done: %v", idx, cnt, ctx.Err())
+				modCtxCancel()
+
+				return
+			}
+
 			log.Printf("Running module %d of %d: %q", idx+1, cnt, module.Config.Name)
 
 			var moduleArgs []string
-
 			if module.Config.Main {
 				moduleArgs = args.cmdMsg.GetArgs()
 			} else {
@@ -156,15 +137,8 @@ func executeModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State
 
 			err := module.Run(rpcCtx, moduleSession, moduleArgs...)
 			if err != nil {
-				args.moduleErr <- err
+				args.moduleErrCh <- err
 				log.Printf("Module %q failed: %v", module.Config.Name, err)
-				modCtxCancel()
-
-				return
-			}
-
-			if ctx.Err() != nil {
-				log.Printf("Module execution aborted, %d of %d done: %v", idx+1, cnt, ctx.Err())
 				modCtxCancel()
 
 				return
@@ -173,7 +147,7 @@ func executeModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State
 
 		log.Print("All modules finished successfully")
 		modCtxCancel()
-		args.moduleErr <- nil // Signal that all modules finished successfully
+		args.moduleErrCh <- nil // Signal that all modules finished successfully
 	}()
 
 	return args, waitModules, nil
@@ -197,33 +171,32 @@ func waitModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State[ru
 			log.Printf("Wait for Modules to finish: Context closed: %v", e)
 
 			return args, nil, e
-		case brokerErr := <-args.broker.Err():
+		case brokerErr := <-args.brokerErrCh:
 			brokerDone = true
 
 			if brokerErr != nil {
-				// An error occurred with the communication to the module during the module execution.
+				// Communication error in module environment.
 				e := connect.NewError(connect.CodeInternal, fmt.Errorf("module environment error: %v", brokerErr))
 				log.Printf("Wait for Modules to finish: Broker issue: %v", e)
 
 				return args, nil, e
 			}
-		case moduleErr := <-args.moduleErr:
+		case moduleErr := <-args.moduleErrCh:
 			moduleDone = true
 
 			if moduleErr != nil {
-				// The module execution failed.
+				// Module execution failed.
 				e := connect.NewError(connect.CodeAborted, fmt.Errorf("module execution failed: %v", moduleErr))
 				log.Printf("Wait for Modules to finish: A module failed: %v", e)
 
 				return args, nil, e
 			}
-		default:
-			// If the modules are done, we also need to wait for the broker to finish any remaining communication.
-			if brokerDone && moduleDone {
-				log.Println("Module execution finished successfully")
+		}
 
-				return args, nil, nil
-			}
+		if brokerDone && moduleDone {
+			log.Println("Module execution finished successfully")
+
+			return args, nil, nil
 		}
 	}
 }
