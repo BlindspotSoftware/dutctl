@@ -14,6 +14,7 @@ import (
 	"github.com/BlindspotSoftware/dutctl/internal/dutagent"
 	"github.com/BlindspotSoftware/dutctl/internal/fsm"
 	"github.com/BlindspotSoftware/dutctl/pkg/dut"
+	"github.com/BlindspotSoftware/dutctl/pkg/module"
 
 	pb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1"
 )
@@ -22,14 +23,14 @@ import (
 type runCmdArgs struct {
 	// dependencies of the state machine
 	stream     dutagent.Stream
-	broker     *dutagent.Broker
 	deviceList dut.Devlist
 
 	// fields for the states used during execution
 	cmdMsg      *pb.Command
 	dev         dut.Device
 	cmd         dut.Command
-	moduleErr   chan error
+	session     module.Session
+	moduleErrCh chan error
 	brokerErrCh <-chan error
 }
 
@@ -98,17 +99,20 @@ func findDUTCmd(_ context.Context, args runCmdArgs) (runCmdArgs, fsm.State[runCm
 // Further, worker goroutines will be started to serve the module-to-client communication
 // during the module execution.
 func executeModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State[runCmdArgs], error) {
-	if args.broker == nil {
-		e := connect.NewError(connect.CodeInternal, errors.New("broker is not initialized"))
+	broker := &dutagent.Broker{}
 
-		return args, nil, e
+	// Deferred initialization of the moduleErr channel: only create if not already provided
+	// (tests may still pass a custom channel).
+	if args.moduleErrCh == nil {
+		args.moduleErrCh = make(chan error, 1)
 	}
 
 	rpcCtx := ctx
 	modCtx, modCtxCancel := context.WithCancel(rpcCtx)
 
-	moduleSession, brokerErrCh := args.broker.Start(modCtx, args.stream)
+	moduleSession, brokerErrCh := broker.Start(modCtx, args.stream)
 	args.brokerErrCh = brokerErrCh
+	args.session = moduleSession
 
 	// Run the modules in a goroutine.
 	// The termination of the module execution is signaled by sending a result to the args.moduleErr channel.
@@ -134,8 +138,7 @@ func executeModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State
 
 			err := module.Run(rpcCtx, moduleSession, moduleArgs...)
 			if err != nil {
-				args.moduleErr <- err
-
+				args.moduleErrCh <- err
 				log.Printf("Module %q failed: %v", module.Config.Name, err)
 				modCtxCancel()
 
@@ -145,7 +148,7 @@ func executeModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State
 
 		log.Print("All modules finished successfully")
 		modCtxCancel()
-		args.moduleErr <- nil // Signal that all modules finished successfully
+		args.moduleErrCh <- nil // Signal that all modules finished successfully
 	}()
 
 	return args, waitModules, nil
@@ -179,7 +182,7 @@ func waitModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State[ru
 
 				return args, nil, e
 			}
-		case moduleErr := <-args.moduleErr:
+		case moduleErr := <-args.moduleErrCh:
 			moduleDone = true
 
 			if moduleErr != nil {
