@@ -11,7 +11,6 @@ import (
 	"log"
 
 	"connectrpc.com/connect"
-	"github.com/BlindspotSoftware/dutctl/internal/dutagent"
 	"github.com/BlindspotSoftware/dutctl/internal/fsm"
 	"github.com/BlindspotSoftware/dutctl/pkg/dut"
 
@@ -160,9 +159,7 @@ func (a *rpcService) Run(
 
 	fsmArgs := runCmdArgs{
 		stream:     &streamAdapter{inner: stream},
-		broker:     &dutagent.Broker{},
 		deviceList: a.devices,
-		moduleErr:  make(chan error, 1),
 	}
 
 	var err error
