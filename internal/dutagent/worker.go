@@ -6,6 +6,7 @@ package dutagent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -106,6 +107,11 @@ func fromClientWorker(ctx context.Context, stream Stream, s *session) error {
 		default:
 			req, err := stream.Receive()
 			if err != nil {
+				// Treat EOF as a clean shutdown (client closed its send side)
+				if errors.Is(err, io.EOF) {
+					return nil
+				}
+
 				return err
 			}
 
