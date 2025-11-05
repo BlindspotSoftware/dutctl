@@ -17,7 +17,6 @@ import (
 // This concerns communication and data exchange.
 type Broker struct {
 	once    sync.Once
-	started bool
 	stream  Stream
 	session session
 	errCh   chan error
@@ -36,24 +35,21 @@ func (b *Broker) init() {
 	b.errCh = make(chan error)
 }
 
-func (b *Broker) Start(ctx context.Context, s Stream) {
-	b.once.Do(func() { b.init() })
+// Start initializes the broker and launches its workers. It returns the module session
+// for module execution and a channel signaling worker termination or errors.
+// Multiple calls are idempotent; subsequent calls return the already initialized session and channel.
+//
+//nolint:ireturn // returning interface module.Session is intentional for abstraction boundary
+func (b *Broker) Start(ctx context.Context, s Stream) (module.Session, <-chan error) {
+	b.once.Do(func() {
+		b.init()
+		b.stream = s
+		b.toClient(ctx)
+		b.fromClient(ctx)
+	})
 
-	b.stream = s
-
-	b.toClient(ctx)
-	b.fromClient(ctx)
-
-	b.started = true
-}
-
-//nolint:ireturn
-func (b *Broker) ModuleSession() module.Session {
-	return &b.session
-}
-
-func (b *Broker) Err() <-chan error {
-	return b.errCh
+	// Rebinding the stream after first start is ignored by design; a Broker is single-use per Run.
+	return &b.session, b.errCh
 }
 
 func (b *Broker) toClient(ctx context.Context) {

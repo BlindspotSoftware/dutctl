@@ -25,10 +25,11 @@ type runCmdArgs struct {
 	deviceList dut.Devlist
 
 	// fields for the states used during execution
-	cmdMsg    *pb.Command
-	dev       dut.Device
-	cmd       dut.Command
-	moduleErr chan error
+	cmdMsg      *pb.Command
+	dev         dut.Device
+	cmd         dut.Command
+	moduleErr   chan error
+	brokerErrCh <-chan error
 }
 
 // receiveCommandRPC is the first state of the Run RPC.
@@ -105,8 +106,8 @@ func executeModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State
 	rpcCtx := ctx
 	modCtx, modCtxCancel := context.WithCancel(rpcCtx)
 
-	args.broker.Start(modCtx, args.stream)
-	moduleSession := args.broker.ModuleSession()
+	moduleSession, brokerErrCh := args.broker.Start(modCtx, args.stream)
+	args.brokerErrCh = brokerErrCh
 
 	// Run the modules in a goroutine.
 	// The termination of the module execution is signaled by sending a result to the args.moduleErr channel.
@@ -166,7 +167,7 @@ func waitModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State[ru
 			log.Printf("Wait for Modules to finish: Context closed: %v", e)
 
 			return args, nil, e
-		case brokerErr := <-args.broker.Err():
+		case brokerErr := <-args.brokerErrCh:
 			brokerDone = true
 
 			if brokerErr != nil {
