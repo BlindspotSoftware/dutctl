@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	"github.com/BlindspotSoftware/dutctl/internal/dutagent"
 	"github.com/BlindspotSoftware/dutctl/internal/fsm"
 	"github.com/BlindspotSoftware/dutctl/internal/test/fakes"
 	"github.com/BlindspotSoftware/dutctl/pkg/dut"
@@ -54,8 +53,8 @@ func TestReceiveCommandRPC(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			fake := &fakes.FakeStream{RecvQueue: tt.recv, RecvErr: tt.recvErr}
 			args := runCmdArgs{
-				stream:    fake,
-				moduleErr: make(chan error, 1),
+				stream:      fake,
+				moduleErrCh: make(chan error, 1),
 			}
 
 			gotArgs, next, err := receiveCommandRPC(context.Background(), args)
@@ -164,9 +163,9 @@ func TestFindDUTCmd(t *testing.T) {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			args := runCmdArgs{
-				cmdMsg:     tt.cmdMsg,
-				deviceList: tt.devs,
-				moduleErr:  make(chan error, 1),
+				cmdMsg:      tt.cmdMsg,
+				deviceList:  tt.devs,
+				moduleErrCh: make(chan error, 1),
 			}
 
 			gotArgs, next, err := findDUTCmd(context.Background(), args)
@@ -228,19 +227,11 @@ func TestExecuteModules(t *testing.T) {
 
 	tests := []struct {
 		name      string
-		brokerNil bool
 		preCancel bool
 		modules   []dut.Module
 		cmdMsg    *pb.Command
 		expect    expect
 	}{
-		{
-			name:      "broker_nil",
-			brokerNil: true,
-			modules:   nil,
-			cmdMsg:    &pb.Command{Device: "devX", Command: "cmdY"},
-			expect:    expect{wantErrCode: connect.CodeInternal, wantNext: nil},
-		},
 		{
 			name: "success_single_main_module",
 			modules: func() []dut.Module {
@@ -348,16 +339,11 @@ func TestExecuteModules(t *testing.T) {
 			moduleErrCh := make(chan error, 1)
 
 			args := runCmdArgs{
-				stream:     &fakes.FakeStream{}, // no actual traffic needed for these tests
-				broker:     &dutagent.Broker{},
-				cmdMsg:     tt.cmdMsg,
-				cmd:        dut.Command{Modules: tt.modules},
-				moduleErr:  moduleErrCh,
-				deviceList: nil,
-			}
-
-			if tt.brokerNil {
-				args.broker = nil
+				stream:      &fakes.FakeStream{}, // no actual traffic needed for these tests
+				cmdMsg:      tt.cmdMsg,
+				cmd:         dut.Command{Modules: tt.modules},
+				moduleErrCh: moduleErrCh,
+				deviceList:  nil,
 			}
 
 			gotArgs, next, err := executeModules(ctx, args)
@@ -463,7 +449,7 @@ func TestWaitModules(t *testing.T) {
 				// Signal module completion first, then broker.
 				moduleErrCh <- nil
 				go func() { brokerErrCh <- nil }()
-				args := runCmdArgs{moduleErr: moduleErrCh, brokerErrCh: brokerErrCh}
+				args := runCmdArgs{moduleErrCh: moduleErrCh, brokerErrCh: brokerErrCh}
 				return ctx, args
 			},
 			exp: expect{wantSuccess: true},
@@ -476,7 +462,7 @@ func TestWaitModules(t *testing.T) {
 				brokerErrCh := make(chan error, 1)
 				brokerErrCh <- nil
 				go func() { moduleErrCh <- nil }()
-				args := runCmdArgs{moduleErr: moduleErrCh, brokerErrCh: brokerErrCh}
+				args := runCmdArgs{moduleErrCh: moduleErrCh, brokerErrCh: brokerErrCh}
 				return ctx, args
 			},
 			exp: expect{wantSuccess: true},
@@ -490,7 +476,7 @@ func TestWaitModules(t *testing.T) {
 				moduleErrCh <- errors.New("module exploded")
 				// broker later (would be ignored)
 				go func() { brokerErrCh <- nil }()
-				args := runCmdArgs{moduleErr: moduleErrCh, brokerErrCh: brokerErrCh}
+				args := runCmdArgs{moduleErrCh: moduleErrCh, brokerErrCh: brokerErrCh}
 				return ctx, args
 			},
 			exp: expect{wantErrCode: connect.CodeAborted},
@@ -503,7 +489,7 @@ func TestWaitModules(t *testing.T) {
 				brokerErrCh := make(chan error, 1)
 				brokerErrCh <- errors.New("broker I/O failed")
 				go func() { moduleErrCh <- nil }()
-				args := runCmdArgs{moduleErr: moduleErrCh, brokerErrCh: brokerErrCh}
+				args := runCmdArgs{moduleErrCh: moduleErrCh, brokerErrCh: brokerErrCh}
 				return ctx, args
 			},
 			exp: expect{wantErrCode: connect.CodeInternal},
@@ -516,7 +502,7 @@ func TestWaitModules(t *testing.T) {
 				cancel() // cancel immediately
 				moduleErrCh := make(chan error, 1)
 				brokerErrCh := make(chan error, 1)
-				args := runCmdArgs{moduleErr: moduleErrCh, brokerErrCh: brokerErrCh}
+				args := runCmdArgs{moduleErrCh: moduleErrCh, brokerErrCh: brokerErrCh}
 				return ctx, args
 			},
 			exp: expect{wantErrCode: connect.CodeAborted},
@@ -529,7 +515,7 @@ func TestWaitModules(t *testing.T) {
 				brokerErrCh := make(chan error, 1)
 				moduleErrCh <- nil
 				go func() { brokerErrCh <- errors.New("late broker fail") }()
-				args := runCmdArgs{moduleErr: moduleErrCh, brokerErrCh: brokerErrCh}
+				args := runCmdArgs{moduleErrCh: moduleErrCh, brokerErrCh: brokerErrCh}
 				return ctx, args
 			},
 			exp: expect{wantErrCode: connect.CodeInternal},
@@ -542,7 +528,7 @@ func TestWaitModules(t *testing.T) {
 				brokerErrCh := make(chan error, 1)
 				brokerErrCh <- nil
 				go func() { moduleErrCh <- errors.New("late module fail") }()
-				args := runCmdArgs{moduleErr: moduleErrCh, brokerErrCh: brokerErrCh}
+				args := runCmdArgs{moduleErrCh: moduleErrCh, brokerErrCh: brokerErrCh}
 				return ctx, args
 			},
 			exp: expect{wantErrCode: connect.CodeAborted},
