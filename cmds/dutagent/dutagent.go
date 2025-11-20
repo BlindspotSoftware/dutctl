@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"slices"
 	"syscall"
 
 	"connectrpc.com/connect"
@@ -82,6 +83,46 @@ type agent struct {
 type config struct {
 	Version int
 	Devices dut.Devlist
+}
+
+// configAlias is used when parsing YAML to avoid recursion.
+type configAlias config
+
+func (c *config) UnmarshalYAML(node *yaml.Node) error {
+	var ca configAlias
+	if err := node.Decode(&ca); err != nil {
+		return err
+	}
+
+	*c = config(ca)
+
+	if err := validateConfig(*c); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func validateConfig(config config) error {
+	for name := range config.Devices {
+		if err := validateDeviceName(name); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func validateDeviceName(name string) error {
+	invalidDeviceNames := []string{
+		"list",
+	}
+
+	if slices.Contains(invalidDeviceNames, name) {
+		return fmt.Errorf("invalid device name: %s", name)
+	}
+
+	return nil
 }
 
 type exitCode int
