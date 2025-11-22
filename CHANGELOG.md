@@ -1,5 +1,52 @@
 # Changelog
 
+## [2.0.0-alpha.1](https://github.com/BlindspotSoftware/dutctl/compare/v1.0.0-alpha.1...v2.0.0-alpha.1) (2025-11-22)
+
+
+### ⚠ BREAKING CHANGES
+
+* The -v flag now enabled verbose output, while version information is printed with the 'dutctl version' command.
+* The client does not add an extra newline to received Print messages anymore.
+
+### Features
+
+* add further output options to dutctl ([5c027cc](https://github.com/BlindspotSoftware/dutctl/commit/5c027ccb170f37eb35a64ac16596872674ba936d))
+* add wifi socket module ([329161d](https://github.com/BlindspotSoftware/dutctl/commit/329161d5b3834edc5b871741e5feea059a350b48))
+* dutctl verbose output flag ([abb8d67](https://github.com/BlindspotSoftware/dutctl/commit/abb8d67afcfc56a7d713a9c64e2329503d5340f4))
+* extend module.Session interface  with fmt-style print functions ([3432675](https://github.com/BlindspotSoftware/dutctl/commit/34326753a2a6afc4722329d5e87a8ca6caa89ba4))
+
+
+### Bug Fixes
+
+* remove extra newline for print messages ([afe31fe](https://github.com/BlindspotSoftware/dutctl/commit/afe31fe40513d431ab9ecf5cef24c9620d332255))
+
+
+### Documentation
+
+* explain module.Session interface ([3e9612e](https://github.com/BlindspotSoftware/dutctl/commit/3e9612eb677d904b3ea634c0d6a5f28e1afabcaf))
+* fix typos, spelling and tables ([c1dbf9b](https://github.com/BlindspotSoftware/dutctl/commit/c1dbf9b840f91a3c6f22332a704839fe2374e2c6))
+* sanitize modules example configuration ([0479c66](https://github.com/BlindspotSoftware/dutctl/commit/0479c66eb96ab7e94208280eb87569779a834768))
+
+
+### Other Work
+
+* bump actions/checkout from 4 to 5 ([ab84c81](https://github.com/BlindspotSoftware/dutctl/commit/ab84c8109330b5bea1247ebbe161d71e6ea442ff))
+* bump actions/checkout from 5 to 6 ([3bb8551](https://github.com/BlindspotSoftware/dutctl/commit/3bb8551a2ef06a77ddd8b24f8e3ee00825d17714))
+* bump actions/setup-go from 5 to 6 ([77b3beb](https://github.com/BlindspotSoftware/dutctl/commit/77b3beb4336d393ec08bcecfd3c38d44aa0af35e))
+* bump actions/setup-node from 4 to 6 ([bd4e5f7](https://github.com/BlindspotSoftware/dutctl/commit/bd4e5f71f9ab340a78ef00f90b846adb77f75058))
+* bump connectrpc.com/connect from 1.18.1 to 1.19.1 ([323b013](https://github.com/BlindspotSoftware/dutctl/commit/323b013a9fab7357433e676ee2fa96aead0c8ee5))
+* bump github.com/bougou/go-ipmi from 0.7.7 to 0.7.8 ([d561eab](https://github.com/BlindspotSoftware/dutctl/commit/d561eab15674ea30f35f9667500bbf1d3a57f4d2))
+* bump github.com/go-playground/validator/v10 ([2293e9d](https://github.com/BlindspotSoftware/dutctl/commit/2293e9d6948eaf7221a0d5ba953ab1ef0c9c952b))
+* bump golang.org/x/crypto ([933701c](https://github.com/BlindspotSoftware/dutctl/commit/933701cdba424f312f490806e79d53038362d70b))
+* bump golang.org/x/net from 0.42.0 to 0.46.0 ([f11049e](https://github.com/BlindspotSoftware/dutctl/commit/f11049e60a6e014d8468f439bee386e68daafac7))
+* bump golang.org/x/net from 0.46.0 to 0.47.0 ([da28691](https://github.com/BlindspotSoftware/dutctl/commit/da286913efed73be4d040ec932698ab4bb911474))
+* bump golangci/golangci-lint-action from 8 to 9 ([244cb31](https://github.com/BlindspotSoftware/dutctl/commit/244cb3153fe60f6311163cd0ccb074a93a37c707))
+* bump google.golang.org/protobuf from 1.36.6 to 1.36.10 ([e49cc65](https://github.com/BlindspotSoftware/dutctl/commit/e49cc6559ee3084f4aaf2093654044f96bf71e88))
+* dutctl output formatter ([923f673](https://github.com/BlindspotSoftware/dutctl/commit/923f673ad62424d6aabc0833dc76f8a918a40705))
+* improve default output of dutctl ([46817ce](https://github.com/BlindspotSoftware/dutctl/commit/46817ce15923363133216170ab1d2b5b92af6199))
+* modules use session.Print/f/ln functions ([a5acb8f](https://github.com/BlindspotSoftware/dutctl/commit/a5acb8fca7a7499bbc7af76c03e47ad63e791c19))
+* send/receive synchronization in dutclient ([6f900f2](https://github.com/BlindspotSoftware/dutctl/commit/6f900f28bc6ebe01393a5972acdcfbf63aa27ba8))
+
 ## [1.0.0-alpha.1](https://github.com/BlindspotSoftware/dutctl/compare/v0.10.0...v1.0.0-alpha.1) (2025-07-27)
 
 
