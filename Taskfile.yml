@@ -1,0 +1,31 @@
+version: "3"
+
+tasks:
+  default:
+    desc: "Build all binaries"
+    cmds:
+      - task: lint
+      - task: test
+      - task: build
+
+  build:
+    desc: "Build dutctl and dutagent for the current platform"
+    cmds:
+      - go build -o dutctl ./cmds/dutctl
+      - go build -o dutagent ./cmds/dutagent
+
+  build-arm64:
+    desc: "Build dutctl and dutagent for ARM64"
+    cmds:
+      - GOOS=linux GOARCH=arm64 go build -o dutctl-arm64 ./cmds/dutctl
+      - GOOS=linux GOARCH=arm64 go build -o dutagent-arm64 ./cmds/dutagent
+
+  test:
+    desc: "Run all tests"
+    cmds:
+      - go test ./...
+
+  lint:
+    desc: "Run linters"
+    cmds:
+      - golangci-lint run
