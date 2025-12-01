@@ -106,3 +106,11 @@ func (s *session) SendFile(name string, r io.Reader) error {
 
 	return nil
 }
+
+// Close closes the output channels to signal that no more messages will be sent.
+// This should be called after the module execution finishes.
+func (s *session) Close() {
+	close(s.printCh)
+	close(s.stdoutCh)
+	close(s.stderrCh)
+}

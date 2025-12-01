@@ -156,16 +156,20 @@ func executeModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State
 
 			err := module.Run(rpcCtx, moduleSession, moduleArgs...)
 			if err != nil {
-				args.moduleErr <- err
-
 				log.Printf("Module %q failed: %v", module.Config.Name, err)
-				modCtxCancel()
+
+				args.broker.Close()
+
+				args.moduleErr <- err
 
 				return
 			}
 
 			if ctx.Err() != nil {
 				log.Printf("Module execution aborted, %d of %d done: %v", idx+1, cnt, ctx.Err())
+
+				args.broker.Close()
+
 				modCtxCancel()
 
 				return
@@ -173,6 +177,9 @@ func executeModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State
 		}
 
 		log.Print("All modules finished successfully")
+
+		args.broker.Close()
+
 		modCtxCancel()
 		args.moduleErr <- nil // Signal that all modules finished successfully
 	}()
@@ -183,19 +190,19 @@ func executeModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State
 // waitModules is a state of the Run RPC.
 //
 // It waits for the module execution to finish. The state will block until the module execution is finished.
+//
+//nolint:cyclop
 func waitModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State[runCmdArgs], error) {
-	log.Println("Waiting for module to finish")
-
 	var (
-		brokerDone bool
-		moduleDone bool
+		brokerDone      bool
+		moduleDone      bool
+		storedModuleErr error
 	)
 
 	for {
 		select {
 		case <-ctx.Done():
 			e := connect.NewError(connect.CodeAborted, fmt.Errorf("module execution aborted: %v", ctx.Err()))
-			log.Printf("Wait for Modules to finish: Context closed: %v", e)
 
 			return args, nil, e
 		case brokerErr := <-args.broker.Err():
@@ -204,7 +211,6 @@ func waitModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State[ru
 			if brokerErr != nil {
 				// An error occurred with the communication to the module during the module execution.
 				e := connect.NewError(connect.CodeInternal, fmt.Errorf("module environment error: %v", brokerErr))
-				log.Printf("Wait for Modules to finish: Broker issue: %v", e)
 
 				return args, nil, e
 			}
@@ -212,16 +218,18 @@ func waitModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State[ru
 			moduleDone = true
 
 			if moduleErr != nil {
-				// The module execution failed.
-				e := connect.NewError(connect.CodeAborted, fmt.Errorf("module execution failed: %v", moduleErr))
-				log.Printf("Wait for Modules to finish: A module failed: %v", e)
-
-				return args, nil, e
+				// The module execution failed. Store the error but don't return yet.
+				// We need to wait for the broker to finish sending any buffered output.
+				storedModuleErr = moduleErr
 			}
 		default:
-			// If the modules are done, we also need to wait for the broker to finish any remaining communication.
+			// If both the broker and modules are done, return the result.
 			if brokerDone && moduleDone {
-				log.Println("Module execution finished successfully")
+				if storedModuleErr != nil {
+					e := connect.NewError(connect.CodeAborted, fmt.Errorf("module execution failed: %v", storedModuleErr))
+
+					return args, nil, e
+				}
 
 				return args, nil, nil
 			}
