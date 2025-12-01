@@ -99,3 +99,9 @@ func (b *Broker) fromClient(ctx context.Context) {
 		}
 	}()
 }
+
+// Close closes the session to signal that no more messages will be sent.
+// This should be called after the module execution finishes.
+func (b *Broker) Close() {
+	b.session.Close()
+}

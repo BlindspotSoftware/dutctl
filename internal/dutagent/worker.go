@@ -16,53 +16,92 @@ import (
 )
 
 // toClientWorker sends messages from the module session to the client.
-// This function is an infinite loop. It terminates when the session's done channel is closed.
+// This function loops until all output channels are closed or an error occurs.
+// When the module finishes, the output channels are closed, signaling this worker to exit.
 //
-//nolint:cyclop, funlen
+//nolint:cyclop, funlen, gocognit
 func toClientWorker(ctx context.Context, stream Stream, s *session) error {
-	for {
+	// Copy channels so we can nil them when closed. A closed channel is always
+	// ready in select (returns zero value immediately), causing a busy loop.
+	// Niling a channel makes it block forever, removing it from selection.
+	printCh := s.printCh
+	stdoutCh := s.stdoutCh
+	stderrCh := s.stderrCh
+
+	activeChannels := 3
+
+	for activeChannels > 0 {
 		select {
 		case <-ctx.Done():
 			return nil
-		case str := <-s.printCh:
+		case str, ok := <-printCh:
+			if !ok {
+				printCh = nil
+				activeChannels--
+
+				continue
+			}
+
 			res := &pb.RunResponse{
 				Msg: &pb.RunResponse_Print{Print: &pb.Print{Text: []byte(str)}},
 			}
 
 			err := stream.Send(res)
 			if err != nil {
-				return err
+				return fmt.Errorf("failed to send print message: %w", err)
 			}
-		case bytes := <-s.stdoutCh:
+		case bytes, ok := <-stdoutCh:
+			if !ok {
+				stdoutCh = nil
+				activeChannels--
+
+				continue
+			}
+
 			res := &pb.RunResponse{
 				Msg: &pb.RunResponse_Console{Console: &pb.Console{Data: &pb.Console_Stdout{Stdout: bytes}}},
 			}
 
 			err := stream.Send(res)
 			if err != nil {
-				return err
+				return fmt.Errorf("failed to send stdout message: %w", err)
 			}
-		case bytes := <-s.stderrCh:
+		case bytes, ok := <-stderrCh:
+			if !ok {
+				stderrCh = nil
+				activeChannels--
+
+				continue
+			}
+
 			res := &pb.RunResponse{
 				Msg: &pb.RunResponse_Console{Console: &pb.Console{Data: &pb.Console_Stderr{Stderr: bytes}}},
 			}
 
 			err := stream.Send(res)
 			if err != nil {
-				return err
+				return fmt.Errorf("failed to send stderr message: %w", err)
 			}
-		case name := <-s.fileReqCh:
+		case name, ok := <-s.fileReqCh:
+			if !ok {
+				return nil
+			}
+
 			res := &pb.RunResponse{
 				Msg: &pb.RunResponse_FileRequest{FileRequest: &pb.FileRequest{Path: name}},
 			}
 
 			err := stream.Send(res)
 			if err != nil {
-				return err
+				return fmt.Errorf("failed to send file request: %w", err)
 			}
 
 			s.currentFile = name
-		case file := <-s.fileCh:
+		case file, ok := <-s.fileCh:
+			if !ok {
+				return nil
+			}
+
 			r, err := chanio.NewChanReader(file)
 			if err != nil {
 				return err
@@ -86,12 +125,14 @@ func toClientWorker(ctx context.Context, stream Stream, s *session) error {
 
 			err = stream.Send(res)
 			if err != nil {
-				return err
+				return fmt.Errorf("failed to send file: %w", err)
 			}
 
 			s.currentFile = ""
 		}
 	}
+
+	return nil
 }
 
 // fromClientWorker reads messages from the client and passes them to the module session.
