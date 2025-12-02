@@ -48,3 +48,21 @@ jobs:
         with:
           version: latest
           working-directory: cmd/firmware-action
+
+  megalinter:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Needed by GitHub Comment Reporter:
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: MegaLinter
+        uses: oxsecurity/megalinter/flavors/cupcake@v9
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VALIDATE_ALL_CODEBASE: true
