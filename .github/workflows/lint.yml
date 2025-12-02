@@ -1,0 +1,34 @@
+---
+# Run linters
+
+name: lint
+on:
+  pull_request: {}
+  merge_group: {}
+  push:
+    branches: ['main']
+    tags: ['v*']
+
+env:
+  APPLY_FIXES: none
+  APPLY_FIXES_EVENT: pull_request
+  APPLY_FIXES_MODE: commit
+concurrency:
+  group: ${{ github.ref }}-${{ github.workflow }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  commit-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Commit-Lint
+        uses: wagoid/commitlint-github-action@v6
+        with:
+          configFile: .commitlintrc.yml
