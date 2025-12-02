@@ -95,11 +95,12 @@ func receiveCommandRPC(_ context.Context, args runCmdArgs) (runCmdArgs, fsm.Stat
 func findDUTCmd(_ context.Context, args runCmdArgs) (runCmdArgs, fsm.State[runCmdArgs], error) {
 	wantDev := args.cmdMsg.GetDevice()
 	wantCmd := args.cmdMsg.GetCommand()
+	cmdArgs := args.cmdMsg.GetArgs()
 
-	dev, cmd, err := args.deviceList.FindCmd(wantDev, wantCmd)
+	dev, cmd, err := args.deviceList.FindCmd(wantDev, wantCmd, cmdArgs)
 	if err != nil {
 		var code connect.Code
-		if errors.Is(err, dut.ErrDeviceNotFound) || errors.Is(err, dut.ErrCommandNotFound) {
+		if errors.Is(err, dut.ErrDeviceNotFound) || errors.Is(err, dut.ErrCommandNotFound) || errors.Is(err, dut.ErrNoMainForArgs) {
 			code = connect.CodeInvalidArgument
 		} else {
 			code = connect.CodeInternal
