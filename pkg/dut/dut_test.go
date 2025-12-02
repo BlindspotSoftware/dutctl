@@ -105,6 +105,15 @@ func TestFindCmd(t *testing.T) {
 						},
 					},
 				},
+				"cmd4": {
+					Modules: []Module{
+						{
+							Config: ModuleConfig{
+								Main: false,
+							},
+						},
+					},
+				},
 			},
 		},
 	}
@@ -113,22 +122,52 @@ func TestFindCmd(t *testing.T) {
 		name    string
 		device  string
 		command string
+		args    []string
 		wantDev Device
 		wantCmd Command
 		err     error
 	}{
 		{
-			name:    "device and command found",
+			name:    "device and command found with main module and args",
 			device:  "device1",
 			command: "cmd1",
+			args:    []string{"arg1", "arg2"},
 			wantDev: devs["device1"],
 			wantCmd: devs["device1"].Cmds["cmd1"],
 			err:     nil,
 		},
 		{
-			name:    "device found, command not found",
+			name:    "device and command found with main module and no args",
+			device:  "device1",
+			command: "cmd1",
+			args:    []string{},
+			wantDev: devs["device1"],
+			wantCmd: devs["device1"].Cmds["cmd1"],
+			err:     nil,
+		},
+		{
+			name:    "command without main module and no args",
 			device:  "device1",
 			command: "cmd4",
+			args:    []string{},
+			wantDev: devs["device1"],
+			wantCmd: devs["device1"].Cmds["cmd4"],
+			err:     nil,
+		},
+		{
+			name:    "args provided but no main module",
+			device:  "device1",
+			command: "cmd4",
+			args:    []string{"arg1"},
+			wantDev: devs["device1"],
+			wantCmd: devs["device1"].Cmds["cmd4"],
+			err:     ErrNoMainForArgs,
+		},
+		{
+			name:    "device found, command not found",
+			device:  "device1",
+			command: "cmd5",
+			args:    []string{},
 			wantDev: devs["device1"],
 			wantCmd: Command{},
 			err:     ErrCommandNotFound,
@@ -137,22 +176,25 @@ func TestFindCmd(t *testing.T) {
 			name:    "device not found",
 			device:  "device2",
 			command: "cmd1",
+			args:    []string{},
 			wantDev: Device{},
 			wantCmd: Command{},
 			err:     ErrDeviceNotFound,
 		},
 		{
-			name:    "invalid command with no modules",
+			name:    "command with module but no main module",
 			device:  "device1",
 			command: "cmd2",
+			args:    []string{},
 			wantDev: devs["device1"],
 			wantCmd: devs["device1"].Cmds["cmd2"],
-			err:     ErrInvalidCommand,
+			err:     nil,
 		},
 		{
 			name:    "invalid command with multiple main modules",
 			device:  "device1",
 			command: "cmd3",
+			args:    []string{},
 			wantDev: devs["device1"],
 			wantCmd: devs["device1"].Cmds["cmd3"],
 			err:     ErrInvalidCommand,
@@ -161,7 +203,7 @@ func TestFindCmd(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			resultDev, resultCmd, err := devs.FindCmd(tt.device, tt.command)
+			resultDev, resultCmd, err := devs.FindCmd(tt.device, tt.command, tt.args)
 			if !reflect.DeepEqual(resultDev, tt.wantDev) || !reflect.DeepEqual(resultCmd, tt.wantCmd) || !errors.Is(err, tt.err) {
 				t.Errorf("expected %v, %v, %v; got %v, %v, %v", tt.wantDev, tt.wantCmd, tt.err, resultDev, resultCmd, err)
 			}

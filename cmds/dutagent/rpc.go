@@ -72,7 +72,6 @@ func (a *rpcService) Commands(
 	return res, nil
 }
 
-//nolint:funlen
 func (a *rpcService) Details(
 	_ context.Context,
 	req *connect.Request[pb.DetailsRequest],
@@ -92,7 +91,7 @@ func (a *rpcService) Details(
 		return nil, e
 	}
 
-	_, cmd, err := a.devices.FindCmd(wantDev, wantCmd)
+	_, cmd, err := a.devices.FindCmd(wantDev, wantCmd, []string{})
 	if err != nil {
 		var code connect.Code
 		if errors.Is(err, dut.ErrDeviceNotFound) || errors.Is(err, dut.ErrCommandNotFound) {
@@ -109,25 +108,14 @@ func (a *rpcService) Details(
 		return nil, e
 	}
 
-	var (
-		helpStr   string
-		foundMain bool
-	)
+	var helpStr string
 
 	for _, module := range cmd.Modules {
 		if module.Config.Main {
-			foundMain = true
 			helpStr = module.Help()
+
+			break
 		}
-	}
-
-	if !foundMain {
-		e := connect.NewError(
-			connect.CodeInternal,
-			fmt.Errorf("no main module found for command %q at device %q", wantCmd, wantDev),
-		)
-
-		return nil, e
 	}
 
 	res := connect.NewResponse(&pb.DetailsResponse{

@@ -19,7 +19,8 @@ import (
 var (
 	ErrDeviceNotFound  = errors.New("no such device")
 	ErrCommandNotFound = errors.New("no such command")
-	ErrInvalidCommand  = errors.New("command not implemented - no modules or no main module set")
+	ErrInvalidCommand  = errors.New("command not implemented - no modules or multiple main modules")
+	ErrNoMainForArgs   = errors.New("arguments provided but command has no main module to receive them")
 )
 
 // Devlist is a list of devices-under-test.
@@ -59,9 +60,9 @@ func (devs Devlist) CmdNames(device string) ([]string, error) {
 
 // FindCmd returns the device and command for a given device and command name.
 // If the device is not found, it returns ErrDeviceNotFound, if the command is not found,
-// it returns ErrCommandNotFound. If the requested command has no modules, or no main module,
-// it returns ErrInvalidCommand.
-func (devs Devlist) FindCmd(device, command string) (Device, Command, error) {
+// it returns ErrCommandNotFound. If the requested command has no modules or multiple main modules,
+// it returns ErrInvalidCommand. If arguments are provided but no main module exists, returns an error.
+func (devs Devlist) FindCmd(device, command string, args []string) (Device, Command, error) {
 	dev, ok := devs[device]
 	if !ok {
 		return Device{}, Command{}, ErrDeviceNotFound
@@ -72,8 +73,13 @@ func (devs Devlist) FindCmd(device, command string) (Device, Command, error) {
 		return dev, Command{}, ErrCommandNotFound
 	}
 
-	if len(cmd.Modules) == 0 || cmd.countMain() != 1 {
+	if len(cmd.Modules) == 0 || cmd.CountMain() > 1 {
 		return dev, cmd, ErrInvalidCommand
+	}
+
+	// Validate that if arguments are provided, there must be a main module to receive them
+	if len(args) > 0 && cmd.CountMain() == 0 {
+		return dev, cmd, ErrNoMainForArgs
 	}
 
 	return dev, cmd, nil
@@ -108,16 +114,12 @@ func (c *Command) UnmarshalYAML(node *yaml.Node) error {
 	*c = Command(cmd)
 
 	// Check presence of main module
-	switch len(c.Modules) {
-	case 0:
+	if len(c.Modules) == 0 {
 		return errors.New("command must have at least one module")
-	case 1:
-		// Implicitly sets the only module as main
-		c.Modules[0].Config.Main = true
-	default:
-		if c.countMain() != 1 {
-			return errors.New("command must have exactly one main module")
-		}
+	}
+
+	if c.CountMain() > 1 {
+		return errors.New("command must have at most one main module")
 	}
 
 	// Check for presence of args in non-main modules only
@@ -130,7 +132,8 @@ func (c *Command) UnmarshalYAML(node *yaml.Node) error {
 	return nil
 }
 
-func (c *Command) countMain() int {
+// CountMain returns the number of modules marked as main in the command.
+func (c *Command) CountMain() int {
 	count := 0
 
 	for _, mod := range c.Modules {
