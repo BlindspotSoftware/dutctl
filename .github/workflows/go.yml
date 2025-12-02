@@ -60,25 +60,6 @@ jobs:
     outputs:
       commits: ${{ toJSON(steps.*.outputs.*) }}
 
-  # Lint job - runs once per workflow execution, not per commit
-  golangci-lint:
-    name: Lint
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: 'go.mod'
-
-      - run: go version
-
-      - name: golangci-lint
-        uses: golangci/golangci-lint-action@v9
-        with:
-          version: v2.6.1
-
   # Build and test each commit for both architectures
   # Uses a matrix strategy to create separate job runs for each combination of commit and architecture
   per_commit_build_test:
