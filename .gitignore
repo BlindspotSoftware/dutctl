@@ -7,3 +7,4 @@ taskfile.yml
 /dutserver
 /cmds/exp/dutserver/dutserver
 /keys/
+/bin/
