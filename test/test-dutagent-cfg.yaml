@@ -1,0 +1,41 @@
+---
+version: 0
+devices:
+  device1:
+    desc: "Device 1"
+    cmds:
+      status:
+        desc: "Report status"
+        modules:
+          - module: dummy-status
+            main: true
+  device2:
+    desc: "Device 2"
+    cmds:
+      status:
+        desc: "Report status"
+        modules:
+          - module: dummy-status
+            main: true
+      repeat:
+        desc: "Repeat input"
+        modules:
+          - module: dummy-repeat
+            main: true
+  device3:
+    desc: "Device 3"
+    cmds:
+      status:
+        desc: "Report status"
+        modules:
+          - module: dummy-status
+            main: true
+      file-transfer:
+        desc: "Transfer a file"
+        modules:
+          - module: dummy-status
+            args:
+              - foo
+              - bar
+          - module: dummy-ft
+            main: true
