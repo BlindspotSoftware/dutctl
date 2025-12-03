@@ -149,12 +149,10 @@ nfpms:
     bindir: /usr/bin
     section: default
     priority: extra
-    #contents:
-    #  # systemd services
-    #  - src: ./scripts/remotelab-server.service
-    #    dst: /usr/lib/systemd/system/remotelab-server.service
-    #  - src: ./scripts/remotelab-set-pins-on-boot.service
-    #    dst: /usr/lib/systemd/system/remotelab-set-pins-on-boot.service
+    contents:
+      # systemd services
+      - src: ./scripts/dutagent.service
+        dst: /usr/lib/systemd/system/dutagent.service
 
     rpm:
       packager: "Jens Drenhaus <jens.drenhaus@blindspot.software>"
