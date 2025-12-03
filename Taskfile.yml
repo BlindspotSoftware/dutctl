@@ -8,3 +8,4 @@ includes:
     optional: true
     vars:
       FWCI_PROJECT_NAME: "test-dutctl"
+      DUTCTL_CONFIG_FILE: "/etc/dutctl.yaml"
