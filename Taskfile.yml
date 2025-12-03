@@ -1,0 +1,10 @@
+---
+version: '3'
+
+includes:
+  misc:
+    taskfile: ./.firmwareci/Taskfile.yml
+    dir: ./.firmwareci
+    optional: true
+    vars:
+      FWCI_PROJECT_NAME: "test-dutctl"
