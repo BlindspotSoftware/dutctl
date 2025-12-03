@@ -1,0 +1,71 @@
+---
+version: '3'
+
+includes:
+  fwci:
+    taskfile: .firmwareci/Taskfile.yml
+    dir: .firmwareci
+    optional: true
+
+tasks:
+  #==========================
+  # Compilation and building
+  #==========================
+
+  goreleaser:build:
+    desc: Use goreleaser to build the project
+    cmds:
+      - goreleaser build --auto-snapshot --clean
+
+  goreleaser:check:
+    desc: Checks if goreleaser configuration is valid
+    cmds:
+      - goreleaser check
+
+  goreleaser:release-test:
+    desc: Use goreleaser to test release the project
+    cmds:
+      - goreleaser release --draft --snapshot --clean
+    sources:
+      - .goreleaser.yaml
+      - cmds/**/*.go
+      - go.mod
+      - go.sum
+      - internal/**/*.go
+      - pkg/**/*.go
+      - protobuf/**/*.go
+      - protobuf/**/*.proto
+      - scripts/*
+    env:
+      GITHUB_TOKEN: 'dummy'
+
+  #=========
+  # Testing
+  #=========
+
+  fwci:validate:
+    desc: Validate FWCI files
+    cmds:
+      - fwci validate
+
+  fwci:sync:
+    desc: Synchronize the repository with the CI
+    cmds:
+      - yes | fwci sync --force
+    sources:
+      - ./.firmwareci/**/*.yaml
+      - ./.firmwareci/**/Taskfile.yml
+      - ./Taskfile.yml
+
+  fwci:job:
+    desc: Submit a job
+    deps:
+      - fwci:sync
+    vars:
+      DUTCTL_PATH:
+        sh: ls ./bin/dutctl_linux_amd64_*/dutctl
+      FTI_PKG_PATH:
+        sh: ls ./bin/dutctl_*_arm64.deb
+      CONFIG: ./contrib/dutagent-cfg-example.yaml
+    cmds:
+      - fwci job --workflow="test-dutctl" "DUTCTL={{.DUTCTL_PATH}}" "REMOTE_PKG={{.FTI_PKG_PATH}}" "CONFIG={{.CONFIG}}"
