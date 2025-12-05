@@ -1,6 +1,7 @@
 // Copyright 2025 Blindspot Software
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
+
 package dutagent
 
 import (
@@ -10,7 +11,7 @@ import (
 // Stream abstracts the bidirectional RPC channel used by the dutagent Run RPC.
 //
 // General Purpose:
-//   - Decouples internal prosessing of bidirectional RPC streams from concrete
+//   - Decouples internal processing of bidirectional RPC streams from concrete
 //     transport implementation (currently connect.BidiStream).
 //   - Enables unit tests to provide lightweight fakes without standing up a real
 //     RPC connection.
