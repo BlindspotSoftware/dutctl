@@ -100,22 +100,65 @@ func toClientWorker(ctx context.Context, stream Stream, s *session) error {
 //
 //nolint:cyclop,funlen,gocognit
 func fromClientWorker(ctx context.Context, stream Stream, s *session) error {
+	type recvResult struct {
+		req *pb.RunRequest
+		err error
+	}
+
+	// Single goroutine performing blocking Receive calls and forwarding results.
+	resCh := make(chan recvResult)
+	// Receive loop goroutine rationale:
+	//
+	// We offload blocking stream.Receive calls to this goroutine so the main select
+	// can remain responsive to ctx cancellation. The goroutine will keep calling
+	// Receive until an error (including io.EOF) occurs, then return.
+	//
+	// Potential leak concern: If ctx is cancelled while Receive is blocked the
+	// goroutine keeps waiting. This is acceptable because, by contract, the RPC
+	// stream is closed by the client (EOF) or ends with an error shortly after
+	// module completion / broker cancellation; that closure unblocks Receive and
+	// the goroutine exits, so it does not leak for the lifetime of the process.
+	go func() {
+		for {
+			req, err := stream.Receive()
+			resCh <- recvResult{req: req, err: err}
+
+			if err != nil { // stop receiving after any error (including EOF)
+				return
+			}
+		}
+	}()
+
 	for {
 		select {
 		case <-ctx.Done():
-			return nil
-		default:
-			req, err := stream.Receive()
-			if err != nil {
-				// Treat EOF as a clean shutdown (client closed its send side)
-				if errors.Is(err, io.EOF) {
+			// Cancellation path: opportunistically drain one pending receive.
+			select {
+			case r := <-resCh:
+				if r.err != nil && !errors.Is(r.err, io.EOF) {
+					return r.err
+				}
+
+				return nil
+			default:
+				return nil
+			}
+		case r := <-resCh:
+			if r.err != nil {
+				if errors.Is(r.err, io.EOF) {
 					return nil
 				}
 
-				return err
+				return r.err
 			}
 
-			reqMsg := req.GetMsg()
+			if r.req == nil { // Defensive: shouldn't happen unless stream.Receive misbehaves
+				log.Println("Received nil request without error; ignoring")
+
+				continue
+			}
+
+			reqMsg := r.req.GetMsg()
 			switch msg := reqMsg.(type) {
 			case *pb.RunRequest_Console:
 				msgConsoleData := msg.Console.GetData()
@@ -125,13 +168,19 @@ func fromClientWorker(ctx context.Context, stream Stream, s *session) error {
 					if stdin == nil {
 						log.Println("Received nil stdin message")
 
-						continue // Can this happen?
+						continue
 					}
 
 					log.Printf("Server received stdin from client: %q", string(stdin))
-					s.stdinCh <- stdin
+
+					select {
+					case <-ctx.Done():
+						return nil
+					case s.stdinCh <- stdin:
+					}
 
 					log.Println("Passed stdin to module")
+
 				default:
 					log.Printf("Unexpected Console message %T", consoleMsg)
 				}
@@ -170,18 +219,12 @@ func fromClientWorker(ctx context.Context, stream Stream, s *session) error {
 				s.fileCh <- file
 				file <- content
 
-				close(file) // indicate EOF.
-
+				close(file)
 				log.Println("Passed file to module (buffered in the session)")
 
 				s.currentFile = ""
 			default:
 				log.Printf("Unexpected message type %T", msg)
-			}
-
-			consoleMsg := req.GetConsole()
-			if consoleMsg == nil {
-				continue // Ignore non-console messages
 			}
 		}
 	}
