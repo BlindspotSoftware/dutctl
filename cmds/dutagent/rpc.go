@@ -142,7 +142,7 @@ func (a *rpcService) Details(
 	return res, nil
 }
 
-// streamAdapter decoupls a connect.BidiStream to the dutagent.Stream interface.
+// streamAdapter decouples a connect.BidiStream to the dutagent.Stream interface.
 type streamAdapter struct {
 	inner *connect.BidiStream[pb.RunRequest, pb.RunResponse]
 }
@@ -162,8 +162,7 @@ func (a *rpcService) Run(
 		deviceList: a.devices,
 	}
 
-	var err error
-	_, err = fsm.Run(ctx, fsmArgs, receiveCommandRPC)
+	_, err := fsm.Run(ctx, fsmArgs, receiveCommandRPC)
 
 	var connectErr *connect.Error
 	if err != nil && !errors.As(err, &connectErr) {
@@ -171,7 +170,11 @@ func (a *rpcService) Run(
 		err = connect.NewError(connect.CodeInternal, err)
 	}
 
-	log.Print("Run-RPC finished with error: ", err)
+	if err != nil {
+		log.Print("Run-RPC finished with error: ", err)
+	} else {
+		log.Print("Run-RPC finished successfully")
+	}
 
 	return err
 }
