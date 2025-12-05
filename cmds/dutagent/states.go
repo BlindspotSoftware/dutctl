@@ -139,6 +139,7 @@ func executeModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State
 			err := module.Run(rpcCtx, moduleSession, moduleArgs...)
 			if err != nil {
 				args.moduleErrCh <- err
+
 				log.Printf("Module %q failed: %v", module.Config.Name, err)
 				modCtxCancel()
 
@@ -158,27 +159,24 @@ func executeModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State
 //
 // It waits for the module execution to finish. The state will block until the module execution is finished.
 func waitModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State[runCmdArgs], error) {
-	log.Println("Waiting for module to finish")
-
 	var (
-		brokerDone bool
-		moduleDone bool
+		brokerDone  bool
+		moduleDone  bool
+		brokerErrCh = args.brokerErrCh
 	)
 
 	for {
 		select {
 		case <-ctx.Done():
 			e := connect.NewError(connect.CodeAborted, fmt.Errorf("module execution aborted: %v", ctx.Err()))
-			log.Printf("Wait for Modules to finish: Context closed: %v", e)
 
 			return args, nil, e
-		case brokerErr := <-args.brokerErrCh:
-			brokerDone = true
-
-			if brokerErr != nil {
-				// Communication error in module environment.
+		case brokerErr, ok := <-brokerErrCh:
+			if !ok { // channel closed: all broker workers finished
+				brokerDone = true
+				brokerErrCh = nil
+			} else if brokerErr != nil {
 				e := connect.NewError(connect.CodeInternal, fmt.Errorf("module environment error: %v", brokerErr))
-				log.Printf("Wait for Modules to finish: Broker issue: %v", e)
 
 				return args, nil, e
 			}
@@ -188,15 +186,12 @@ func waitModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State[ru
 			if moduleErr != nil {
 				// Module execution failed.
 				e := connect.NewError(connect.CodeAborted, fmt.Errorf("module execution failed: %v", moduleErr))
-				log.Printf("Wait for Modules to finish: A module failed: %v", e)
 
 				return args, nil, e
 			}
 		}
 
 		if brokerDone && moduleDone {
-			log.Println("Module execution finished successfully")
-
 			return args, nil, nil
 		}
 	}
