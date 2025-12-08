@@ -8,6 +8,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"flag"
 	"fmt"
@@ -15,6 +16,8 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
 
 	"connectrpc.com/connect"
@@ -322,7 +325,66 @@ func (app *application) dispatchCommand(ctx context.Context, device, command str
 		return app.detailsRPC(ctx, device, command, keyword.Help)
 	}
 
+	// Preprocess arguments for optimization (e.g., calculate hashes)
+	cmdArgs, err := app.preprocessArgs(command, cmdArgs)
+	if err != nil {
+		return err
+	}
+
 	return app.runRPC(ctx, device, command, cmdArgs)
+}
+
+// preprocessArgs preprocesses command arguments for optimization.
+// For example, it calculates file hashes for PiKVM media mount commands.
+func (app *application) preprocessArgs(command string, args []string) ([]string, error) {
+	// Argument counts for "media mount <path> [hash] [size]".
+	const (
+		mediaMountMinArgs  = 2 // mount + path
+		mediaMountWithHash = 3 // mount + path + hash
+	)
+
+	// Optimize PiKVM media mount: calculate hash locally to avoid unnecessary transfers
+	if strings.ToLower(command) == "media" && len(args) >= mediaMountMinArgs && strings.ToLower(args[0]) == "mount" {
+		imagePath := args[1]
+
+		// If hash is already provided (args[2]), skip preprocessing
+		if len(args) >= mediaMountWithHash {
+			return args, nil
+		}
+
+		// Check if file exists
+		fileInfo, err := os.Stat(imagePath) //nolint:gosec // the user names a local image on the command line
+		if err != nil {
+			// If file doesn't exist locally, let the agent handle the error
+			return args, nil
+		}
+
+		// Calculate SHA256 hash
+		slog.Debug("Calculating SHA256 hash", "path", imagePath)
+
+		file, err := os.Open(imagePath) //nolint:gosec // the user names a local image on the command line
+		if err != nil {
+			return args, fmt.Errorf("failed to open file for hashing: %w", err)
+		}
+		defer file.Close()
+
+		hash := sha256.New()
+
+		_, err = io.Copy(hash, file)
+		if err != nil {
+			return args, fmt.Errorf("failed to calculate hash: %w", err)
+		}
+
+		hashSum := fmt.Sprintf("%x", hash.Sum(nil))
+		fileSize := fileInfo.Size()
+
+		slog.Debug("Calculated SHA256 hash", "hash", hashSum, "size", fileSize)
+
+		// Append hash and size to arguments
+		return append(args, hashSum, strconv.FormatInt(fileSize, 10)), nil
+	}
+
+	return args, nil
 }
 
 // parseUnlockArgs interprets the arguments to the unlock command. Unlock accepts
