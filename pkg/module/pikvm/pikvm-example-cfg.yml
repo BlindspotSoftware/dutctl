@@ -1,0 +1,53 @@
+version: 0
+devices:
+  my-server:
+    desc: "A server controlled via PiKVM"
+    cmds:
+      # Power Management
+      power:
+        desc: "Power management: on|off|force-off|reset|force-reset|status"
+        modules:
+          - module: pikvm
+            main: true
+            options:
+              host: https://pikvm.local
+              user: admin
+              password: admin
+              timeout: 10s
+              command: power
+
+      # Keyboard Control
+      keyboard:
+        desc: "Keyboard control: type <text>|key <keyname>|key-combo <combo>"
+        modules:
+          - module: pikvm
+            main: true
+            options:
+              host: https://pikvm.local
+              user: admin
+              password: admin
+              command: keyboard
+
+      # Virtual Media
+      media:
+        desc: "Virtual media control: mount <path>|mount-url <url>|unmount|media-status"
+        modules:
+          - module: pikvm
+            main: true
+            options:
+              host: https://pikvm.local
+              user: admin
+              password: admin
+              command: media
+
+      # Screenshot
+      screenshot:
+        desc: "Capture a screenshot from PiKVM"
+        modules:
+          - module: pikvm
+            main: true
+            options:
+              host: https://pikvm.local
+              user: admin
+              password: admin
+              command: screenshot
