@@ -1,0 +1,16 @@
+version: 0
+devices:
+  my-server:
+    desc: "Server controlled via PiKVM"
+    cmds:
+      power:
+        desc: "Power management: on|off|force-off|reset|force-reset|status"
+        modules:
+          - module: pikvm
+            main: true
+            options:
+              host: https://pikvm.local
+              user: admin
+              password: admin
+              mode: power
+# Usage: dutctl my-server power status

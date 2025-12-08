@@ -1,0 +1,16 @@
+version: 0
+devices:
+  my-server:
+    desc: "Server controlled via PiKVM"
+    cmds:
+      media:
+        desc: "Virtual media control: mount <path>|mount-url <url>|unmount|media-status"
+        modules:
+          - module: pikvm
+            main: true
+            options:
+              host: https://pikvm.local
+              user: admin
+              password: admin
+              mode: media
+# Usage: dutctl my-server media mount-url https://releases.ubuntu.com/22.04/ubuntu-22.04-live-server-amd64.iso

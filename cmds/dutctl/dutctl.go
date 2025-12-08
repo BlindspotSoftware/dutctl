@@ -7,6 +7,7 @@
 package main
 
 import (
+	"crypto/sha256"
 	"crypto/tls"
 	"errors"
 	"flag"
@@ -16,6 +17,8 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
+	"strings"
 
 	"connectrpc.com/connect"
 	"github.com/BlindspotSoftware/dutctl/internal/buildinfo"
@@ -176,16 +179,18 @@ func (app *application) start() {
 			app.exit(errInvalidCmdline)
 		}
 
-		err := app.listRPC()
-		app.exit(err)
+		app.exit(app.listRPC())
 	}
 
 	if len(app.args) == 1 {
-		device := app.args[0]
-		err := app.commandsRPC(device)
-		app.exit(err)
+		app.exit(app.commandsRPC(app.args[0]))
 	}
 
+	app.dispatchDeviceCommand()
+}
+
+// dispatchDeviceCommand handles the "device command [args...]" invocation form.
+func (app *application) dispatchDeviceCommand() {
 	device := app.args[0]
 	command := app.args[1]
 	cmdArgs := app.args[2:]
@@ -198,12 +203,16 @@ func (app *application) start() {
 	}
 
 	if len(cmdArgs) > 0 && cmdArgs[0] == "help" {
-		err := app.detailsRPC(device, command, "help")
+		app.exit(app.detailsRPC(device, command, "help"))
+	}
+
+	// Preprocess arguments for optimization (e.g., calculate hashes)
+	cmdArgs, err := app.preprocessArgs(command, cmdArgs)
+	if err != nil {
 		app.exit(err)
 	}
 
-	err := app.runRPC(device, command, cmdArgs)
-	app.exit(err)
+	app.exit(app.runRPC(device, command, cmdArgs))
 }
 
 // exit terminates the application. If the provided error is not nil, it is printed to
@@ -233,6 +242,59 @@ func (app *application) exit(err error) {
 	}
 
 	app.exitFunc(1)
+}
+
+// preprocessArgs preprocesses command arguments for optimization.
+// For example, it calculates file hashes for PiKVM media mount commands.
+func (app *application) preprocessArgs(command string, args []string) ([]string, error) {
+	// Argument counts for "media mount <path> [hash] [size]".
+	const (
+		mediaMountMinArgs  = 2 // mount + path
+		mediaMountWithHash = 3 // mount + path + hash
+	)
+
+	// Optimize PiKVM media mount: calculate hash locally to avoid unnecessary transfers
+	if strings.ToLower(command) == "media" && len(args) >= mediaMountMinArgs && strings.ToLower(args[0]) == "mount" {
+		imagePath := args[1]
+
+		// If hash is already provided (args[2]), skip preprocessing
+		if len(args) >= mediaMountWithHash {
+			return args, nil
+		}
+
+		// Check if file exists
+		fileInfo, err := os.Stat(imagePath)
+		if err != nil {
+			// If file doesn't exist locally, let the agent handle the error
+			return args, nil
+		}
+
+		// Calculate SHA256 hash
+		log.Printf("Calculating SHA256 hash of %s...", imagePath)
+
+		file, err := os.Open(imagePath)
+		if err != nil {
+			return args, fmt.Errorf("failed to open file for hashing: %w", err)
+		}
+		defer file.Close()
+
+		hash := sha256.New()
+
+		_, err = io.Copy(hash, file)
+		if err != nil {
+			return args, fmt.Errorf("failed to calculate hash: %w", err)
+		}
+
+		hashSum := fmt.Sprintf("%x", hash.Sum(nil))
+		fileSize := fileInfo.Size()
+
+		log.Printf("Hash: %s, Size: %d bytes", hashSum, fileSize)
+
+		// Append hash and size to arguments
+		return append(args, hashSum, strconv.FormatInt(fileSize, 10)), nil
+	}
+
+	return args, nil
 }
 
 func (app *application) printVersion() {
