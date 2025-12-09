@@ -6,6 +6,7 @@ require (
 	connectrpc.com/connect v1.19.1
 	github.com/bougou/go-ipmi v0.7.8
 	github.com/go-playground/validator/v10 v10.29.0
+	github.com/google/go-cmp v0.7.0
 	github.com/stianeikeland/go-rpio/v4 v4.6.0
 	github.com/tarm/serial v0.0.0-20180830185346-98f6abe2eb07
 	golang.org/x/crypto v0.46.0

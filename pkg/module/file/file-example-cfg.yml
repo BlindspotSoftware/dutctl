@@ -1,0 +1,63 @@
+# Example configuration for the file module
+# This file demonstrates various use cases for file transfers between client and dutagent
+# $WD is a placeholder of the working directory on both the client and dutagent
+
+devices:
+  example-device:
+    cmds:
+      # Upload any file - preserves directory structure
+      upload:
+        desc: "Upload file to device"
+        modules:
+          - module: file
+            main: true
+            options:
+              operation: "upload"
+        # Usage:
+        #   dutctl example-device upload ./build/firmware.bin
+        #   → uploads to $WD/firmware.bin (preserves structure)
+        #
+        #   dutctl example-device upload ./firmware.bin:custom/firmware.bin
+        #   → uploads to $WD/custom/firmware.bin (custom destination via colon syntax)
+
+      # Upload with destination configured - arg becomes source
+      upload-script:
+        desc: "Upload and install a script"
+        modules:
+          - module: file
+            main: true
+            options:
+              operation: "upload"
+              destination: "/opt/scripts/install.sh"
+              permission: "0755" # Make it executable
+        # Usage:
+        #   dutctl example-device upload-script ./scripts/init.sh
+        #   → uploads to: /opt/scripts/install.sh on device
+
+      # Download with source configured - arg becomes destination
+      fetch-logs:
+        desc: "Download logs from device"
+        modules:
+          - module: file
+            main: true
+            options:
+              operation: "download"
+              source: "/var/log.txt"
+        # Usage:
+        #   dutctl example-device fetch-logs ./local-log.txt
+        #   → downloads /var/log.txt to ./local-log.txt on client
+
+      # Upload with both paths configured - no arg allowed
+      upload-config:
+        desc: "Upload configuration file with fixed paths"
+        modules:
+          - module: file
+            main: true
+            options:
+              operation: "upload"
+              source: "./configs/device.conf"
+              destination: "/etc/device/device.conf"
+              permission: "0644"
+        # Usage:
+        #   dutctl example-device upload-config
+        #   → uploads ./configs/device.conf to /etc/device/device.conf
