@@ -12,16 +12,16 @@ import (
 
 // validateConfig validates the File configuration (called in Init).
 func (f *File) validateConfig() error {
-	// Validate mode string format if specified
-	if f.Mode != "" {
-		// Mode must start with "0" to indicate octal format
-		if f.Mode[0] != '0' {
-			return fmt.Errorf("invalid mode %q: must be octal format starting with '0' (e.g., '0644')", f.Mode)
+	// Validate perm string format if specified
+	if f.Perm != "" {
+		// Perm must start with "0" to indicate octal format
+		if f.Perm[0] != '0' {
+			return fmt.Errorf("invalid permission %q: must be octal format starting with '0' (e.g., '0644')", f.Perm)
 		}
 
-		_, err := strconv.ParseUint(f.Mode, 8, 32)
+		_, err := strconv.ParseUint(f.Perm, 8, 32)
 		if err != nil {
-			return fmt.Errorf("invalid mode %q: must be octal format (e.g., '0644'): %w", f.Mode, err)
+			return fmt.Errorf("invalid permission %q: must be octal format (e.g., '0644'): %w", f.Perm, err)
 		}
 	}
 

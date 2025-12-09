@@ -40,32 +40,32 @@ func TestValidateConfig_Mode(t *testing.T) {
 			name:    "invalid mode - not octal",
 			mode:    "0999",
 			wantErr: true,
-			errMsg:  "invalid mode",
+			errMsg:  "invalid permission",
 		},
 		{
 			name:    "invalid mode - decimal",
 			mode:    "644",
 			wantErr: true,
-			errMsg:  "invalid mode",
+			errMsg:  "invalid permission",
 		},
 		{
 			name:    "invalid mode - text",
 			mode:    "rwxr-xr-x",
 			wantErr: true,
-			errMsg:  "invalid mode",
+			errMsg:  "invalid permission",
 		},
 		{
 			name:    "invalid mode - empty quotes",
 			mode:    "''",
 			wantErr: true,
-			errMsg:  "invalid mode",
+			errMsg:  "invalid permission",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := &File{
-				Mode:      tt.mode,
+				Perm:      tt.mode,
 				Operation: "upload", // Required field
 			}
 
@@ -135,7 +135,7 @@ func TestValidateConfig_Operation(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := &File{
 				Operation: tt.operation,
-				Mode:      "", // Valid mode
+				Perm:      "", // Valid mode
 			}
 
 			err := f.validateConfig()
@@ -162,7 +162,7 @@ func TestValidateConfig_Combined(t *testing.T) {
 			name: "fully valid upload config",
 			file: File{
 				Operation: "upload",
-				Mode:      "0644",
+				Perm:      "0644",
 				ForceDir:  true,
 				Overwrite: true,
 			},
@@ -172,7 +172,7 @@ func TestValidateConfig_Combined(t *testing.T) {
 			name: "fully valid download config",
 			file: File{
 				Operation:          "download",
-				DefaultDestination: "/tmp/file.bin",
+				Destination: "/tmp/file.bin",
 			},
 			wantErr: false,
 		},
@@ -180,15 +180,15 @@ func TestValidateConfig_Combined(t *testing.T) {
 			name: "invalid mode and missing operation",
 			file: File{
 				Operation: "",
-				Mode:      "invalid",
+				Perm:      "invalid",
 			},
 			wantErr: true,
-			errMsg:  "invalid mode",
+			errMsg:  "invalid permission",
 		},
 		{
 			name: "missing operation only",
 			file: File{
-				Mode: "0755",
+				Perm: "0755",
 			},
 			wantErr: true,
 			errMsg:  "operation must be set",

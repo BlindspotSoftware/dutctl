@@ -3,8 +3,6 @@
 // license that can be found in the LICENSE file.
 
 // Package file provides a dutagent module that transfers files between client and dutagent.
-// This module allows uploading files from the client to the dutagent and downloading files
-// from the dutagent to the client.
 package file
 
 import (
@@ -46,18 +44,16 @@ const (
 
 // File is a module that transfers files between client and dutagent.
 type File struct {
-	// ForceDir forces creation of parent directories if they don't exist.
+	// ForceDir forces creation of parent directories if they don't exist (default: false).
 	ForceDir bool
-	// Overwrite allows overwriting existing files.
+	// Overwrite allows overwriting existing files (default: false).
 	Overwrite bool
-	// Mode sets file permissions in octal format (e.g., "0644", "0755").
-	Mode string
+	// Perm sets file permissions in octal format (e.g., "0644", "0755").
+	Perm string
 	// Operation pre-configures the operation type ("upload" or "download").
-	// When set, enables single-argument form.
 	Operation string
-	// DefaultDestination is the default destination path (for uploads) or
-	// source path (for downloads) used in single-argument form.
-	DefaultDestination string
+	// Destination is the destination path that overrides any colon syntax in arguments.
+	Destination string
 
 	sourcePath string // sourcePath is the source file path
 	destPath   string // destPath is the destination file path
@@ -66,52 +62,29 @@ type File struct {
 // Ensure implementing the Module interface.
 var _ module.Module = &File{}
 
-const abstract = `Transfer files between client and dutagent.
-`
+const abstract = `Transfer files between client and dutagent.`
 
 const usage = `
 ARGUMENTS:
-	<path>              Use default destination from config, or working directory if not set
-	<source>:<dest>     Explicitly specify both source and destination
+	[path]
+	[source:destination]
 
+The operation type (upload or download) must be configured in the device YAML.
+
+For single path form:
+  - If destination is configured: uses configured destination
+  - If destination not configured: uses working directory + basename
+
+For colon syntax:
+  - Explicitly specifies both source and destination paths
+  - Only works if destination is NOT configured
+  
+For upload: <source> is client path, <destination> is dutagent path
+For download: <source> is dutagent path, <destination> is client path
 `
 
 const description = `
-The file module transfers files between client and dutagent. The operation type
-(upload or download) must be configured in the device YAML.
-
-USAGE FORMS:
-
-1. Single path:
-   - If default_destination is set: uses configured destination
-   - If default_destination not set: uses working directory + basename
-   Example: dutctl device cmd ./firmware.bin
-
-2. Colon syntax (explicitly specify both paths):
-   Example: dutctl device cmd ./firmware.bin:/custom/path.bin
-
-For upload operations:
-  - <source> is the filepath on the client
-  - <destination> is the filepath on the dutagent where the file will be saved
-
-For download operations:
-  - <source> is the filepath on the dutagent
-  - <destination> is the filepath on the client where the file will be saved
-
-REQUIRED CONFIG (in device YAML):
-  operation: Must be "upload" or "download"
-
-OPTIONAL CONFIG:
-  default_destination: Default destination path (if not set, uses working directory + basename)
-
-OPTIONAL CONFIG (upload only):
-  forcedir:  Force creation of parent directories if they don't exist (default: false)
-  overwrite: Overwrite existing files (default: false)
-  mode:      File permissions in octal format, e.g., "0644" or "0755" (optional)
-
-Note: forcedir, overwrite, and mode options only apply to upload operations.
-For downloads, the client controls how files are saved locally.
-
+See the README for detailed configuration options and examples.
 `
 
 func (f *File) Help() string {
@@ -196,10 +169,10 @@ func (f *File) uploadFile(sesh module.Session) error {
 	// Determine file permissions
 	perm := fs.FileMode(defaultFilePerm) // default
 
-	if f.Mode != "" {
-		mode, err := strconv.ParseUint(f.Mode, 8, 32)
+	if f.Perm != "" {
+		mode, err := strconv.ParseUint(f.Perm, 8, 32)
 		if err != nil {
-			return fmt.Errorf("failed to parse mode %q: %w", f.Mode, err)
+			return fmt.Errorf("failed to parse mode %q: %w", f.Perm, err)
 		}
 
 		perm = fs.FileMode(mode)
