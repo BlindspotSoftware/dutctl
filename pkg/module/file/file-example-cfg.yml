@@ -1,0 +1,50 @@
+# Example configuration for the file module
+# This file demonstrates various use cases for file transfers between client and dutagent
+
+devices:
+  # Example device configuration
+  example-device:
+    # Upload firmware file
+    cmds:
+      upload-firmware:
+        desc: "Upload firmware binary to device"
+        modules:
+          - module: file
+            main: true
+            options:
+              operation: "upload"
+              overwrite: true # Allow overwriting existing firmware
+              mode: "0644" # Standard file permissions
+
+      # Upload executable script
+      upload-script:
+        desc: "Upload and install a script"
+        modules:
+          - module: file
+            main: true
+            options:
+              operation: "upload"
+              default_destination: "/opt/scripts/install.sh"
+              forcedir: true # Create directories if they don't exist
+              overwrite: true # Overwrite existing script
+              mode: "0755" # Make it executable
+
+      # Download logs
+      fetch-logs:
+        desc: "Download logs"
+        modules:
+          - module: file
+            main: true
+            options:
+              operation: "download"
+# Usage examples:
+#
+# Upload firmware:
+#   dutctl example-device upload-firmware  ./firmware.bin:/tmp/firmware.bin
+#
+# Upload script:
+#   dutctl example-device upload-script ./scripts/init.sh
+#
+# Download logs:
+#   dutctl example-device fetch-logs /var/log/app.log:app.log
+#
