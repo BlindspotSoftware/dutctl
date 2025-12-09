@@ -1,8 +1,8 @@
 .vscode/
 taskfile.yml
-/dutctl
+/dutctl*
 /cmds/dutctl/dutctl
-/dutagent
+/dutagent*
 /cmds/dutagent/dutagent
 /dutserver
 /cmds/exp/dutserver/dutserver
