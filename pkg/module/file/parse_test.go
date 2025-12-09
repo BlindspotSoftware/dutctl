@@ -71,7 +71,7 @@ func TestParsePaths_ColonSyntax(t *testing.T) {
 			operation:   "upload",
 			defaultDest: "/tmp/rom.bin",
 			wantErr:     true,
-			errMsg:      "cannot use colon syntax when default_destination is set to",
+			errMsg:      "cannot use colon syntax when destination is configured to",
 		},
 		{
 			name:        "download colon syntax with default destination - should error",
@@ -79,7 +79,7 @@ func TestParsePaths_ColonSyntax(t *testing.T) {
 			operation:   "download",
 			defaultDest: "./output.log",
 			wantErr:     true,
-			errMsg:      "cannot use colon syntax when default_destination is set to",
+			errMsg:      "cannot use colon syntax when destination is configured to",
 		},
 	}
 
@@ -87,7 +87,7 @@ func TestParsePaths_ColonSyntax(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := &File{
 				Operation:          tt.operation,
-				DefaultDestination: tt.defaultDest,
+				Destination: tt.defaultDest,
 			}
 
 			err := f.parsePaths(tt.arg)
@@ -148,7 +148,7 @@ func TestParsePaths_UploadWithDefaultDestination(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := &File{
 				Operation:          "upload",
-				DefaultDestination: tt.defaultDest,
+				Destination: tt.defaultDest,
 			}
 
 			err := f.parsePaths(tt.arg)
@@ -209,7 +209,7 @@ func TestParsePaths_UploadWithoutDefaultDestination(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := &File{
 				Operation:          "upload",
-				DefaultDestination: "", // No default destination
+				Destination: "", // No default destination
 			}
 
 			err := f.parsePaths(tt.arg)
@@ -262,7 +262,7 @@ func TestParsePaths_DownloadWithDefaultDestination(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := &File{
 				Operation:          "download",
-				DefaultDestination: tt.defaultDest,
+				Destination: tt.defaultDest,
 			}
 
 			err := f.parsePaths(tt.arg)
@@ -309,7 +309,7 @@ func TestParsePaths_DownloadWithoutDefaultDestination(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := &File{
 				Operation:          "download",
-				DefaultDestination: "", // No default destination
+				Destination: "", // No default destination
 			}
 
 			err := f.parsePaths(tt.arg)
@@ -363,7 +363,7 @@ func TestParsePaths_EmptyArgument(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := &File{
 				Operation:          tt.operation,
-				DefaultDestination: "/tmp/file.bin",
+				Destination: "/tmp/file.bin",
 			}
 
 			err := f.parsePaths(tt.arg)

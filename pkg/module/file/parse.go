@@ -47,13 +47,13 @@ func determineSource(arg, colonSrc string) string {
 }
 
 // determineDestination returns the destination path following precedence rules:
-// 1. default_destination (if set) - always takes precedence
-// 2. colon syntax destination (if present and no default_destination)
+// 1. destination config (if set) - always takes precedence
+// 2. colon syntax destination (if present and no destination config)
 // 3. working directory + basename.
 func (f *File) determineDestination(colonDest string) string {
-	// Rule 1: default_destination takes precedence
-	if f.DefaultDestination != "" {
-		return f.DefaultDestination
+	// Rule 1: destination config takes precedence
+	if f.Destination != "" {
+		return f.Destination
 	}
 
 	// Rule 2: colon syntax destination
@@ -66,7 +66,7 @@ func (f *File) determineDestination(colonDest string) string {
 }
 
 // parsePaths parses the user argument and returns src and destination paths.
-// default_destination always represents the destination path when configured.
+// destination config always represents the destination path when configured.
 func (f *File) parsePaths(arg string) error {
 	// Validate argument is not empty
 	if arg == "" {
@@ -79,9 +79,9 @@ func (f *File) parsePaths(arg string) error {
 		return err
 	}
 
-	// Check for mutually exclusive conditions: default_destination config and colon syntax
-	if f.DefaultDestination != "" && colonDest != "" {
-		return fmt.Errorf("cannot use colon syntax when default_destination is set to %q", f.DefaultDestination)
+	// Check for mutually exclusive conditions: destination config and colon syntax
+	if f.Destination != "" && colonDest != "" {
+		return fmt.Errorf("cannot use colon syntax when destination is configured to %q", f.Destination)
 	}
 
 	// Determine src
