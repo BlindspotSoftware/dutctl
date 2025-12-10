@@ -6,7 +6,9 @@ package file
 
 import (
 	"errors"
+	"flag"
 	"fmt"
+	"io"
 	"path/filepath"
 	"strings"
 )
@@ -16,6 +18,28 @@ const (
 	dstArg   = 1
 	argCount = 2
 )
+
+// evalArgs parses and validates arguments using flag.FlagSet.
+func (f *File) evalArgs(args []string) (string, error) {
+	fs := flag.NewFlagSet("file", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+
+	err := fs.Parse(args)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse arguments: %w", err)
+	}
+
+	// Expect exactly one positional argument
+	if fs.NArg() != 1 {
+		if fs.NArg() == 0 {
+			return "", errors.New("missing argument: path required")
+		}
+
+		return "", fmt.Errorf("invalid argument count: expected 1 arg, got %d", fs.NArg())
+	}
+
+	return fs.Arg(0), nil
+}
 
 // parseColonSyntax parses the argument for colon syntax (src:dest).
 // Returns the src and dest parts, whether colon was present, and any error.
@@ -47,13 +71,13 @@ func determineSource(arg, colonSrc string) string {
 }
 
 // determineDestination returns the destination path following precedence rules:
-// 1. default_destination (if set) - always takes precedence
-// 2. colon syntax destination (if present and no default_destination)
+// 1. destination (if set) - always takes precedence
+// 2. colon syntax destination (if present and no destination)
 // 3. working directory + basename.
 func (f *File) determineDestination(colonDest string) string {
-	// Rule 1: default_destination takes precedence
-	if f.DefaultDestination != "" {
-		return f.DefaultDestination
+	// Rule 1: destination takes precedence
+	if f.Destination != "" {
+		return f.Destination
 	}
 
 	// Rule 2: colon syntax destination
@@ -66,7 +90,7 @@ func (f *File) determineDestination(colonDest string) string {
 }
 
 // parsePaths parses the user argument and returns src and destination paths.
-// default_destination always represents the destination path when configured.
+// destination always represents the destination path when configured.
 func (f *File) parsePaths(arg string) error {
 	// Validate argument is not empty
 	if arg == "" {
@@ -79,9 +103,9 @@ func (f *File) parsePaths(arg string) error {
 		return err
 	}
 
-	// Check for mutually exclusive conditions: default_destination config and colon syntax
-	if f.DefaultDestination != "" && colonDest != "" {
-		return fmt.Errorf("cannot use colon syntax when default_destination is set to %q", f.DefaultDestination)
+	// Check for mutually exclusive conditions: destination config and colon syntax
+	if f.Destination != "" && colonDest != "" {
+		return fmt.Errorf("cannot use colon syntax when destination is set to %q", f.Destination)
 	}
 
 	// Determine src

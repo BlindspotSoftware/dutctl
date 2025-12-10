@@ -13,8 +13,7 @@ devices:
             main: true
             options:
               operation: "upload"
-              overwrite: true # Allow overwriting existing firmware
-              mode: "0644" # Standard file permissions
+              permission: "0644" # Standard file permissions
 
       # Upload executable script
       upload-script:
@@ -24,10 +23,8 @@ devices:
             main: true
             options:
               operation: "upload"
-              default_destination: "/opt/scripts/install.sh"
-              forcedir: true # Create directories if they don't exist
-              overwrite: true # Overwrite existing script
-              mode: "0755" # Make it executable
+              destination: "/opt/scripts/install.sh"
+              permission: "0755" # Make it executable
 
       # Download logs
       fetch-logs:
@@ -37,6 +34,7 @@ devices:
             main: true
             options:
               operation: "download"
+              
 # Usage examples:
 #
 # Upload firmware:

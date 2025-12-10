@@ -11,14 +11,14 @@ import (
 
 func TestParsePaths_ColonSyntax(t *testing.T) {
 	tests := []struct {
-		name        string
-		arg         string
-		operation   string
-		defaultDest string
-		wantSrc     string
-		wantDest    string
-		wantErr     bool
-		errMsg      string
+		name      string
+		arg       string
+		operation string
+		dest      string
+		wantSrc   string
+		wantDest  string
+		wantErr   bool
+		errMsg    string
 	}{
 		{
 			name:      "upload with colon syntax",
@@ -66,28 +66,28 @@ func TestParsePaths_ColonSyntax(t *testing.T) {
 			errMsg:    "src path cannot be empty",
 		},
 		{
-			name:        "colon syntax with default destination - should error",
-			arg:         "./firmware.bin:/custom/path.bin",
-			operation:   "upload",
-			defaultDest: "/tmp/rom.bin",
-			wantErr:     true,
-			errMsg:      "cannot use colon syntax when default_destination is set to",
+			name:      "colon syntax with destination - should error",
+			arg:       "./firmware.bin:/custom/path.bin",
+			operation: "upload",
+			dest:      "/tmp/rom.bin",
+			wantErr:   true,
+			errMsg:    "cannot use colon syntax when destination is set to",
 		},
 		{
-			name:        "download colon syntax with default destination - should error",
-			arg:         "/var/log/dut.log:./local/log.txt",
-			operation:   "download",
-			defaultDest: "./output.log",
-			wantErr:     true,
-			errMsg:      "cannot use colon syntax when default_destination is set to",
+			name:      "download colon syntax with destination - should error",
+			arg:       "/var/log/dut.log:./local/log.txt",
+			operation: "download",
+			dest:      "./output.log",
+			wantErr:   true,
+			errMsg:    "cannot use colon syntax when destination is set to",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := &File{
-				Operation:          tt.operation,
-				DefaultDestination: tt.defaultDest,
+				Operation:   tt.operation,
+				Destination: tt.dest,
 			}
 
 			err := f.parsePaths(tt.arg)
@@ -113,42 +113,42 @@ func TestParsePaths_ColonSyntax(t *testing.T) {
 	}
 }
 
-func TestParsePaths_UploadWithDefaultDestination(t *testing.T) {
+func TestParsePaths_UploadWithDestination(t *testing.T) {
 	tests := []struct {
-		name        string
-		arg         string
-		defaultDest string
-		wantSrc     string
-		wantDest    string
+		name     string
+		arg      string
+		dest     string
+		wantSrc  string
+		wantDest string
 	}{
 		{
-			name:        "upload with default destination set",
-			arg:         "./firmware.bin",
-			defaultDest: "/tmp/rom.bin",
-			wantSrc:     "./firmware.bin",
-			wantDest:    "/tmp/rom.bin",
+			name:     "upload with destination set",
+			arg:      "./firmware.bin",
+			dest:     "/tmp/rom.bin",
+			wantSrc:  "./firmware.bin",
+			wantDest: "/tmp/rom.bin",
 		},
 		{
-			name:        "upload with absolute path source",
-			arg:         "/home/user/firmware.bin",
-			defaultDest: "/opt/firmware.bin",
-			wantSrc:     "/home/user/firmware.bin",
-			wantDest:    "/opt/firmware.bin",
+			name:     "upload with absolute path source",
+			arg:      "/home/user/firmware.bin",
+			dest:     "/opt/firmware.bin",
+			wantSrc:  "/home/user/firmware.bin",
+			wantDest: "/opt/firmware.bin",
 		},
 		{
-			name:        "upload with relative path",
-			arg:         "../firmware.bin",
-			defaultDest: "/var/lib/firmware.bin",
-			wantSrc:     "../firmware.bin",
-			wantDest:    "/var/lib/firmware.bin",
+			name:     "upload with relative path",
+			arg:      "../firmware.bin",
+			dest:     "/var/lib/firmware.bin",
+			wantSrc:  "../firmware.bin",
+			wantDest: "/var/lib/firmware.bin",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := &File{
-				Operation:          "upload",
-				DefaultDestination: tt.defaultDest,
+				Operation:   "upload",
+				Destination: tt.dest,
 			}
 
 			err := f.parsePaths(tt.arg)
@@ -166,7 +166,7 @@ func TestParsePaths_UploadWithDefaultDestination(t *testing.T) {
 	}
 }
 
-func TestParsePaths_UploadWithoutDefaultDestination(t *testing.T) {
+func TestParsePaths_UploadWithoutDestination(t *testing.T) {
 	tests := []struct {
 		name     string
 		arg      string
@@ -174,7 +174,7 @@ func TestParsePaths_UploadWithoutDefaultDestination(t *testing.T) {
 		wantDest string
 	}{
 		{
-			name:     "upload uses basename when no default",
+			name:     "upload uses basename when no",
 			arg:      "./path/to/firmware.bin",
 			wantSrc:  "./path/to/firmware.bin",
 			wantDest: "firmware.bin",
@@ -208,8 +208,8 @@ func TestParsePaths_UploadWithoutDefaultDestination(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := &File{
-				Operation:          "upload",
-				DefaultDestination: "", // No default destination
+				Operation:   "upload",
+				Destination: "", // No destination
 			}
 
 			err := f.parsePaths(tt.arg)
@@ -227,42 +227,42 @@ func TestParsePaths_UploadWithoutDefaultDestination(t *testing.T) {
 	}
 }
 
-func TestParsePaths_DownloadWithDefaultDestination(t *testing.T) {
+func TestParsePaths_DownloadWithDestination(t *testing.T) {
 	tests := []struct {
-		name        string
-		arg         string
-		defaultDest string
-		wantSrc     string
-		wantDest    string
+		name     string
+		arg      string
+		dest     string
+		wantSrc  string
+		wantDest string
 	}{
 		{
-			name:        "download with default destination - user provides source",
-			arg:         "/var/log/dut.log",
-			defaultDest: "./local/output.bin",
-			wantSrc:     "/var/log/dut.log",
-			wantDest:    "./local/output.bin",
+			name:     "download with destination - user provides source",
+			arg:      "/var/log/dut.log",
+			dest:     "./local/output.bin",
+			wantSrc:  "/var/log/dut.log",
+			wantDest: "./local/output.bin",
 		},
 		{
-			name:        "download from absolute path to default dest",
-			arg:         "/tmp/rom.bin",
-			defaultDest: "/home/user/backup.bin",
-			wantSrc:     "/tmp/rom.bin",
-			wantDest:    "/home/user/backup.bin",
+			name:     "download from absolute path to dest",
+			arg:      "/tmp/rom.bin",
+			dest:     "/home/user/backup.bin",
+			wantSrc:  "/tmp/rom.bin",
+			wantDest: "/home/user/backup.bin",
 		},
 		{
-			name:        "download with relative source path",
-			arg:         "../logs/app.log",
-			defaultDest: "./local-logs/app.log",
-			wantSrc:     "../logs/app.log",
-			wantDest:    "./local-logs/app.log",
+			name:     "download with relative source path",
+			arg:      "../logs/app.log",
+			dest:     "./local-logs/app.log",
+			wantSrc:  "../logs/app.log",
+			wantDest: "./local-logs/app.log",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := &File{
-				Operation:          "download",
-				DefaultDestination: tt.defaultDest,
+				Operation:   "download",
+				Destination: tt.dest,
 			}
 
 			err := f.parsePaths(tt.arg)
@@ -280,7 +280,7 @@ func TestParsePaths_DownloadWithDefaultDestination(t *testing.T) {
 	}
 }
 
-func TestParsePaths_DownloadWithoutDefaultDestination(t *testing.T) {
+func TestParsePaths_DownloadWithoutDestination(t *testing.T) {
 	tests := []struct {
 		name     string
 		arg      string
@@ -290,14 +290,14 @@ func TestParsePaths_DownloadWithoutDefaultDestination(t *testing.T) {
 		wantDest string
 	}{
 		{
-			name:     "download without default and no colon uses working dir",
+			name:     "download without and no colon uses working dir",
 			arg:      "/var/log/dut.log",
 			wantErr:  false,
 			wantSrc:  "/var/log/dut.log",
 			wantDest: "dut.log",
 		},
 		{
-			name:     "download with colon syntax - no default needed",
+			name:     "download with colon syntax - no needed",
 			arg:      "/var/log/dut.log:./local/log.txt",
 			wantErr:  false,
 			wantSrc:  "/var/log/dut.log",
@@ -308,8 +308,8 @@ func TestParsePaths_DownloadWithoutDefaultDestination(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := &File{
-				Operation:          "download",
-				DefaultDestination: "", // No default destination
+				Operation:   "download",
+				Destination: "", // No destination
 			}
 
 			err := f.parsePaths(tt.arg)
@@ -362,8 +362,8 @@ func TestParsePaths_EmptyArgument(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := &File{
-				Operation:          tt.operation,
-				DefaultDestination: "/tmp/file.bin",
+				Operation:   tt.operation,
+				Destination: "/tmp/file.bin",
 			}
 
 			err := f.parsePaths(tt.arg)

@@ -3,8 +3,6 @@
 // license that can be found in the LICENSE file.
 
 // Package file provides a dutagent module that transfers files between client and dutagent.
-// This module allows uploading files from the client to the dutagent and downloading files
-// from the dutagent to the client.
 package file
 
 import (
@@ -46,18 +44,12 @@ const (
 
 // File is a module that transfers files between client and dutagent.
 type File struct {
-	// ForceDir forces creation of parent directories if they don't exist.
-	ForceDir bool
-	// Overwrite allows overwriting existing files.
-	Overwrite bool
-	// Mode sets file permissions in octal format (e.g., "0644", "0755").
-	Mode string
+	// Permission sets file permissions in octal format (e.g., "0644", "0755").
+	Permission string
 	// Operation pre-configures the operation type ("upload" or "download").
-	// When set, enables single-argument form.
 	Operation string
-	// DefaultDestination is the default destination path (for uploads) or
-	// source path (for downloads) used in single-argument form.
-	DefaultDestination string
+	// Destination is the destination path on either the client (for download) or dutagent (for upload).
+	Destination string
 
 	sourcePath string // sourcePath is the source file path
 	destPath   string // destPath is the destination file path
@@ -71,7 +63,7 @@ const abstract = `Transfer files between client and dutagent.
 
 const usage = `
 ARGUMENTS:
-	<path>              Use default destination from config, or working directory if not set
+	<path>              Use destination from config, or working directory if not set
 	<source>:<dest>     Explicitly specify both source and destination
 
 `
@@ -83,34 +75,12 @@ The file module transfers files between client and dutagent. The operation type
 USAGE FORMS:
 
 1. Single path:
-   - If default_destination is set: uses configured destination
-   - If default_destination not set: uses working directory + basename
+   - If destination is set: uses configured destination
+   - If destination not set: uses working directory + basename
    Example: dutctl device cmd ./firmware.bin
 
 2. Colon syntax (explicitly specify both paths):
    Example: dutctl device cmd ./firmware.bin:/custom/path.bin
-
-For upload operations:
-  - <source> is the filepath on the client
-  - <destination> is the filepath on the dutagent where the file will be saved
-
-For download operations:
-  - <source> is the filepath on the dutagent
-  - <destination> is the filepath on the client where the file will be saved
-
-REQUIRED CONFIG (in device YAML):
-  operation: Must be "upload" or "download"
-
-OPTIONAL CONFIG:
-  default_destination: Default destination path (if not set, uses working directory + basename)
-
-OPTIONAL CONFIG (upload only):
-  forcedir:  Force creation of parent directories if they don't exist (default: false)
-  overwrite: Overwrite existing files (default: false)
-  mode:      File permissions in octal format, e.g., "0644" or "0755" (optional)
-
-Note: forcedir, overwrite, and mode options only apply to upload operations.
-For downloads, the client controls how files are saved locally.
 
 `
 
@@ -120,6 +90,18 @@ func (f *File) Help() string {
 	help := strings.Builder{}
 	help.WriteString(abstract)
 	help.WriteString(usage)
+	help.WriteString(fmt.Sprintf("Configured operation is %q.\n", f.Operation))
+
+	if f.Destination != "" {
+		help.WriteString(fmt.Sprintf("Configured destination path is %q.\n", f.Destination))
+	}
+
+	if f.Permission != "" {
+		help.WriteString(fmt.Sprintf("Configured file permission is %q.\n", f.Permission))
+	} else {
+		help.WriteString("Default file permission is \"0644\".\n")
+	}
+
 	help.WriteString(description)
 
 	return help.String()
@@ -141,14 +123,13 @@ func (f *File) Deinit() error {
 func (f *File) Run(_ context.Context, sesh module.Session, args ...string) error {
 	log.Println("file module: Run called")
 
-	// Validate arguments
-	err := f.validateArguments(args)
+	path, err := f.evalArgs(args)
 	if err != nil {
 		return err
 	}
 
-	// Parse arguments
-	err = f.parsePaths(args[0])
+	// Parse paths
+	err = f.parsePaths(path)
 	if err != nil {
 		return err
 	}
@@ -173,33 +154,21 @@ func (f *File) uploadFile(sesh module.Session) error {
 		return fmt.Errorf("failed to request file from client: %w", err)
 	}
 
-	// Check if destination exists
-	if !f.Overwrite {
-		_, err := os.Stat(f.destPath)
-		if err == nil {
-			return fmt.Errorf("destination file %q already exists (use overwrite option to replace)", f.destPath)
-		}
-	}
+	// Create parent directories
+	destDir := filepath.Dir(f.destPath)
 
-	// Create parent directories if needed
-	if f.ForceDir {
-		destDir := filepath.Dir(f.destPath)
-
-		err := os.MkdirAll(destDir, defaultDirPerm)
-		if err != nil {
-			return fmt.Errorf("failed to create parent directories for %q: %w", f.destPath, err)
-		}
-
-		log.Printf("file module: Created parent directories for %q", f.destPath)
+	err = os.MkdirAll(destDir, defaultDirPerm)
+	if err != nil {
+		return fmt.Errorf("failed to create parent directories for %q: %w", f.destPath, err)
 	}
 
 	// Determine file permissions
 	perm := fs.FileMode(defaultFilePerm) // default
 
-	if f.Mode != "" {
-		mode, err := strconv.ParseUint(f.Mode, 8, 32)
+	if f.Permission != "" {
+		mode, err := strconv.ParseUint(f.Permission, 8, 32)
 		if err != nil {
-			return fmt.Errorf("failed to parse mode %q: %w", f.Mode, err)
+			return fmt.Errorf("failed to parse permission %q: %w", f.Permission, err)
 		}
 
 		perm = fs.FileMode(mode)

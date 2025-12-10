@@ -9,64 +9,64 @@ import (
 	"testing"
 )
 
-func TestValidateConfig_Mode(t *testing.T) {
+func TestValidateConfig_Permission(t *testing.T) {
 	tests := []struct {
-		name    string
-		mode    string
-		wantErr bool
-		errMsg  string
+		name       string
+		permission string
+		wantErr    bool
+		errMsg     string
 	}{
 		{
-			name:    "valid mode 0644",
-			mode:    "0644",
-			wantErr: false,
+			name:       "valid permission 0644",
+			permission: "0644",
+			wantErr:    false,
 		},
 		{
-			name:    "valid mode 0755",
-			mode:    "0755",
-			wantErr: false,
+			name:       "valid permission 0755",
+			permission: "0755",
+			wantErr:    false,
 		},
 		{
-			name:    "valid mode 0600",
-			mode:    "0600",
-			wantErr: false,
+			name:       "valid permission 0600",
+			permission: "0600",
+			wantErr:    false,
 		},
 		{
-			name:    "empty mode is valid",
-			mode:    "",
-			wantErr: false,
+			name:       "empty permission is valid",
+			permission: "",
+			wantErr:    false,
 		},
 		{
-			name:    "invalid mode - not octal",
-			mode:    "0999",
-			wantErr: true,
-			errMsg:  "invalid mode",
+			name:       "invalid permission - not octal",
+			permission: "0999",
+			wantErr:    true,
+			errMsg:     "invalid permission",
 		},
 		{
-			name:    "invalid mode - decimal",
-			mode:    "644",
-			wantErr: true,
-			errMsg:  "invalid mode",
+			name:       "invalid permission - decimal",
+			permission: "644",
+			wantErr:    true,
+			errMsg:     "invalid permission",
 		},
 		{
-			name:    "invalid mode - text",
-			mode:    "rwxr-xr-x",
-			wantErr: true,
-			errMsg:  "invalid mode",
+			name:       "invalid permission - text",
+			permission: "rwxr-xr-x",
+			wantErr:    true,
+			errMsg:     "invalid permission",
 		},
 		{
-			name:    "invalid mode - empty quotes",
-			mode:    "''",
-			wantErr: true,
-			errMsg:  "invalid mode",
+			name:       "invalid permission - empty quotes",
+			permission: "''",
+			wantErr:    true,
+			errMsg:     "invalid permission",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := &File{
-				Mode:      tt.mode,
-				Operation: "upload", // Required field
+				Permission: tt.permission,
+				Operation:  "upload", // Required field
 			}
 
 			err := f.validateConfig()
@@ -134,8 +134,8 @@ func TestValidateConfig_Operation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := &File{
-				Operation: tt.operation,
-				Mode:      "", // Valid mode
+				Operation:  tt.operation,
+				Permission: "", // Valid permission
 			}
 
 			err := f.validateConfig()
@@ -161,34 +161,32 @@ func TestValidateConfig_Combined(t *testing.T) {
 		{
 			name: "fully valid upload config",
 			file: File{
-				Operation: "upload",
-				Mode:      "0644",
-				ForceDir:  true,
-				Overwrite: true,
+				Operation:  "upload",
+				Permission: "0644",
 			},
 			wantErr: false,
 		},
 		{
 			name: "fully valid download config",
 			file: File{
-				Operation:          "download",
-				DefaultDestination: "/tmp/file.bin",
+				Operation:   "download",
+				Destination: "/tmp/file.bin",
 			},
 			wantErr: false,
 		},
 		{
-			name: "invalid mode and missing operation",
+			name: "invalid permission and missing operation",
 			file: File{
-				Operation: "",
-				Mode:      "invalid",
+				Operation:  "",
+				Permission: "invalid",
 			},
 			wantErr: true,
-			errMsg:  "invalid mode",
+			errMsg:  "invalid permission",
 		},
 		{
 			name: "missing operation only",
 			file: File{
-				Mode: "0755",
+				Permission: "0755",
 			},
 			wantErr: true,
 			errMsg:  "operation must be set",
