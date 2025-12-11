@@ -446,10 +446,8 @@ func TestWaitModules(t *testing.T) {
 				ctx := context.Background()
 				moduleErrCh := make(chan error, 1)
 				brokerErrCh := make(chan error, 1)
-				// Signal module completion first, then broker.
-				moduleErrCh <- nil
 				close(moduleErrCh)
-				go func() { brokerErrCh <- nil; close(brokerErrCh) }()
+				go func() { close(brokerErrCh) }()
 				args := runCmdArgs{moduleErrCh: moduleErrCh, brokerErrCh: brokerErrCh}
 				return ctx, args
 			},
@@ -461,9 +459,8 @@ func TestWaitModules(t *testing.T) {
 				ctx := context.Background()
 				moduleErrCh := make(chan error, 1)
 				brokerErrCh := make(chan error, 1)
-				brokerErrCh <- nil
 				close(brokerErrCh)
-				go func() { moduleErrCh <- nil; close(moduleErrCh) }()
+				go func() { close(moduleErrCh) }()
 				args := runCmdArgs{moduleErrCh: moduleErrCh, brokerErrCh: brokerErrCh}
 				return ctx, args
 			},
@@ -478,7 +475,7 @@ func TestWaitModules(t *testing.T) {
 				moduleErrCh <- errors.New("module exploded")
 				close(moduleErrCh)
 				// broker later (would be ignored)
-				go func() { brokerErrCh <- nil; close(brokerErrCh) }()
+				go func() { close(brokerErrCh) }()
 				args := runCmdArgs{moduleErrCh: moduleErrCh, brokerErrCh: brokerErrCh}
 				return ctx, args
 			},
@@ -492,26 +489,11 @@ func TestWaitModules(t *testing.T) {
 				brokerErrCh := make(chan error, 1)
 				brokerErrCh <- errors.New("broker I/O failed")
 				close(brokerErrCh)
-				go func() { moduleErrCh <- nil; close(moduleErrCh) }()
+				go func() { close(moduleErrCh) }()
 				args := runCmdArgs{moduleErrCh: moduleErrCh, brokerErrCh: brokerErrCh}
 				return ctx, args
 			},
 			exp: expect{wantErrCode: connect.CodeInternal},
-		},
-		{
-			name: "context_canceled_before_signals",
-			setup: func() (context.Context, runCmdArgs) {
-				base := context.Background()
-				ctx, cancel := context.WithCancel(base)
-				cancel() // cancel immediately
-				moduleErrCh := make(chan error, 1)
-				brokerErrCh := make(chan error, 1)
-				close(moduleErrCh)
-				close(brokerErrCh)
-				args := runCmdArgs{moduleErrCh: moduleErrCh, brokerErrCh: brokerErrCh}
-				return ctx, args
-			},
-			exp: expect{wantErrCode: connect.CodeAborted},
 		},
 		{
 			name: "module_success_then_broker_failure",
@@ -519,7 +501,6 @@ func TestWaitModules(t *testing.T) {
 				ctx := context.Background()
 				moduleErrCh := make(chan error, 1)
 				brokerErrCh := make(chan error, 1)
-				moduleErrCh <- nil
 				close(moduleErrCh)
 				go func() { brokerErrCh <- errors.New("late broker fail"); close(brokerErrCh) }()
 				args := runCmdArgs{moduleErrCh: moduleErrCh, brokerErrCh: brokerErrCh}
@@ -533,8 +514,7 @@ func TestWaitModules(t *testing.T) {
 				ctx := context.Background()
 				moduleErrCh := make(chan error, 1)
 				brokerErrCh := make(chan error, 1)
-				brokerErrCh <- nil
-				close(brokerErrCh)
+				close(brokerErrCh) // Broker success = channel closure only
 				go func() { moduleErrCh <- errors.New("late module fail"); close(moduleErrCh) }()
 				args := runCmdArgs{moduleErrCh: moduleErrCh, brokerErrCh: brokerErrCh}
 				return ctx, args

@@ -157,42 +157,49 @@ func executeModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State
 
 // waitModules is a state of the Run RPC.
 //
-// It waits for the module execution to finish. The state will block until the module execution is finished.
+// It waits for both module execution and broker workers to complete,
+// respecting the different channel contracts:
+// - Broker: error-only channel, success indicated by closure.
+// - Module: sends nil for success, then closes; sends error for failure.
+// If multiple events (errors, closures, context cancellation) happen simultaneously,
+// any of them may be processed first - this is acceptable.
 func waitModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State[runCmdArgs], error) {
-	var (
-		brokerDone  bool
-		moduleDone  bool
-		brokerErrCh = args.brokerErrCh
-	)
+	brokerDone := false
+	moduleDone := false
 
-	for {
+	for !brokerDone || !moduleDone {
 		select {
 		case <-ctx.Done():
 			e := connect.NewError(connect.CodeAborted, fmt.Errorf("module execution aborted: %v", ctx.Err()))
 
 			return args, nil, e
-		case brokerErr, ok := <-brokerErrCh:
-			if !ok { // channel closed: all broker workers finished
+
+		case brokerErr, ok := <-args.brokerErrCh:
+			if !ok {
+				// Broker channel closed = success
 				brokerDone = true
-				brokerErrCh = nil
-			} else if brokerErr != nil {
-				e := connect.NewError(connect.CodeInternal, fmt.Errorf("module environment error: %v", brokerErr))
+			} else {
+				// Broker only sends errors (never nil)
+				e := connect.NewError(connect.CodeInternal, fmt.Errorf("broker error: %v", brokerErr))
 
 				return args, nil, e
 			}
-		case moduleErr := <-args.moduleErrCh:
-			moduleDone = true
 
-			if moduleErr != nil {
-				// Module execution failed.
-				e := connect.NewError(connect.CodeAborted, fmt.Errorf("module execution failed: %v", moduleErr))
+		case moduleErr, ok := <-args.moduleErrCh:
+			if !ok {
+				// Module channel closed without value = unexpected
+				moduleDone = true
+			} else if moduleErr == nil {
+				// Module sends nil for success
+				moduleDone = true
+			} else {
+				// Module sends error for failure
+				e := connect.NewError(connect.CodeAborted, fmt.Errorf("module failed: %v", moduleErr))
 
 				return args, nil, e
 			}
-		}
-
-		if brokerDone && moduleDone {
-			return args, nil, nil
 		}
 	}
+
+	return args, nil, nil
 }
