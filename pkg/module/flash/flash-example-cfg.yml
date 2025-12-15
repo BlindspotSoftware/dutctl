@@ -11,5 +11,5 @@ devices:
           - module: flash
             main: true
             options:
-              tool: "/usr/sbin/flashrom"
+              tool: "/usr/sbin/flashprog"
               programmer: "dediprog"

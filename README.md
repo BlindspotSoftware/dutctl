@@ -35,7 +35,7 @@ Key features include:
 For detailed information on the system architecture, see the [Documentation](./docs/README.md).
 
 | Supported Client OS | Recommended DUT Agent Hardware |
-|---------------------|--------------------------------|
+| ------------------- | ------------------------------ |
 | Linux               | RaspberryPi 4                  |
 
 ## Getting Started
@@ -85,14 +85,13 @@ DUT agent on it. Below you can find the currently supported modules with example
 [here](./docs/dutagent-config.md), to learn how you can adapt the agent's configuration to your needs
 
 | Modules                                                            | Status                   |
-|--------------------------------------------------------------------|--------------------------|
+| ------------------------------------------------------------------ | ------------------------ |
 | [GPIO Button](./pkg/module/gpio/README.md)                         | :white_check_mark:       |
 | [GPIO Switch](./pkg/module/gpio/README.md)                         | :white_check_mark:       |
 | [IPMI Power Control](./pkg/module/gpio/README.md)                  | :white_check_mark:       |
 | [Power Distribution Unit (Intellinet)](./pkg/module/pdu/README.md) | :white_check_mark:       |
 | Power Distribution Unit (Delock)                                   | :hourglass_flowing_sand: |
-| [SPI Flasher (flashrom)](./pkg/module/flash/README.md)             | :white_check_mark:       |
-| SPI Flasher (flashprog)                                            | :hourglass_flowing_sand: |
+| [SPI Flasher](./pkg/module/flash/README.md)                        | :white_check_mark:       |
 | [Serial Console](./pkg/module/serial/README.md)                    | :white_check_mark:       |
 | [Shell Execution](./pkg/module/shell/README.md)                    | :white_check_mark:       |
 | [Secure Shell (SSH)](./pkg/module/ssh/README.md)                   | :white_check_mark:       |
@@ -118,6 +117,6 @@ Commons Fund. The NGI0 Commons Fund is made possible with financial support from
 [Next Generation Internet](https://ngi.eu/) program.
 
 |                              |                                    |                            |
-|------------------------------|------------------------------------|----------------------------|
+| ---------------------------- | ---------------------------------- | -------------------------- |
 | ![nlnet](./assets/nlnet.png) | ![European Union](./assets/EU.png) | ![NGI0](./assets/NGI0.png) |
 
