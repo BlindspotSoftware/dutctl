@@ -115,7 +115,7 @@ func executeModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State
 	args.session = moduleSession
 
 	// Run the modules in a goroutine.
-	// The termination of the module execution is signaled by sending a result to the args.moduleErr channel.
+	// Termination of the module execution is signaled by closing the moduleErrCh channel.
 	go func() {
 		cnt := len(args.cmd.Modules)
 
@@ -149,7 +149,7 @@ func executeModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State
 
 		log.Print("All modules finished successfully")
 		modCtxCancel()
-		args.moduleErrCh <- nil // Signal that all modules finished successfully
+		close(args.moduleErrCh)
 	}()
 
 	return args, waitModules, nil
@@ -157,10 +157,10 @@ func executeModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State
 
 // waitModules is a state of the Run RPC.
 //
-// It waits for both module execution and broker workers to complete,
-// respecting the different channel contracts:
-// - Broker: error-only channel, success indicated by closure.
-// - Module: sends nil for success, then closes; sends error for failure.
+// It waits for both module execution and broker workers to complete.
+// Both channels use the error-only pattern:
+// - Success: Channel closes without sending anything
+// - Failure: Sends error, then closes
 // If multiple events (errors, closures, context cancellation) happen simultaneously,
 // any of them may be processed first - this is acceptable.
 func waitModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State[runCmdArgs], error) {
@@ -187,13 +187,10 @@ func waitModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State[ru
 
 		case moduleErr, ok := <-args.moduleErrCh:
 			if !ok {
-				// Module channel closed without value = unexpected
-				moduleDone = true
-			} else if moduleErr == nil {
-				// Module sends nil for success
+				// Module channel closed = success
 				moduleDone = true
 			} else {
-				// Module sends error for failure
+				// Module only sends errors (never nil)
 				e := connect.NewError(connect.CodeAborted, fmt.Errorf("module failed: %v", moduleErr))
 
 				return args, nil, e
