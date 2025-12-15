@@ -27,14 +27,11 @@ func init() {
 		ID: "flash",
 		New: func() module.Module {
 			return &Flash{
-				supportedTools: []string{"flashrom", "flashprog"},
+				supportedTools: []string{"flashrom", "flashprog", "dpcmd"},
 			}
 		},
 	})
 }
-
-// DefaultFlashTool is the default tool on the dutagent.
-const DefaultFlashTool = "/bin/flashrom"
 
 // localImagePath is the local path on the dutagent to temporally store the flash image
 // during read/write operations.
@@ -50,11 +47,16 @@ const (
 
 // Flash is a module that reads or writes the SPI flash on the DUT.
 type Flash struct {
+	// Tool is the path to the underlying flash-tool on the dutagent.
+	// It must be set to one of the following:
+	// - flashrom
+	// - flashprog
+	// - dpcmd
+	Tool string `yaml:"tool"`
 	// Programmer is the name of the flasher hardware.
-	Programmer string
-	// Tool is the path to the underlying flash-tool on the dutagent. If unset, [DefaultFlashTool] is used.
-	// Supported tools: flashrom, flashprog.
-	Tool string
+	// For flashrom/flashprog: passed via -p flag (e.g., "dediprog", "ch341a_spi").
+	// For dpcmd: optional, used with --device flag to select specific USB device number.
+	Programmer string `yaml:"programmer"`
 
 	op              op       // op holds the current flash operation
 	localImagePath  string   // localImagePath is the path to SPI image file at the dutagent
@@ -100,7 +102,7 @@ func (f *Flash) Init() error {
 	log.Println("flash module: Init called")
 
 	if f.Tool == "" {
-		f.Tool = DefaultFlashTool
+		return fmt.Errorf("tool must be configured; supported tools are %v", f.supportedTools)
 	}
 
 	if !f.isSupported(f.Tool) {
@@ -112,8 +114,11 @@ func (f *Flash) Init() error {
 		return fmt.Errorf("flash tool %q: %w", f.Tool, err)
 	}
 
-	if f.Programmer == "" {
-		return errors.New("programmer must be configured")
+	// dpcmd auto-detects hardware, so programmer is optional
+	// flashrom/flashprog require a programmer to be specified
+	base := filepath.Base(f.Tool)
+	if base != "dpcmd" && f.Programmer == "" {
+		return fmt.Errorf("programmer must be configured for %q", base)
 	}
 
 	return nil
@@ -210,14 +215,37 @@ func execute(tool string, args ...string) error {
 }
 
 // cmdline returns the arg list for the wrapped flash tool.
+// flashrom/flashprog use: -p <programmer> -r/-w <file>.
+// dpcmd uses: -r/-u <file> [--device <n>].
 func (f *Flash) cmdline() []string {
-	args := []string{"-p", f.Programmer}
+	base := filepath.Base(f.Tool)
 
-	switch f.op {
-	case opWrite:
-		args = append(args, "-w", f.localImagePath)
-	case opRead:
-		args = append(args, "-r", f.localImagePath)
+	var args []string
+
+	// dpcmd has different CLI syntax than flashrom/flashprog
+	if base == "dpcmd" {
+		// dpcmd auto-detects hardware, but can optionally specify device number
+		if f.Programmer != "" {
+			args = append(args, "--device", f.Programmer)
+		}
+
+		switch f.op {
+		case opWrite:
+			// dpcmd uses -u (update: erase then program) instead of -w
+			args = append(args, "-u", f.localImagePath)
+		case opRead:
+			args = append(args, "-r", f.localImagePath)
+		}
+	} else {
+		// flashrom and flashprog use the same CLI
+		args = []string{"-p", f.Programmer}
+
+		switch f.op {
+		case opWrite:
+			args = append(args, "-w", f.localImagePath)
+		case opRead:
+			args = append(args, "-r", f.localImagePath)
+		}
 	}
 
 	return args
