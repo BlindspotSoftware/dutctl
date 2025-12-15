@@ -27,7 +27,7 @@ func init() {
 		ID: "flash",
 		New: func() module.Module {
 			return &Flash{
-				supportedTools: []string{"flashrom"},
+				supportedTools: []string{"flashrom", "flashprog"},
 			}
 		},
 	})
@@ -52,8 +52,8 @@ const (
 type Flash struct {
 	// Programmer is the name of the flasher hardware.
 	Programmer string
-	// Tool is th path to the underlying flash-tool on the dutagent. If unset, [DefaultFlashTool] is used.
-	// Currently only fashrom is supported.
+	// Tool is the path to the underlying flash-tool on the dutagent. If unset, [DefaultFlashTool] is used.
+	// Supported tools: flashrom, flashprog.
 	Tool string
 
 	op              op       // op holds the current flash operation
@@ -78,8 +78,8 @@ const description = `
 For read operation, <image> sets the filepath the read image is saved at the client.
 For write operation, <image> is the local filepath to the image at the client.
 
-This module is a wrapper around a flash software on the dutagent. The flasher software 
-must be installed on the dutagent and a suitable flasher hardware must be hooked up to 
+This module is a wrapper around a flasher tool on the dutagent. The flasher tool
+must be installed on the dutagent and a suitable flasher hardware must be hooked up to
 the DUT.
 
 `
