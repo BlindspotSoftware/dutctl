@@ -4,7 +4,7 @@ go 1.24.5
 
 require (
 	connectrpc.com/connect v1.19.1
-	github.com/bougou/go-ipmi v0.7.8
+	github.com/bougou/go-ipmi v0.8.0
 	github.com/go-playground/validator/v10 v10.29.0
 	github.com/stianeikeland/go-rpio/v4 v4.6.0
 	github.com/tarm/serial v0.0.0-20180830185346-98f6abe2eb07
