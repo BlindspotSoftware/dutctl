@@ -167,6 +167,8 @@ func waitModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State[ru
 	brokerDone := false
 	moduleDone := false
 
+	var firstErr error
+
 	for !brokerDone || !moduleDone {
 		select {
 		case <-ctx.Done():
@@ -176,27 +178,27 @@ func waitModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State[ru
 
 		case brokerErr, ok := <-args.brokerErrCh:
 			if !ok {
-				// Broker channel closed = success
 				brokerDone = true
 			} else {
-				// Broker only sends errors (never nil)
-				e := connect.NewError(connect.CodeInternal, fmt.Errorf("broker error: %v", brokerErr))
-
-				return args, nil, e
+				// Module only sends errors (never nil)
+				if firstErr == nil {
+					firstErr = connect.NewError(connect.CodeInternal, fmt.Errorf("broker error: %v", brokerErr))
+				}
 			}
 
 		case moduleErr, ok := <-args.moduleErrCh:
 			if !ok {
-				// Module channel closed = success
 				moduleDone = true
 			} else {
 				// Module only sends errors (never nil)
-				e := connect.NewError(connect.CodeAborted, fmt.Errorf("module failed: %v", moduleErr))
+				if firstErr == nil {
+					firstErr = connect.NewError(connect.CodeAborted, fmt.Errorf("module failed: %v", moduleErr))
+				}
 
-				return args, nil, e
+				moduleDone = true
 			}
 		}
 	}
 
-	return args, nil, nil
+	return args, nil, firstErr
 }
