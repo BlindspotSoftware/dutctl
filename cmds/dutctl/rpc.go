@@ -179,12 +179,6 @@ func (app *application) runRPC(device, command string, cmdArgs []string) error {
 				path := msg.FileRequest.GetPath()
 				log.Printf("File request for: %q\n", path)
 
-				if !isPartOfArgs(cmdArgs, path) {
-					errChan <- fmt.Errorf("invalid file request: requested file %q was not named in the command's arguments", path)
-
-					return
-				}
-
 				content, err := os.ReadFile(path)
 				if err != nil {
 					errChan <- fmt.Errorf("reading requested file %q: %w", path, err)
@@ -212,12 +206,6 @@ func (app *application) runRPC(device, command string, cmdArgs []string) error {
 				content := msg.File.GetContent()
 
 				log.Printf("Received file: %q\n", path)
-
-				if !isPartOfArgs(cmdArgs, path) {
-					errChan <- fmt.Errorf("invalid file transmission: received file %q was not named in the command's arguments", path)
-
-					return
-				}
 
 				if len(content) == 0 {
 					log.Println("Received empty file content")
@@ -286,14 +274,4 @@ func (app *application) runRPC(device, command string, cmdArgs []string) error {
 	case err := <-errChan:
 		return err
 	}
-}
-
-func isPartOfArgs(args []string, token string) bool {
-	for _, arg := range args {
-		if strings.Contains(arg, token) {
-			return true
-		}
-	}
-
-	return false
 }
