@@ -1,0 +1,156 @@
+version: 0
+devices:
+  my-server:
+    desc: "A server controlled via PiKVM"
+    cmds:
+      # Power Management Commands
+      power-on:
+        desc: "Power on the server via PiKVM ATX power button (short press)"
+        modules:
+          - module: pikvm
+            main: true
+            args:
+              - on
+            options:
+              host: https://pikvm.local
+              user: admin
+              password: admin
+              timeout: 10s
+
+      power-off:
+        desc: "Graceful shutdown via PiKVM ATX power button (short press)"
+        modules:
+          - module: pikvm
+            main: true
+            args:
+              - off
+            options:
+              host: https://192.168.1.100
+              user: admin
+              password: admin
+
+      force-off:
+        desc: "Force power off via PiKVM ATX power button (long press)"
+        modules:
+          - module: pikvm
+            main: true
+            args:
+              - force-off
+            options:
+              host: https://pikvm.local
+              user: admin
+              password: admin
+
+      reset:
+        desc: "Reset via PiKVM ATX reset button (short press)"
+        modules:
+          - module: pikvm
+            main: true
+            args:
+              - reset
+            options:
+              host: https://pikvm.local
+              user: admin
+              password: admin
+
+      force-reset:
+        desc: "Force reset via PiKVM ATX reset button (long press)"
+        modules:
+          - module: pikvm
+            main: true
+            args:
+              - force-reset
+            options:
+              host: https://pikvm.local
+              user: admin
+              password: admin
+
+      status:
+        desc: "Query current power status via PiKVM"
+        modules:
+          - module: pikvm
+            main: true
+            args:
+              - status
+            options:
+              host: https://pikvm.local
+              user: admin
+              password: admin
+
+      # Keyboard Control Commands
+      enter-bios:
+        desc: "Send F12 key to enter BIOS boot menu"
+        modules:
+          - module: pikvm
+            main: true
+            args:
+              - key
+              - F12
+            options:
+              host: https://pikvm.local
+              user: admin
+              password: admin
+
+      ctrl-alt-del:
+        desc: "Send Ctrl+Alt+Delete key combination"
+        modules:
+          - module: pikvm
+            main: true
+            args:
+              - combo
+              - Ctrl+Alt+Delete
+            options:
+              host: https://pikvm.local
+              user: admin
+              password: admin
+
+      # Virtual Media Commands
+      mount-iso:
+        desc: "Mount an ISO image from local filesystem"
+        modules:
+          - module: pikvm
+            main: true
+            args:
+              - mount
+              - /path/to/image.iso
+            options:
+              host: https://pikvm.local
+              user: admin
+              password: admin
+
+      mount-iso-url:
+        desc: "Mount an ISO image from URL"
+        modules:
+          - module: pikvm
+            main: true
+            args:
+              - mount-url
+              - https://example.com/os.iso
+            options:
+              host: https://pikvm.local
+              user: admin
+              password: admin
+
+      unmount-media:
+        desc: "Unmount virtual media"
+        modules:
+          - module: pikvm
+            main: true
+            args:
+              - unmount
+            options:
+              host: https://pikvm.local
+              user: admin
+              password: admin
+
+      media-info:
+        desc: "Show mounted media information"
+        modules:
+          - module: pikvm
+            main: true
+            args:
+              - media-status
+            options:
+              host: https://pikvm.local
+              user: admin
+              password: admin
