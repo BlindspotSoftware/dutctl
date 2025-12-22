@@ -76,6 +76,9 @@ const (
 	mountURL    = "mount-url"
 	unmount     = "unmount"
 	mediaStatus = "media-status"
+
+	// Screenshot.
+	screenshot = "screenshot"
 )
 
 func (p *PiKVM) Help() string {
@@ -100,6 +103,8 @@ func (p *PiKVM) Help() string {
 	help.WriteString("  pikvm mount-url <url>   - Mount an image from a URL\n")
 	help.WriteString("  pikvm unmount           - Unmount current virtual media\n")
 	help.WriteString("  pikvm media-status      - Show mounted media information\n\n")
+	help.WriteString("Screenshot:\n")
+	help.WriteString("  pikvm screenshot        - Capture a screenshot (saved to current directory)\n\n")
 	help.WriteString("This module provides comprehensive control of a PiKVM device.\n")
 	help.WriteString("Configured PiKVM: " + p.Host + "\n")
 
@@ -178,6 +183,8 @@ func (p *PiKVM) Run(ctx context.Context, s module.Session, args ...string) error
 		return p.handleKeyboardCommand(ctx, s, command, args)
 	case mount, mountURL, unmount, mediaStatus:
 		return p.handleMediaCommand(ctx, s, command, args)
+	case screenshot:
+		return p.handleScreenshot(ctx, s)
 	default:
 		return p.showUnknownCommand(s, command)
 	}
@@ -190,6 +197,7 @@ func (p *PiKVM) showUnknownCommand(s module.Session, command string) error {
 	s.Println("  Power: on, off, force-off, reset, force-reset, status")
 	s.Println("  Keyboard: type, key, key-combo, paste")
 	s.Println("  Media: mount, mount-url, unmount, media-status")
+	s.Println("  Screenshot: screenshot")
 
 	return nil
 }
