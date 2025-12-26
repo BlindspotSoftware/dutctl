@@ -1,0 +1,169 @@
+---
+# The lines below are called `modelines`. See `:help modeline`
+# Feel free to remove those if you don't want/need to use them.
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+# vim: set ts=2 sw=2 tw=0 fo=cnqoj
+
+version: 2
+
+dist: "./bin"
+
+before:
+  hooks:
+    - go mod tidy
+    - go generate ./...
+
+builds:
+  - id: "dutctl"
+    main: ./cmds/dutctl
+    binary: "dutctl"
+    ldflags:
+      - -s -w -X main.builtBy=goreleaser
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm
+      - arm64
+    goarm:
+      - "7"
+    goarm64:
+      - v8.0
+    goamd64:
+      - v1
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+  - id: "dutagent"
+    main: ./cmds/dutagent
+    binary: "dutagent"
+    ldflags:
+      - -s -w -X main.builtBy=goreleaser
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm
+      - arm64
+    goarm:
+      - "7"
+    goarm64:
+      - v8.0
+    goamd64:
+      - v1
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+  - id: "dutserver"
+    main: ./cmds/exp/dutserver
+    binary: "dutserver"
+    ldflags:
+      - -s -w -X main.builtBy=goreleaser
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm
+      - arm64
+    goarm:
+      - "7"
+    goarm64:
+      - v8.0
+    goamd64:
+      - v1
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: blake2b
+
+changelog:
+  use: github
+  sort: asc
+  groups:
+    - title: "New Features"
+      regexp: "^.*feat[(\\w)]*:+.*$"
+      order: 0
+    - title: "Bug fixes"
+      regexp: "^.*fix[(\\w)]*:+.*$"
+      order: 10
+    - title: Other work
+      order: 999
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore"
+      - Merge pull request
+      - Merge remote-tracking branch
+      - Merge branch
+      - go mod tidy
+
+archives:
+  - formats: ["tar.gz"]
+    # this name template makes the OS and Arch compatible with the results of `uname`.
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+      {{- if .Arm }}v{{ .Arm }}{{ end }}
+    # use zip for windows archives
+    format_overrides:
+      - goos: windows
+        formats: ["zip"]
+
+nfpms:
+  - id: packages
+    package_name: "dutctl"
+    file_name_template: >-
+      {{- trimsuffix .ConventionalFileName .ConventionalExtension -}}
+      {{- if and (eq .Arm "6") (eq .ConventionalExtension ".deb") }}6{{ end -}}
+      {{- if not (eq .Amd64 "v1")}}{{ .Amd64 }}{{ end -}}
+      {{- .ConventionalExtension -}}
+    ids:
+      - dutctl
+      - dutagent
+    provides:
+      - dutctl
+      - dutagent
+    vendor: "9elements GmbH"
+    homepage: "https://9esec.io"
+    maintainer: "Jens Drenhaus <jens.drenhaus@blindspot.software>"
+    description: |
+      DUT Control is an abstraction layer for remote hardware access.
+    license: "BSD 2-Clause"
+    formats:
+      - deb
+      - rpm
+      - archlinux
+    replaces:
+      - golang-github-fti
+      - golang-fti
+      - fti
+    bindir: /usr/bin
+    section: default
+    priority: extra
+    contents:
+      # systemd services
+      - src: ./scripts/dutagent.service
+        dst: /usr/lib/systemd/system/dutagent.service
+
+    rpm:
+      packager: "Jens Drenhaus <jens.drenhaus@blindspot.software>"
+    archlinux:
+      packager: "Jens Drenhaus <jens.drenhaus@blindspot.software>"
+
+source:
+  enabled: true
+
+release:
+  prerelease: auto
+  mode: append
+  footer: |
+    **Full Changelog**: https://github.com/BlindspotSoftware/dutctl/compare/{{ .PreviousTag }}...{{ .Tag }}
