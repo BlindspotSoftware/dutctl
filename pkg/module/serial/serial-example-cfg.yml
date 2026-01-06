@@ -7,9 +7,12 @@ devices:
         desc: |
           Basic demo of the Serial module: After the DUT is powered on, use Serial
           as the main module to wait for magic strings in the DUT's boot log.
+        args:
+          magic-string: "String to wait for in serial output"
         modules:
           - module: serial
-            main: true
+            args:
+              - "${magic-string}"
             options:
               port: /tmp/ttyS0
               baudrate: 115200

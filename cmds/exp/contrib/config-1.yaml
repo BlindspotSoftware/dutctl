@@ -8,4 +8,3 @@ devices:
         desc: "Report status"
         modules:
           - module: dummy-status
-            main: true

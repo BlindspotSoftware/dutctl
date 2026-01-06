@@ -7,9 +7,12 @@ devices:
       flash:
         desc: |
           Basic demo of the Flash module.
+        args:
+          image: "Path to the firmware image file to flash"
         modules:
           - module: flash
-            main: true
+            args:
+              - "${image}"
             options:
               tool: "/usr/sbin/flashprog"
               programmer: "dediprog"

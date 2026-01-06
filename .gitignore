@@ -2,7 +2,9 @@
 taskfile.yml
 /dutctl
 /cmds/dutctl/dutctl
+/cmds/dutctl/dutctl-arm64
 /dutagent
+/dutagent-arm64
 /cmds/dutagent/dutagent
 /dutserver
 /cmds/exp/dutserver/dutserver

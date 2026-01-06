@@ -8,14 +8,15 @@ devices:
         desc: "Report status twice"
         modules:
           - module: agent-status
-            main: true
           - module: time-wait
             options:
               duration: 2s
           - module: agent-status
       just-wait:
         desc: "Do nothing and finish after the provided amount of time"
+        args:
+          duration: "Duration to wait (e.g., 5s, 2m, 1h)"
         modules:
           - module: time-wait
-            main: true
-  
+            args:
+              - "${duration}"

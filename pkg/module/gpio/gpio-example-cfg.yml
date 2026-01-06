@@ -8,14 +8,12 @@ devices:
         desc: "Push the big red button"
         modules:
           - module: gpio-button
-            main: true
             options:
               pin: 9
       reset:
         desc: "Reset the rocket"
         modules:
           - module: gpio-button
-            main: true
             options:
               pin: 10
               activelow: true
@@ -23,7 +21,6 @@ devices:
         desc: "Turn on the light"
         modules:
           - module: gpio-switch
-            main: true
             options:
               pin: 11
               initial: on

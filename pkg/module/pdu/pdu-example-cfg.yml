@@ -5,9 +5,12 @@ devices:
     cmds:
       power-on:
         desc: "Turn the power ON via PDU"
+        args:
+          action: "PDU action: on, off, or status"
         modules:
           - module: pdu
-            main: true
+            args:
+              - "${action}"
             options:
               host: http://192.168.1.100
               user: admin

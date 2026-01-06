@@ -8,9 +8,7 @@ devices:
         desc: "Report status"
         modules:
           - module: dummy-status
-            main: true
       repeat:
         desc: "Repeat input"
         modules:
           - module: dummy-repeat
-            main: true

@@ -8,9 +8,11 @@ package dut
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 
+	"github.com/BlindspotSoftware/dutctl/internal/template"
 	"github.com/BlindspotSoftware/dutctl/pkg/module"
 	"github.com/go-playground/validator/v10"
 	"gopkg.in/yaml.v3"
@@ -19,7 +21,9 @@ import (
 var (
 	ErrDeviceNotFound  = errors.New("no such device")
 	ErrCommandNotFound = errors.New("no such command")
-	ErrInvalidCommand  = errors.New("command not implemented - no modules or no main module set")
+	ErrInvalidCommand  = errors.New("command not implemented - no modules set")
+
+	identifierRegex = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 )
 
 // Devlist is a list of devices-under-test.
@@ -59,7 +63,7 @@ func (devs Devlist) CmdNames(device string) ([]string, error) {
 
 // FindCmd returns the device and command for a given device and command name.
 // If the device is not found, it returns ErrDeviceNotFound, if the command is not found,
-// it returns ErrCommandNotFound. If the requested command has no modules, or no main module,
+// it returns ErrCommandNotFound. If the requested command has no modules,
 // it returns ErrInvalidCommand.
 func (devs Devlist) FindCmd(device, command string) (Device, Command, error) {
 	dev, ok := devs[device]
@@ -72,7 +76,7 @@ func (devs Devlist) FindCmd(device, command string) (Device, Command, error) {
 		return dev, Command{}, ErrCommandNotFound
 	}
 
-	if len(cmd.Modules) == 0 || cmd.countMain() != 1 {
+	if len(cmd.Modules) == 0 {
 		return dev, cmd, ErrInvalidCommand
 	}
 
@@ -88,8 +92,12 @@ type Device struct {
 // Command represents a task that can be executed on a device-under-test (DUT).
 // This task is composed of one or multiple steps. The steps are implemented by
 // modules and are executed in the order they are defined.
+//
+// Args defines named arguments that can be referenced in module args using ${argname} syntax.
+// Positional arguments from the client are mapped to these named args by position.
 type Command struct {
 	Desc    string
+	Args    map[string]string // Named arguments: map of arg name to description
 	Modules []Module
 }
 
@@ -107,39 +115,35 @@ func (c *Command) UnmarshalYAML(node *yaml.Node) error {
 
 	*c = Command(cmd)
 
-	// Check presence of main module
-	switch len(c.Modules) {
-	case 0:
+	// Validate command has at least one module
+	if len(c.Modules) == 0 {
 		return errors.New("command must have at least one module")
-	case 1:
-		// Implicitly sets the only module as main
-		c.Modules[0].Config.Main = true
-	default:
-		if c.countMain() != 1 {
-			return errors.New("command must have exactly one main module")
+	}
+
+	// Validate Args keys are valid identifiers
+	for argName := range c.Args {
+		if !identifierRegex.MatchString(argName) {
+			return fmt.Errorf("invalid argument name %q: must contain only letters, numbers, underscores, and hyphens", argName)
 		}
 	}
 
-	// Check for presence of args in non-main modules only
+	// Validate all template placeholders in module args reference defined Args
 	for _, mod := range c.Modules {
-		if mod.Config.Main && len(mod.Config.Args) > 0 {
-			return errors.New("main module should not have args set. They are passed as command line arguments via the dutctl client")
+		for _, arg := range mod.Config.Args {
+			placeholders, err := template.Parse(arg)
+			if err != nil {
+				return fmt.Errorf("module %q has invalid template in arg %q: %w", mod.Config.Name, arg, err)
+			}
+
+			for _, placeholder := range placeholders.Placeholders() {
+				if _, exists := c.Args[placeholder]; !exists {
+					return fmt.Errorf("module %q references undefined argument %q in template", mod.Config.Name, placeholder)
+				}
+			}
 		}
 	}
 
 	return nil
-}
-
-func (c *Command) countMain() int {
-	count := 0
-
-	for _, mod := range c.Modules {
-		if mod.Config.Main {
-			count++
-		}
-	}
-
-	return count
 }
 
 // Module is a wrapper for any module implementation.
@@ -151,7 +155,6 @@ type Module struct {
 
 type ModuleConfig struct {
 	Name    string `yaml:"module"`
-	Main    bool
 	Args    []string
 	Options map[string]any
 }

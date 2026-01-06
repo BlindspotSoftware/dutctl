@@ -9,6 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"slices"
+	"strings"
 
 	"connectrpc.com/connect"
 	"github.com/BlindspotSoftware/dutctl/internal/fsm"
@@ -74,8 +76,6 @@ func (a *rpcService) Commands(
 }
 
 // Details is the handler for the Details RPC.
-//
-//nolint:funlen
 func (a *rpcService) Details(
 	_ context.Context,
 	req *connect.Request[pb.DetailsRequest],
@@ -87,59 +87,75 @@ func (a *rpcService) Details(
 	keyword := req.Msg.GetKeyword()
 
 	if keyword != "help" {
-		e := connect.NewError(
+		return nil, connect.NewError(
 			connect.CodeInvalidArgument,
 			fmt.Errorf("unknown keyword %q, possible values are: 'help'", keyword),
 		)
-
-		return nil, e
 	}
 
 	_, cmd, err := a.devices.FindCmd(wantDev, wantCmd)
 	if err != nil {
-		var code connect.Code
+		code := connect.CodeInternal
 		if errors.Is(err, dut.ErrDeviceNotFound) || errors.Is(err, dut.ErrCommandNotFound) {
 			code = connect.CodeInvalidArgument
-		} else {
-			code = connect.CodeInternal
 		}
 
-		e := connect.NewError(
-			code,
-			fmt.Errorf("device %q, command %q: %w", wantDev, wantCmd, err),
-		)
-
-		return nil, e
+		return nil, connect.NewError(code, fmt.Errorf("device %q, command %q: %w", wantDev, wantCmd, err))
 	}
 
-	var (
-		helpStr   string
-		foundMain bool
-	)
-
-	for _, module := range cmd.Modules {
-		if module.Config.Main {
-			foundMain = true
-			helpStr = module.Help()
-		}
-	}
-
-	if !foundMain {
-		e := connect.NewError(
-			connect.CodeInternal,
-			fmt.Errorf("no main module found for command %q at device %q", wantCmd, wantDev),
-		)
-
-		return nil, e
-	}
-
-	res := connect.NewResponse(&pb.DetailsResponse{
-		Details: helpStr,
-	})
+	helpText := buildCommandHelp(cmd)
 
 	log.Print("Details-RPC finished")
 
-	return res, nil
+	return connect.NewResponse(&pb.DetailsResponse{Details: helpText}), nil
+}
+
+// buildCommandHelp constructs comprehensive help text for a command.
+func buildCommandHelp(cmd dut.Command) string {
+	var helpStr strings.Builder
+
+	if cmd.Desc != "" {
+		helpStr.WriteString("Description:\n  ")
+		helpStr.WriteString(cmd.Desc)
+		helpStr.WriteString("\n\n")
+	}
+
+	if len(cmd.Args) > 0 {
+		helpStr.WriteString("Arguments:\n")
+
+		argNames := make([]string, 0, len(cmd.Args))
+		for name := range cmd.Args {
+			argNames = append(argNames, name)
+		}
+
+		slices.Sort(argNames)
+
+		for i, name := range argNames {
+			helpStr.WriteString(fmt.Sprintf("  %d. %s: %s\n", i+1, name, cmd.Args[name]))
+		}
+
+		helpStr.WriteString("\n")
+	}
+
+	if len(cmd.Modules) > 0 {
+		helpStr.WriteString("Modules:\n")
+
+		for i, module := range cmd.Modules {
+			helpStr.WriteString(fmt.Sprintf("\n%d. %s\n", i+1, module.Config.Name))
+
+			if moduleHelp := module.Help(); moduleHelp != "" {
+				for _, line := range strings.Split(moduleHelp, "\n") {
+					if line != "" {
+						helpStr.WriteString("   ")
+						helpStr.WriteString(line)
+						helpStr.WriteString("\n")
+					}
+				}
+			}
+		}
+	}
+
+	return helpStr.String()
 }
 
 // streamAdapter decouples a connect.BidiStream to the dutagent.Stream interface.

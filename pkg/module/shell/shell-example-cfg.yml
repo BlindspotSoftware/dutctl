@@ -10,6 +10,8 @@ devices:
         desc: |
           Demonstrates the shell module by writing a greeting to a file, giving the user the chance to edit, 
           then reading it back and deleting the file. E.g try: dutctl self greet "echo 'Hello World' >> /tmp/shell-test.txt"
+        args:
+          user-command: "Shell command to execute in the middle of the workflow"
         modules:
           - module: shell
             options:
@@ -18,7 +20,8 @@ devices:
             args:
               - "echo 'Greetings from the shell module!\n\n' > /tmp/shell-test.txt"
           - module: shell
-            main: true
+            args:
+              - "${user-command}"
           - module: shell
             options:
               path: sh

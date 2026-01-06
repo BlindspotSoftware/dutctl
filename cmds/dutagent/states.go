@@ -9,10 +9,12 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"sort"
 
 	"connectrpc.com/connect"
 	"github.com/BlindspotSoftware/dutctl/internal/dutagent"
 	"github.com/BlindspotSoftware/dutctl/internal/fsm"
+	"github.com/BlindspotSoftware/dutctl/internal/template"
 	"github.com/BlindspotSoftware/dutctl/pkg/dut"
 	"github.com/BlindspotSoftware/dutctl/pkg/module"
 
@@ -119,6 +121,9 @@ func executeModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State
 	go func() {
 		cnt := len(args.cmd.Modules)
 
+		// Map positional args to named args
+		namedArgs := mapPositionalToNamedArgs(args.cmd.Args, args.cmdMsg.GetArgs())
+
 		for idx, module := range args.cmd.Modules {
 			if ctx.Err() != nil {
 				log.Printf("Execution aborted, %d of %d modules done: %v", idx, cnt, ctx.Err())
@@ -129,14 +134,18 @@ func executeModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State
 
 			log.Printf("Running module %d of %d: %q", idx+1, cnt, module.Config.Name)
 
-			var moduleArgs []string
-			if module.Config.Main {
-				moduleArgs = args.cmdMsg.GetArgs()
-			} else {
-				moduleArgs = module.Config.Args
+			// Expand templates in module args
+			moduleArgs, err := template.ExpandAll(module.Config.Args, namedArgs)
+			if err != nil {
+				args.moduleErrCh <- fmt.Errorf("template expansion failed for module %q: %w", module.Config.Name, err)
+
+				log.Printf("Module %q template expansion failed: %v", module.Config.Name, err)
+				modCtxCancel()
+
+				return
 			}
 
-			err := module.Run(rpcCtx, moduleSession, moduleArgs...)
+			err = module.Run(rpcCtx, moduleSession, moduleArgs...)
 			if err != nil {
 				args.moduleErrCh <- err
 
@@ -153,6 +162,33 @@ func executeModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State
 	}()
 
 	return args, waitModules, nil
+}
+
+// mapPositionalToNamedArgs maps positional arguments to named arguments.
+// Keys are sorted alphabetically to ensure deterministic mapping.
+func mapPositionalToNamedArgs(argDefs map[string]string, positionalArgs []string) map[string]string {
+	namedArgs := make(map[string]string)
+
+	if len(argDefs) == 0 {
+		return namedArgs
+	}
+
+	argNames := make([]string, 0, len(argDefs))
+	for name := range argDefs {
+		argNames = append(argNames, name)
+	}
+
+	sort.Strings(argNames)
+
+	for i, name := range argNames {
+		if i < len(positionalArgs) {
+			namedArgs[name] = positionalArgs[i]
+		} else {
+			namedArgs[name] = ""
+		}
+	}
+
+	return namedArgs
 }
 
 // waitModules is a state of the Run RPC.

@@ -8,9 +8,12 @@ devices:
       # Upload any file - preserves directory structure
       upload:
         desc: "Upload file to device"
+        args:
+          file: "File path to upload (e.g., ./build/firmware.bin or ./firmware.bin:custom/firmware.bin)"
         modules:
           - module: file
-            main: true
+            args:
+              - "${file}"
             options:
               operation: "upload"
         # Usage:
@@ -23,9 +26,12 @@ devices:
       # Upload with destination configured - arg becomes source
       upload-script:
         desc: "Upload and install a script"
+        args:
+          source: "Path to the script file to upload"
         modules:
           - module: file
-            main: true
+            args:
+              - "${source}"
             options:
               operation: "upload"
               destination: "/opt/scripts/install.sh"
@@ -37,9 +43,12 @@ devices:
       # Download with source configured - arg becomes destination
       fetch-logs:
         desc: "Download logs from device"
+        args:
+          destination: "Local path where to save the downloaded file"
         modules:
           - module: file
-            main: true
+            args:
+              - "${destination}"
             options:
               operation: "download"
               source: "/var/log.txt"
@@ -52,7 +61,6 @@ devices:
         desc: "Upload configuration file with fixed paths"
         modules:
           - module: file
-            main: true
             options:
               operation: "upload"
               source: "./configs/device.conf"

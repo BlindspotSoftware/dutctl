@@ -93,16 +93,13 @@ func TestFindDUTCmd(t *testing.T) {
 	validCmd := pb.Command{Device: "dev1", Command: "echo"}
 
 	// Helper to build a dut.Devlist with optional command configuration.
-	makeDevlist := func(includeCmd bool, cmdModules int, mainCount int) dut.Devlist {
+	makeDevlist := func(includeCmd bool, cmdModules int) dut.Devlist {
 		devs := make(dut.Devlist)
 		if includeCmd {
 			modules := make([]dut.Module, 0, cmdModules)
 			for i := 0; i < cmdModules; i++ {
 				m := dut.Module{}
 				m.Config.Name = fmt.Sprintf("mod%d", i)
-				if i < mainCount { // mark first mainCount modules as main (can create invalid config)
-					m.Config.Main = true
-				}
 				modules = append(modules, m)
 			}
 			devs[validCmd.GetDevice()] = dut.Device{Cmds: map[string]dut.Command{
@@ -130,7 +127,7 @@ func TestFindDUTCmd(t *testing.T) {
 		{
 			name:     "success_valid_command",
 			cmdMsg:   &validCmd,
-			devs:     makeDevlist(true, 1, 1),
+			devs:     makeDevlist(true, 1),
 			wantNext: executeModules,
 		},
 		{
@@ -142,20 +139,20 @@ func TestFindDUTCmd(t *testing.T) {
 		{
 			name:        "command_not_found",
 			cmdMsg:      &validCmd,
-			devs:        makeDevlist(false, 0, 0),
+			devs:        makeDevlist(false, 0),
 			wantErrCode: connect.CodeInvalidArgument,
 		},
 		{
 			name:        "invalid_command_no_modules",
 			cmdMsg:      &validCmd,
-			devs:        makeDevlist(true, 0, 0),
+			devs:        makeDevlist(true, 0),
 			wantErrCode: connect.CodeInternal,
 		},
 		{
-			name:        "invalid_command_multiple_mains",
-			cmdMsg:      &validCmd,
-			devs:        makeDevlist(true, 2, 2),
-			wantErrCode: connect.CodeInternal,
+			name:     "success_command_multiple_modules",
+			cmdMsg:   &validCmd,
+			devs:     makeDevlist(true, 2),
+			wantNext: executeModules,
 		},
 	}
 
@@ -236,12 +233,11 @@ func TestExecuteModules(t *testing.T) {
 				m := &dummyModule{}
 				wrap := dut.Module{}
 				wrap.Config.Name = "mainMod"
-				wrap.Config.Main = true
 				wrap.Module = m
 				return []dut.Module{wrap}
 			}(),
 			cmdMsg: &pb.Command{Device: "devX", Command: "cmdY", Args: []string{"a", "b"}},
-			expect: expect{wantNext: waitModules, mainArgs: []string{"a", "b"}, mainRuns: 1},
+			expect: expect{wantNext: waitModules, mainArgs: []string{}, mainRuns: 1},
 		},
 		{
 			name: "success_two_modules_main_and_helper",
@@ -250,17 +246,15 @@ func TestExecuteModules(t *testing.T) {
 				helper := &dummyModule{}
 				w1 := dut.Module{}
 				w1.Config.Name = "mainMod"
-				w1.Config.Main = true
 				w1.Module = main
 				w2 := dut.Module{}
 				w2.Config.Name = "helperMod"
-				w2.Config.Main = false
 				w2.Config.Args = []string{"conf1"}
 				w2.Module = helper
 				return []dut.Module{w1, w2}
 			}(),
 			cmdMsg: &pb.Command{Device: "devX", Command: "cmdY", Args: []string{"x", "y"}},
-			expect: expect{wantNext: waitModules, mainArgs: []string{"x", "y"}, nonMainArgs: []string{"conf1"}, mainRuns: 1, nonMainRuns: 1},
+			expect: expect{wantNext: waitModules, mainArgs: []string{}, nonMainArgs: []string{"conf1"}, mainRuns: 1, nonMainRuns: 1},
 		},
 		{
 			name: "module_error_stops_execution",
@@ -268,7 +262,6 @@ func TestExecuteModules(t *testing.T) {
 				bad := &dummyModule{err: errors.New("boom")}
 				wrap := dut.Module{}
 				wrap.Config.Name = "badMain"
-				wrap.Config.Main = true
 				wrap.Module = bad
 				return []dut.Module{wrap}
 			}(),
@@ -282,17 +275,15 @@ func TestExecuteModules(t *testing.T) {
 				failing := &dummyModule{err: errors.New("helper failed")}
 				w1 := dut.Module{}
 				w1.Config.Name = "mainMod"
-				w1.Config.Main = true
 				w1.Module = main
 				w2 := dut.Module{}
 				w2.Config.Name = "helperMod"
-				w2.Config.Main = false
 				w2.Config.Args = []string{"harg"}
 				w2.Module = failing
 				return []dut.Module{w1, w2}
 			}(),
 			cmdMsg: &pb.Command{Device: "devX", Command: "cmdY", Args: []string{"m1", "m2"}},
-			expect: expect{wantNext: waitModules, mainArgs: []string{"m1", "m2"}, nonMainArgs: []string{"harg"}, mainRuns: 1, nonMainRuns: 1},
+			expect: expect{wantNext: waitModules, mainArgs: []string{}, nonMainArgs: []string{"harg"}, mainRuns: 1, nonMainRuns: 1},
 		},
 		{
 			name:      "pre_canceled_context_no_module_run",
@@ -301,7 +292,6 @@ func TestExecuteModules(t *testing.T) {
 				m := &dummyModule{}
 				wrap := dut.Module{}
 				wrap.Config.Name = "mainMod"
-				wrap.Config.Main = true
 				wrap.Module = m
 				return []dut.Module{wrap}
 			}(),

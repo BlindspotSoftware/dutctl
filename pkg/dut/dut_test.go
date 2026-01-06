@@ -78,30 +78,20 @@ func TestFindCmd(t *testing.T) {
 				"cmd1": {
 					Modules: []Module{
 						{
-							Config: ModuleConfig{
-								Main: true,
-							},
-						},
-					},
-				},
-				"cmd2": {
-					Modules: []Module{
-						{
 							Config: ModuleConfig{},
 						},
 					},
 				},
+				"cmd2": {
+					Modules: []Module{},
+				},
 				"cmd3": {
 					Modules: []Module{
 						{
-							Config: ModuleConfig{
-								Main: true,
-							},
+							Config: ModuleConfig{},
 						},
 						{
-							Config: ModuleConfig{
-								Main: true,
-							},
+							Config: ModuleConfig{},
 						},
 					},
 				},
@@ -150,12 +140,12 @@ func TestFindCmd(t *testing.T) {
 			err:     ErrInvalidCommand,
 		},
 		{
-			name:    "invalid command with multiple main modules",
+			name:    "valid command with multiple modules",
 			device:  "device1",
 			command: "cmd3",
 			wantDev: devs["device1"],
 			wantCmd: devs["device1"].Cmds["cmd3"],
-			err:     ErrInvalidCommand,
+			err:     nil,
 		},
 	}
 
