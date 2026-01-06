@@ -49,7 +49,7 @@ func (e *ConfigError) Unwrap() error {
 
 var (
 	ErrNoModules           = errors.New("command must have at least one module")
-	ErrMultipleMainModules = errors.New("command must have exactly one main module")
+	ErrMultipleMainModules = errors.New("command must have at most one main module")
 	ErrMainModuleWithArgs  = errors.New("main module must not have args set")
 	ErrModuleNotFound      = errors.New("module not found")
 	ErrEmptyDevices        = errors.New("devices must not be empty")
@@ -229,16 +229,12 @@ func (c *Command) UnmarshalYAML(node *yaml.Node) error {
 	*c = Command(cmd)
 
 	// Check presence of main module
-	switch len(c.Modules) {
-	case 0:
+	if len(c.Modules) == 0 {
 		return &ConfigError{Line: node.Line, Err: ErrNoModules}
-	case 1:
-		// Implicitly sets the only module as main
-		c.Modules[0].Config.Main = true
-	default:
-		if c.CountMain() != 1 {
-			return &ConfigError{Line: node.Line, Err: ErrMultipleMainModules}
-		}
+	}
+
+	if c.countMain() > 1 {
+		return &ConfigError{Line: node.Line, Err: ErrMultipleMainModules}
 	}
 
 	// Check for presence of args in non-main modules only
