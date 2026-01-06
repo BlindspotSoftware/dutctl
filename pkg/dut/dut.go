@@ -17,11 +17,10 @@ import (
 )
 
 var (
-	ErrDeviceNotFound      = errors.New("no such device")
-	ErrCommandNotFound     = errors.New("no such command")
-	ErrNoModules           = errors.New("command has no modules")
-	ErrMultipleMainModules = errors.New("command has multiple main modules")
-	ErrNoMainForArgs       = errors.New("arguments provided but command has no main module to receive them")
+	ErrDeviceNotFound             = errors.New("no such device")
+	ErrCommandNotFound            = errors.New("no such command")
+	ErrNoModules                  = errors.New("command has no modules")
+	ErrMultipleInteractiveModules = errors.New("command has multiple interactive modules")
 )
 
 // Devlist is a list of devices-under-test.
@@ -62,7 +61,7 @@ func (devs Devlist) CmdNames(device string) ([]string, error) {
 // FindCmd returns the device and command for a given device and command name.
 // If the device is not found, it returns ErrDeviceNotFound, if the command is not found,
 // it returns ErrCommandNotFound. If the requested command has no modules, it returns ErrNoModules.
-// If the requested command has multiple main modules, it returns ErrMultipleMainModules.
+// If the requested command has multiple interactive modules, it returns ErrMultipleInteractiveModules.
 func (devs Devlist) FindCmd(device, command string) (Device, Command, error) {
 	dev, ok := devs[device]
 	if !ok {
@@ -78,8 +77,8 @@ func (devs Devlist) FindCmd(device, command string) (Device, Command, error) {
 		return dev, cmd, ErrNoModules
 	}
 
-	if cmd.CountMain() > 1 {
-		return dev, cmd, ErrMultipleMainModules
+	if cmd.CountInteractive() > 1 {
+		return dev, cmd, ErrMultipleInteractiveModules
 	}
 
 	return dev, cmd, nil
@@ -113,31 +112,31 @@ func (c *Command) UnmarshalYAML(node *yaml.Node) error {
 
 	*c = Command(cmd)
 
-	// Check presence of main module
+	// Check presence of interactive module
 	if len(c.Modules) == 0 {
 		return errors.New("command must have at least one module")
 	}
 
-	if c.CountMain() > 1 {
-		return errors.New("command must have at most one main module")
+	if c.CountInteractive() > 1 {
+		return errors.New("command must have at most one interactive module")
 	}
 
-	// Check for presence of args in non-main modules only
+	// Check for presence of args in non-interactive modules only
 	for _, mod := range c.Modules {
-		if mod.Config.Main && len(mod.Config.Args) > 0 {
-			return errors.New("main module should not have args set. They are passed as command line arguments via the dutctl client")
+		if mod.Config.Interactive && len(mod.Config.Args) > 0 {
+			return errors.New("interactive module should not have args set. They are passed as command line arguments via the dutctl client")
 		}
 	}
 
 	return nil
 }
 
-// CountMain returns the number of modules marked as main in the command.
-func (c *Command) CountMain() int {
+// CountInteractive returns the number of modules marked as interactive in the command.
+func (c *Command) CountInteractive() int {
 	count := 0
 
 	for _, mod := range c.Modules {
-		if mod.Config.Main {
+		if mod.Config.Interactive {
 			count++
 		}
 	}
@@ -153,10 +152,10 @@ type Module struct {
 }
 
 type ModuleConfig struct {
-	Name    string `yaml:"module"`
-	Main    bool
-	Args    []string
-	Options map[string]any `yaml:"with"`
+	Name        string `yaml:"module"`
+	Interactive bool
+	Args        []string
+	Options     map[string]any `yaml:"with"`
 }
 
 // UnmarshalYAML unmarshals a Module from a YAML node and adds custom validation.

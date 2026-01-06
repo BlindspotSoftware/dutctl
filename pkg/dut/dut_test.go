@@ -79,7 +79,7 @@ func TestFindCmd(t *testing.T) {
 					Modules: []Module{
 						{
 							Config: ModuleConfig{
-								Main: true,
+								Interactive: true,
 							},
 						},
 					},
@@ -91,12 +91,12 @@ func TestFindCmd(t *testing.T) {
 					Modules: []Module{
 						{
 							Config: ModuleConfig{
-								Main: true,
+								Interactive: true,
 							},
 						},
 						{
 							Config: ModuleConfig{
-								Main: true,
+								Interactive: true,
 							},
 						},
 					},
@@ -146,12 +146,12 @@ func TestFindCmd(t *testing.T) {
 			err:     ErrNoModules,
 		},
 		{
-			name:    "invalid command with multiple main modules",
+			name:    "invalid command with multiple interactive modules",
 			device:  "device1",
 			command: "cmd3",
 			wantDev: devs["device1"],
 			wantCmd: devs["device1"].Cmds["cmd3"],
-			err:     ErrMultipleMainModules,
+			err:     ErrMultipleInteractiveModules,
 		},
 	}
 

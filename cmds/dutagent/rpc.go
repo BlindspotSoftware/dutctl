@@ -115,16 +115,16 @@ func (a *rpcService) Details(
 
 	var helpStr string
 
-	// Find help text: prefer main module's help, otherwise describe all modules
+	// Find help text: prefer interactive module's help, otherwise describe all modules
 	for _, module := range cmd.Modules {
-		if module.Config.Main {
+		if module.Config.Interactive {
 			helpStr = module.Help()
 
 			break
 		}
 	}
 
-	// If no main module, provide overview of all modules
+	// If no interactive module, provide overview of all modules
 	if helpStr == "" {
 		var moduleNames []string
 		for _, module := range cmd.Modules {
