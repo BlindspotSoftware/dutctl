@@ -115,7 +115,12 @@ func executeModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State
 	args.session = moduleSession
 
 	// Resolve module arguments before spawning the goroutine.
-	moduleArgs := args.cmd.ModuleArgs(args.cmdMsg.GetArgs())
+	moduleArgs, err := args.cmd.ModuleArgs(args.cmdMsg.GetArgs())
+	if err != nil {
+		modCtxCancel()
+
+		return args, nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
 
 	// Run the modules in a goroutine.
 	// Termination of the module execution is signaled by closing the moduleErrCh channel.
