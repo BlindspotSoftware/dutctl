@@ -110,15 +110,7 @@ func (a *rpcService) Details(
 		return nil, e
 	}
 
-	helpStr, ok := cmd.HelpText()
-	if !ok {
-		e := connect.NewError(
-			connect.CodeInternal,
-			fmt.Errorf("no main module found for command %q at device %q", wantCmd, wantDev),
-		)
-
-		return nil, e
-	}
+	helpStr := cmd.HelpText()
 
 	res := connect.NewResponse(&pb.DetailsResponse{
 		Details: helpStr,
