@@ -68,22 +68,6 @@ func TestInvalidConfig(t *testing.T) {
 			wantLine:     5,
 		},
 		{
-			name:         "no_main_in_multi_module",
-			file:         "invalid_no_main_multi.yaml",
-			wantSentinel: ErrMultipleMainModules,
-			wantDevice:   "device1",
-			wantCommand:  "status",
-			wantLine:     5,
-		},
-		{
-			name:         "main_module_with_args",
-			file:         "invalid_main_with_args.yaml",
-			wantSentinel: ErrMainModuleWithArgs,
-			wantDevice:   "device1",
-			wantCommand:  "status",
-			wantLine:     5,
-		},
-		{
 			name:         "main_with_args_explicit_multi",
 			file:         "invalid_main_args_multi.yaml",
 			wantSentinel: ErrMainModuleWithArgs,
@@ -225,15 +209,15 @@ func TestValidConfig(t *testing.T) {
 			wantDevs: 1,
 		},
 		{
-			name:     "implicit_main",
+			name:     "single_module_no_main",
 			file:     "valid_implicit_main.yaml",
 			wantDevs: 1,
 			checkFunc: func(t *testing.T, devs Devlist) {
 				t.Helper()
 
 				cmd := devs["device1"].Cmds["status"]
-				if !cmd.Modules[0].Config.Main {
-					t.Error("expected single module to be implicitly set as main")
+				if cmd.Modules[0].Config.Main {
+					t.Error("single module should not be implicitly set as main")
 				}
 			},
 		},
@@ -314,6 +298,24 @@ func TestValidConfig(t *testing.T) {
 				cmd := devs["device1"].Cmds["flash"]
 				if cmd.Desc != "Flash the firmware" {
 					t.Errorf("Desc: want %q, got %q", "Flash the firmware", cmd.Desc)
+				}
+			},
+		},
+		{
+			name:     "non_main_module_with_args",
+			file:     "invalid_main_with_args.yaml",
+			wantDevs: 1,
+		},
+		{
+			name:     "no_main_multi_module",
+			file:     "invalid_no_main_multi.yaml",
+			wantDevs: 1,
+			checkFunc: func(t *testing.T, devs Devlist) {
+				t.Helper()
+
+				cmd := devs["device1"].Cmds["status"]
+				if cmd.CountMain() != 0 {
+					t.Error("expected no main modules")
 				}
 			},
 		},

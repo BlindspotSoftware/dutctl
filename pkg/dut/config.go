@@ -229,16 +229,12 @@ func (c *Command) UnmarshalYAML(node *yaml.Node) error {
 	*c = Command(cmd)
 
 	// Check presence of main module
-	switch len(c.Modules) {
-	case 0:
+	if len(c.Modules) == 0 {
 		return &ConfigError{Line: node.Line, Err: ErrNoModules}
-	case 1:
-		// Implicitly sets the only module as main
-		c.Modules[0].Config.Main = true
-	default:
-		if c.CountMain() != 1 {
-			return &ConfigError{Line: node.Line, Err: ErrMultipleMainModules}
-		}
+	}
+
+	if c.CountMain() > 1 {
+		return &ConfigError{Line: node.Line, Err: ErrMultipleMainModules}
 	}
 
 	// Check for presence of args in non-main modules only

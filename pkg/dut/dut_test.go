@@ -88,11 +88,7 @@ func TestFindCmd(t *testing.T) {
 					},
 				},
 				"cmd2": {
-					Modules: []Module{
-						{
-							Config: ModuleConfig{},
-						},
-					},
+					Modules: []Module{},
 				},
 				"cmd3": {
 					Modules: []Module{
@@ -107,9 +103,6 @@ func TestFindCmd(t *testing.T) {
 							},
 						},
 					},
-				},
-				"cmd4": {
-					Modules: []Module{},
 				},
 			},
 		},
@@ -148,12 +141,12 @@ func TestFindCmd(t *testing.T) {
 			err:     ErrDeviceNotFound,
 		},
 		{
-			name:    "invalid command with no main module",
+			name:    "invalid command with no modules",
 			device:  "device1",
 			command: "cmd2",
 			wantDev: devs["device1"],
 			wantCmd: devs["device1"].Cmds["cmd2"],
-			err:     ErrMultipleMainModules,
+			err:     ErrNoModules,
 		},
 		{
 			name:    "invalid command with multiple main modules",
@@ -162,14 +155,6 @@ func TestFindCmd(t *testing.T) {
 			wantDev: devs["device1"],
 			wantCmd: devs["device1"].Cmds["cmd3"],
 			err:     ErrMultipleMainModules,
-		},
-		{
-			name:    "invalid command with no modules",
-			device:  "device1",
-			command: "cmd4",
-			wantDev: devs["device1"],
-			wantCmd: devs["device1"].Cmds["cmd4"],
-			err:     ErrNoModules,
 		},
 	}
 
@@ -189,6 +174,7 @@ func TestModuleArgs(t *testing.T) {
 		cmd         Command
 		runtimeArgs []string
 		want        [][]string
+		err         error
 	}{
 		{
 			name: "single main module gets runtime args",
@@ -204,7 +190,8 @@ func TestModuleArgs(t *testing.T) {
 				{Config: ModuleConfig{Args: []string{"x"}}},
 			}},
 			runtimeArgs: []string{"a"},
-			want:        [][]string{{"x"}},
+			want:        nil,
+			err:         ErrNoMainForArgs,
 		},
 		{
 			name: "mixed main and non-main",
@@ -219,23 +206,39 @@ func TestModuleArgs(t *testing.T) {
 			name:        "empty modules",
 			cmd:         Command{},
 			runtimeArgs: []string{"a"},
-			want:        [][]string{},
+			want:        nil,
+			err:         ErrNoMainForArgs,
 		},
 		{
-			name: "non-main with nil args",
+			name: "error when runtime args provided but no main module",
 			cmd: Command{Modules: []Module{
 				{Config: ModuleConfig{}},
 			}},
 			runtimeArgs: []string{"a"},
+			want:        nil,
+			err:         ErrNoMainForArgs,
+		},
+		{
+			name: "main module with no runtime args",
+			cmd: Command{Modules: []Module{
+				{Config: ModuleConfig{Main: true}},
+			}},
+			runtimeArgs: nil,
 			want:        [][]string{nil},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := tt.cmd.ModuleArgs(tt.runtimeArgs)
+			result, err := tt.cmd.ModuleArgs(tt.runtimeArgs)
 			if !reflect.DeepEqual(result, tt.want) {
 				t.Errorf("expected %v, got %v", tt.want, result)
+			}
+
+			if tt.err != nil && !errors.Is(err, tt.err) {
+				t.Errorf("expected error %v, got %v", tt.err, err)
+			} else if tt.err == nil && err != nil {
+				t.Errorf("expected no error, got %v", err)
 			}
 		})
 	}
@@ -246,67 +249,75 @@ type helpModule struct {
 	text string
 }
 
-func (m *helpModule) Help() string                                                  { return m.text }
-func (m *helpModule) Init() error                                                   { return nil }
-func (m *helpModule) Deinit() error                                                 { return nil }
-func (m *helpModule) Run(_ context.Context, _ module.Session, _ ...string) error    { return nil }
+func (m *helpModule) Help() string                                               { return m.text }
+func (m *helpModule) Init() error                                                { return nil }
+func (m *helpModule) Deinit() error                                              { return nil }
+func (m *helpModule) Run(_ context.Context, _ module.Session, _ ...string) error { return nil }
 
 func TestHelpText(t *testing.T) {
 	tests := []struct {
-		name      string
-		cmd       Command
-		wantText  string
-		wantFound bool
+		name     string
+		cmd      Command
+		wantText string
 	}{
 		{
-			name:      "no modules",
-			cmd:       Command{},
-			wantFound: false,
+			name:     "no modules",
+			cmd:      Command{},
+			wantText: "Command with 0 module(s): ",
 		},
 		{
 			name: "main module exists",
 			cmd: Command{Modules: []Module{
 				{
 					Module: &helpModule{text: "usage: flash <image>"},
-					Config: ModuleConfig{Main: true},
+					Config: ModuleConfig{Name: "flash", Main: true},
 				},
 			}},
-			wantText:  "usage: flash <image>",
-			wantFound: true,
+			wantText: "usage: flash <image>",
 		},
 		{
 			name: "no main module",
 			cmd: Command{Modules: []Module{
 				{
 					Module: &helpModule{text: "helper"},
-					Config: ModuleConfig{},
+					Config: ModuleConfig{Name: "helper"},
 				},
 			}},
-			wantFound: false,
+			wantText: "Command with 1 module(s): helper",
+		},
+		{
+			name: "multiple modules without main",
+			cmd: Command{Modules: []Module{
+				{
+					Module: &helpModule{text: "setup"},
+					Config: ModuleConfig{Name: "setup"},
+				},
+				{
+					Module: &helpModule{text: "cleanup"},
+					Config: ModuleConfig{Name: "cleanup"},
+				},
+			}},
+			wantText: "Command with 2 module(s): setup, cleanup",
 		},
 		{
 			name: "main among multiple modules",
 			cmd: Command{Modules: []Module{
 				{
 					Module: &helpModule{text: "helper"},
-					Config: ModuleConfig{},
+					Config: ModuleConfig{Name: "helper"},
 				},
 				{
 					Module: &helpModule{text: "main help"},
-					Config: ModuleConfig{Main: true},
+					Config: ModuleConfig{Name: "main", Main: true},
 				},
 			}},
-			wantText:  "main help",
-			wantFound: true,
+			wantText: "main help",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			text, found := tt.cmd.HelpText()
-			if found != tt.wantFound {
-				t.Errorf("found: expected %v, got %v", tt.wantFound, found)
-			}
+			text := tt.cmd.HelpText()
 			if text != tt.wantText {
 				t.Errorf("text: expected %q, got %q", tt.wantText, text)
 			}
