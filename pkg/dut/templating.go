@@ -22,8 +22,8 @@ func (c *Command) validateTemplateReferences() error {
 	}
 
 	for _, mod := range c.Modules {
-		// Skip main modules (they receive raw args)
-		if mod.Config.Main {
+		// Skip passthrough modules (they receive raw args)
+		if mod.Config.Passthrough {
 			continue
 		}
 

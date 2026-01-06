@@ -48,13 +48,13 @@ func (e *ConfigError) Unwrap() error {
 }
 
 var (
-	ErrNoModules           = errors.New("command must have at least one module")
-	ErrMultipleMainModules = errors.New("command must have at most one main module")
-	ErrMainModuleWithArgs  = errors.New("main module must not have args set")
-	ErrMainWithCommandArgs = errors.New("command cannot have both main module and args declaration")
-	ErrModuleNotFound      = errors.New("module not found")
-	ErrEmptyDevices        = errors.New("devices must not be empty")
-	ErrNoCommands          = errors.New("device must have at least one command")
+	ErrNoModules                  = errors.New("command must have at least one module")
+	ErrMultiplePassthroughModules = errors.New("command must have at most one passthrough module")
+	ErrPassthroughModuleWithArgs  = errors.New("passthrough module must not have args set")
+	ErrPassthroughWithCommandArgs = errors.New("command cannot have both passthrough module and args declaration")
+	ErrModuleNotFound             = errors.New("module not found")
+	ErrEmptyDevices               = errors.New("devices must not be empty")
+	ErrNoCommands                 = errors.New("device must have at least one command")
 )
 
 // UnmarshalYAML unmarshals a Devlist from a YAML node, wrapping errors
@@ -229,24 +229,24 @@ func (c *Command) UnmarshalYAML(node *yaml.Node) error {
 
 	*c = Command(cmd)
 
-	// Check presence of main module
+	// Check presence of passthrough module
 	if len(c.Modules) == 0 {
 		return &ConfigError{Line: node.Line, Err: ErrNoModules}
 	}
 
-	if c.countMain() > 1 {
-		return &ConfigError{Line: node.Line, Err: ErrMultipleMainModules}
+	if c.countPassthrough() > 1 {
+		return &ConfigError{Line: node.Line, Err: ErrMultiplePassthroughModules}
 	}
 
-	// Validate mutual exclusion: cannot have both main module AND command args
-	if c.HasMain() && len(c.Args) > 0 {
-		return &ConfigError{Line: node.Line, Err: ErrMainWithCommandArgs}
+	// Validate mutual exclusion: cannot have both passthrough module AND command args
+	if c.HasPassthrough() && len(c.Args) > 0 {
+		return &ConfigError{Line: node.Line, Err: ErrPassthroughWithCommandArgs}
 	}
 
-	// Check for presence of args in non-main modules only
+	// Check for presence of args in passthrough modules
 	for _, mod := range c.Modules {
-		if mod.Config.Main && len(mod.Config.Args) > 0 {
-			return &ConfigError{Line: node.Line, Err: ErrMainModuleWithArgs}
+		if mod.Config.Passthrough && len(mod.Config.Args) > 0 {
+			return &ConfigError{Line: node.Line, Err: ErrPassthroughModuleWithArgs}
 		}
 	}
 
@@ -266,7 +266,7 @@ func (c *Command) UnmarshalYAML(node *yaml.Node) error {
 // into the concrete module implementation. This is necessary because the concrete
 // type is only known after module.New() resolves the module name.
 func (m *Module) UnmarshalYAML(node *yaml.Node) error {
-	// First pass: decode the fixed fields (module, main, args, with).
+	// First pass: decode the fixed fields (module, passthrough, args, with).
 	err := node.Decode(&m.Config)
 	if err != nil {
 		return err
