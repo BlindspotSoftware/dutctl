@@ -2,10 +2,10 @@ device1:
   desc: "Device 1"
   cmds:
     status:
-      desc: "explicit main with args plus helper"
+      desc: "explicit passthrough with args plus helper"
       uses:
         - module: dummy-repeat
-          main: true
+          passthrough: true
           args:
             - "foo"
         - module: dummy-repeat

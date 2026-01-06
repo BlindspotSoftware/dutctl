@@ -1,18 +1,18 @@
 # Command Arguments Guide
 
-This guide explains the three ways to handle arguments in dutctl commands: non-main, main, and templating.
+This guide explains the three ways to handle arguments in dutctl commands: static, passthrough, and templating.
 
 ## Three Mutually Exclusive Approaches
 
 Commands support three approaches for arguments. **These approaches are mutually exclusive** - a command must use exactly one:
 
-1. **Non-Main Commands** - Static values only, no runtime arguments
-2. **Main Commands** - Single main module receives all runtime arguments
+1. **Static Commands** - Static values only, no runtime arguments
+2. **Passthrough Commands** - Single passthrough module receives all runtime arguments
 3. **Command-Level Templating** - Named arguments distributed to modules via templates
 
-You cannot mix approaches (e.g., a command cannot have both a main module AND command-level args).
+You cannot mix approaches (e.g., a command cannot have both a passthrough module AND command-level args).
 
-## Non-Main Commands
+## Static Commands
 
 For commands without runtime arguments, you specify static values directly in module args:
 
@@ -39,9 +39,9 @@ dutctl run my-device power-cycle
 
 No runtime arguments needed - all values are configured in the YAML.
 
-## Main Commands
+## Passthrough Commands
 
-Commands with a main module pass all runtime arguments directly to that module:
+Commands with a passthrough module pass all runtime arguments directly to that module:
 
 ```yaml
 devices:
@@ -51,7 +51,7 @@ devices:
         desc: "Run shell command"
         uses:
           - module: shell
-            main: true
+            passthrough: true
 ```
 
 Usage:
@@ -60,9 +60,9 @@ Usage:
 dutctl run my-device run-command ls -la /tmp
 ```
 
-The main module receives: `["ls", "-la", "/tmp"]`
+The passthrough module receives: `["ls", "-la", "/tmp"]`
 
-All runtime arguments go to the main module - you cannot have multiple main modules in one command.
+All runtime arguments go to the passthrough module - you cannot have multiple passthrough modules in one command.
 
 ## Command-Level Templating
 

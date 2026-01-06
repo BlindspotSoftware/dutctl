@@ -2,7 +2,7 @@ device1:
   desc: "Device 1"
   cmds:
     status:
-      desc: "two modules, neither main"
+      desc: "two modules, neither passthrough"
       uses:
         - module: dummy-repeat
         - module: dummy-repeat

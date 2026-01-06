@@ -8,9 +8,9 @@ devices:
         desc: "Report status"
         uses:
           - module: dummy-status
-            main: true
+            passthrough: true
       repeat:
         desc: "Repeat input"
         uses:
           - module: dummy-repeat
-            main: true
+            passthrough: true

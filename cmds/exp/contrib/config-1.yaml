@@ -8,4 +8,4 @@ devices:
         desc: "Report status"
         uses:
           - module: dummy-status
-            main: true
+            passthrough: true

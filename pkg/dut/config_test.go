@@ -60,17 +60,17 @@ func TestInvalidConfig(t *testing.T) {
 			wantLine:     5,
 		},
 		{
-			name:         "multiple_main_modules",
-			file:         "invalid_multiple_main.yaml",
-			wantSentinel: ErrMultipleMainModules,
+			name:         "multiple_passthrough_modules",
+			file:         "invalid_multiple_passthrough.yaml",
+			wantSentinel: ErrMultiplePassthroughModules,
 			wantDevice:   "device1",
 			wantCommand:  "status",
 			wantLine:     5,
 		},
 		{
-			name:         "main_with_args_explicit_multi",
-			file:         "invalid_main_args_multi.yaml",
-			wantSentinel: ErrMainModuleWithArgs,
+			name:         "passthrough_with_module_args",
+			file:         "invalid_passthrough_with_module_args.yaml",
+			wantSentinel: ErrPassthroughModuleWithArgs,
 			wantDevice:   "device1",
 			wantCommand:  "status",
 			wantLine:     5,
@@ -209,36 +209,36 @@ func TestValidConfig(t *testing.T) {
 			wantDevs: 1,
 		},
 		{
-			name:     "single_module_no_main",
+			name:     "single_module_no_passthrough",
 			file:     "valid_single_module.yaml",
 			wantDevs: 1,
 			checkFunc: func(t *testing.T, devs Devlist) {
 				t.Helper()
 
 				cmd := devs["device1"].Cmds["status"]
-				if cmd.HasMain() {
-					t.Error("single module should not be implicitly set as main")
+				if cmd.HasPassthrough() {
+					t.Error("single module should not be implicitly set as passthrough")
 				}
 			},
 		},
 		{
-			name:     "explicit_main_with_helper",
-			file:     "valid_explicit_main.yaml",
+			name:     "explicit_passthrough_with_helper",
+			file:     "valid_explicit_passthrough.yaml",
 			wantDevs: 1,
 			checkFunc: func(t *testing.T, devs Devlist) {
 				t.Helper()
 
 				cmd := devs["device1"].Cmds["status"]
-				mainCount := 0
+				passthroughCount := 0
 
 				for _, mod := range cmd.Modules {
-					if mod.Config.Main {
-						mainCount++
+					if mod.Config.Passthrough {
+						passthroughCount++
 					}
 				}
 
-				if mainCount != 1 {
-					t.Errorf("expected exactly 1 main module, got %d", mainCount)
+				if passthroughCount != 1 {
+					t.Errorf("expected exactly 1 passthrough module, got %d", passthroughCount)
 				}
 			},
 		},
@@ -252,11 +252,11 @@ func TestValidConfig(t *testing.T) {
 				cmd := devs["device1"].Cmds["status"]
 
 				for _, mod := range cmd.Modules {
-					if mod.Config.Main && len(mod.Config.Args) > 0 {
-						t.Error("main module should not have args")
+					if mod.Config.Passthrough && len(mod.Config.Args) > 0 {
+						t.Error("passthrough module should not have args")
 					}
 
-					if !mod.Config.Main && len(mod.Config.Args) == 0 {
+					if !mod.Config.Passthrough && len(mod.Config.Args) == 0 {
 						t.Error("expected helper module to have args")
 					}
 				}
@@ -302,20 +302,20 @@ func TestValidConfig(t *testing.T) {
 			},
 		},
 		{
-			name:     "non_main_module_with_args",
+			name:     "module_with_args_no_passthrough",
 			file:     "invalid_main_with_args.yaml",
 			wantDevs: 1,
 		},
 		{
-			name:     "no_main_multi_module",
+			name:     "no_passthrough_multi_module",
 			file:     "invalid_no_main_multi.yaml",
 			wantDevs: 1,
 			checkFunc: func(t *testing.T, devs Devlist) {
 				t.Helper()
 
 				cmd := devs["device1"].Cmds["status"]
-				if cmd.HasMain() {
-					t.Error("expected no main modules")
+				if cmd.HasPassthrough() {
+					t.Error("expected no passthrough modules")
 				}
 			},
 		},
