@@ -11,20 +11,17 @@ devices:
         desc: "Report status information via the dummy-status module"
         uses:
           - module: dummy-status
-            main: true
-            args:
-              - foo
-              - bar
+            passthrough: true
       repeat:
         desc: "Interactively repeat user input via the dummy-repeat module"
         uses:
           - module: dummy-repeat
-            main: true
+            passthrough: true
       file-transfer:
         desc: "Transfer a file, process it, and send it back via the dummy-ft module"
         uses:
           - module: dummy-ft
-            main: true
+            passthrough: true
       combined:
         desc: |
           Demonstrates chaining multiple dummy modules: prints status, transfers a file,
@@ -35,5 +32,5 @@ devices:
               - foo
               - bar
           - module: dummy-ft
-            main: true
+            passthrough: true
           - module: dummy-status
