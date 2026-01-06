@@ -8,7 +8,7 @@ devices:
         desc: "Report status"
         uses:
           - module: dummy-status
-            main: true
+            interactive: true
   device2:
     desc: "Device 2"
     cmds:
@@ -16,12 +16,12 @@ devices:
         desc: "Report status"
         uses:
           - module: dummy-status
-            main: true
+            interactive: true
       repeat:
         desc: "Repeat input"
         uses:
           - module: dummy-repeat
-            main: true
+            interactive: true
   device3:
     desc: "Device 3"
     cmds:
@@ -29,7 +29,7 @@ devices:
         desc: "Report status"
         uses:
           - module: dummy-status
-            main: true
+            interactive: true
       file-transfer:
         desc: "Transfer a file"
         uses:
@@ -38,4 +38,4 @@ devices:
               - foo
               - bar
           - module: dummy-ft
-            main: true
+            interactive: true

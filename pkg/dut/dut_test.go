@@ -82,7 +82,7 @@ func TestFindCmd(t *testing.T) {
 					Modules: []Module{
 						{
 							Config: ModuleConfig{
-								Main: true,
+								Interactive: true,
 							},
 						},
 					},
@@ -94,12 +94,12 @@ func TestFindCmd(t *testing.T) {
 					Modules: []Module{
 						{
 							Config: ModuleConfig{
-								Main: true,
+								Interactive: true,
 							},
 						},
 						{
 							Config: ModuleConfig{
-								Main: true,
+								Interactive: true,
 							},
 						},
 					},
@@ -144,7 +144,7 @@ func TestFindCmd(t *testing.T) {
 			err:     ErrDeviceNotFound,
 		},
 		{
-			name:    "invalid command with no main module",
+			name:    "invalid command with no interactive module",
 			device:  "device1",
 			command: "cmd2",
 			wantDev: devs["device1"],
@@ -152,12 +152,12 @@ func TestFindCmd(t *testing.T) {
 			err:     ErrNoModules,
 		},
 		{
-			name:    "invalid command with multiple main modules",
+			name:    "invalid command with multiple interactive modules",
 			device:  "device1",
 			command: "cmd3",
 			wantDev: devs["device1"],
 			wantCmd: devs["device1"].Cmds["cmd3"],
-			err:     ErrMultipleMainModules,
+			err:     ErrMultipleInteractiveModules,
 		},
 	}
 
@@ -180,26 +180,26 @@ func TestModuleArgs(t *testing.T) {
 		err         error
 	}{
 		{
-			name: "single main module gets runtime args",
+			name: "single interactive module gets runtime args",
 			cmd: Command{Modules: []Module{
-				{Config: ModuleConfig{Main: true}},
+				{Config: ModuleConfig{Interactive: true}},
 			}},
 			runtimeArgs: []string{"a", "b"},
 			want:        [][]string{{"a", "b"}},
 		},
 		{
-			name: "non-main gets static args",
+			name: "non-interactive gets static args",
 			cmd: Command{Modules: []Module{
 				{Config: ModuleConfig{Args: []string{"x"}}},
 			}},
 			runtimeArgs: []string{"a"},
 			want:        nil,
-			err:         ErrNoMainForArgs,
+			err:         ErrNoInteractiveModuleForArgs,
 		},
 		{
-			name: "mixed main and non-main",
+			name: "mixed interactive and non-interactive",
 			cmd: Command{Modules: []Module{
-				{Config: ModuleConfig{Main: true}},
+				{Config: ModuleConfig{Interactive: true}},
 				{Config: ModuleConfig{Args: []string{"static1", "static2"}}},
 			}},
 			runtimeArgs: []string{"run1"},
@@ -210,21 +210,21 @@ func TestModuleArgs(t *testing.T) {
 			cmd:         Command{},
 			runtimeArgs: []string{"a"},
 			want:        nil,
-			err:         ErrNoMainForArgs,
+			err:         ErrNoInteractiveModuleForArgs,
 		},
 		{
-			name: "error when runtime args provided but no main module",
+			name: "error when runtime args provided but no interactive module",
 			cmd: Command{Modules: []Module{
 				{Config: ModuleConfig{}},
 			}},
 			runtimeArgs: []string{"a"},
 			want:        nil,
-			err:         ErrNoMainForArgs,
+			err:         ErrNoInteractiveModuleForArgs,
 		},
 		{
-			name: "main module with no runtime args",
+			name: "interactive module with no runtime args",
 			cmd: Command{Modules: []Module{
-				{Config: ModuleConfig{Main: true}},
+				{Config: ModuleConfig{Interactive: true}},
 			}},
 			runtimeArgs: nil,
 			want:        [][]string{nil},
@@ -269,17 +269,17 @@ func TestHelpText(t *testing.T) {
 			wantText: "Command with 0 module(s): ",
 		},
 		{
-			name: "main module exists",
+			name: "interactive module exists",
 			cmd: Command{Modules: []Module{
 				{
 					Module: &helpModule{text: "usage: flash <image>"},
-					Config: ModuleConfig{Name: "flash", Main: true},
+					Config: ModuleConfig{Name: "flash", Interactive: true},
 				},
 			}},
 			wantText: "usage: flash <image>",
 		},
 		{
-			name: "no main module",
+			name: "no interactive module",
 			cmd: Command{Modules: []Module{
 				{
 					Module: &helpModule{text: "helper"},
@@ -289,7 +289,7 @@ func TestHelpText(t *testing.T) {
 			wantText: "Command with 1 module(s): helper",
 		},
 		{
-			name: "multiple modules without main",
+			name: "multiple modules without interactive",
 			cmd: Command{Modules: []Module{
 				{
 					Module: &helpModule{text: "setup"},
@@ -303,18 +303,18 @@ func TestHelpText(t *testing.T) {
 			wantText: "Command with 2 module(s): setup, cleanup",
 		},
 		{
-			name: "main among multiple modules",
+			name: "interactive among multiple modules",
 			cmd: Command{Modules: []Module{
 				{
 					Module: &helpModule{text: "helper"},
 					Config: ModuleConfig{Name: "helper"},
 				},
 				{
-					Module: &helpModule{text: "main help"},
-					Config: ModuleConfig{Name: "main", Main: true},
+					Module: &helpModule{text: "interactive help"},
+					Config: ModuleConfig{Name: "interactive", Interactive: true},
 				},
 			}},
-			wantText: "main help",
+			wantText: "interactive help",
 		},
 	}
 
