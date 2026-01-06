@@ -82,7 +82,7 @@ func TestFindCmd(t *testing.T) {
 					Modules: []Module{
 						{
 							Config: ModuleConfig{
-								Main: true,
+								ForwardArgs: true,
 							},
 						},
 					},
@@ -94,12 +94,12 @@ func TestFindCmd(t *testing.T) {
 					Modules: []Module{
 						{
 							Config: ModuleConfig{
-								Main: true,
+								ForwardArgs: true,
 							},
 						},
 						{
 							Config: ModuleConfig{
-								Main: true,
+								ForwardArgs: true,
 							},
 						},
 					},
@@ -144,7 +144,7 @@ func TestFindCmd(t *testing.T) {
 			err:     ErrDeviceNotFound,
 		},
 		{
-			name:    "invalid command with no main module",
+			name:    "invalid command with no forwardArgs module",
 			device:  "device1",
 			command: "cmd2",
 			wantDev: devs["device1"],
@@ -152,12 +152,12 @@ func TestFindCmd(t *testing.T) {
 			err:     ErrNoModules,
 		},
 		{
-			name:    "invalid command with multiple main modules",
+			name:    "invalid command with multiple forwardArgs modules",
 			device:  "device1",
 			command: "cmd3",
 			wantDev: devs["device1"],
 			wantCmd: devs["device1"].Cmds["cmd3"],
-			err:     ErrMultipleMainModules,
+			err:     ErrMultipleForwardArgsModules,
 		},
 	}
 
@@ -180,66 +180,78 @@ func TestModuleArgs(t *testing.T) {
 		err         error
 	}{
 		{
-			name: "single main module gets runtime args",
+			name: "single forwardArgs module gets runtime args",
 			cmd: Command{Modules: []Module{
-				{Config: ModuleConfig{Main: true}},
+				{Config: ModuleConfig{ForwardArgs: true}},
 			}},
 			runtimeArgs: []string{"a", "b"},
 			want:        [][]string{{"a", "b"}},
 		},
 		{
-			name: "non-main gets static args",
+			name: "runtime args swallowed when no forwardArgs module",
 			cmd: Command{Modules: []Module{
 				{Config: ModuleConfig{Args: []string{"x"}}},
 			}},
 			runtimeArgs: []string{"a"},
-			want:        nil,
-			err:         ErrNoMainForArgs,
+			want:        [][]string{{"x"}},
 		},
 		{
-			name: "mixed main and non-main",
+			name: "mixed forwardArgs and non-forwardArgs",
 			cmd: Command{Modules: []Module{
-				{Config: ModuleConfig{Main: true}},
+				{Config: ModuleConfig{ForwardArgs: true}},
 				{Config: ModuleConfig{Args: []string{"static1", "static2"}}},
 			}},
 			runtimeArgs: []string{"run1"},
 			want:        [][]string{{"run1"}, {"static1", "static2"}},
 		},
 		{
-			name: "template substitution in non-main module",
+			name: "template substitution with no extra args, forwardArgs gets nil",
 			cmd: Command{
 				Args: []ArgDecl{
 					{Name: "file", Desc: "Input file"},
 					{Name: "device", Desc: "Device ID"},
 				},
 				Modules: []Module{
-					{Config: ModuleConfig{Main: true}},
+					{Config: ModuleConfig{ForwardArgs: true}},
 					{Config: ModuleConfig{Args: []string{"flash", "${file}", "--device=${device}"}}},
 				},
 			},
 			runtimeArgs: []string{"firmware.bin", "dev123"},
-			want:        [][]string{{"firmware.bin", "dev123"}, {"flash", "firmware.bin", "--device=dev123"}},
+			want:        [][]string{nil, {"flash", "firmware.bin", "--device=dev123"}},
 		},
 		{
-			name:        "empty modules",
+			name: "extra args forwarded after named arg substitution",
+			cmd: Command{
+				Args: []ArgDecl{
+					{Name: "file", Desc: "Input file"},
+					{Name: "device", Desc: "Device ID"},
+				},
+				Modules: []Module{
+					{Config: ModuleConfig{ForwardArgs: true}},
+					{Config: ModuleConfig{Args: []string{"flash", "${file}", "--device=${device}"}}},
+				},
+			},
+			runtimeArgs: []string{"firmware.bin", "dev123", "extra1", "extra2"},
+			want:        [][]string{{"extra1", "extra2"}, {"flash", "firmware.bin", "--device=dev123"}},
+		},
+		{
+			name:        "runtime args swallowed with empty modules",
 			cmd:         Command{},
 			runtimeArgs: []string{"a"},
-			want:        nil,
-			err:         ErrNoMainForArgs,
+			want:        [][]string{},
 		},
 		{
-			name: "error when runtime args provided but no main module",
+			name: "runtime args swallowed when module has no forwardArgs",
 			cmd: Command{Modules: []Module{
 				{Config: ModuleConfig{}},
 			}},
 			runtimeArgs: []string{"a"},
-			want:        nil,
-			err:         ErrNoMainForArgs,
+			want:        [][]string{nil},
 		},
 		{
-			name: "main module with no runtime args",
+			name: "forwardArgs module with no runtime args",
 			cmd: Command{Modules: []Module{
-				{Config: ModuleConfig{Main: true}},
+				{Config: ModuleConfig{ForwardArgs: true}},
 			}},
 			runtimeArgs: nil,
 			want:        [][]string{nil},
@@ -298,67 +310,146 @@ func (m *helpModule) Run(_ context.Context, _ module.Session, _ ...string) error
 func TestHelpText(t *testing.T) {
 	tests := []struct {
 		name     string
+		cmdName  string
 		cmd      Command
 		wantText string
 	}{
 		{
-			name:     "no modules",
+			name:     "no modules, no desc",
+			cmdName:  "my-cmd",
 			cmd:      Command{},
-			wantText: "Command with 0 module(s): ",
+			wantText: "\nUsage: my-cmd\n",
 		},
 		{
-			name: "main module exists",
-			cmd: Command{Modules: []Module{
-				{
-					Module: &helpModule{text: "usage: flash <image>"},
-					Config: ModuleConfig{Name: "flash", Main: true},
+			name:    "desc shown before usage",
+			cmdName: "power-cycle",
+			cmd: Command{
+				Desc: "Power cycle the device",
+				Modules: []Module{
+					{Module: &helpModule{text: "gpio"}, Config: ModuleConfig{Name: "gpio"}},
 				},
-			}},
-			wantText: "usage: flash <image>",
+			},
+			wantText: "Power cycle the device\n\nUsage: power-cycle\n",
 		},
 		{
-			name: "no main module",
+			name:    "static only, no args, no forwardArgs",
+			cmdName: "power-cycle",
 			cmd: Command{Modules: []Module{
-				{
-					Module: &helpModule{text: "helper"},
-					Config: ModuleConfig{Name: "helper"},
-				},
+				{Module: &helpModule{text: "gpio"}, Config: ModuleConfig{Name: "gpio"}},
 			}},
-			wantText: "Command with 1 module(s): helper",
+			wantText: "\nUsage: power-cycle\n",
 		},
 		{
-			name: "multiple modules without main",
+			name:    "forwardArgs only",
+			cmdName: "run-command",
 			cmd: Command{Modules: []Module{
 				{
-					Module: &helpModule{text: "setup"},
-					Config: ModuleConfig{Name: "setup"},
-				},
-				{
-					Module: &helpModule{text: "cleanup"},
-					Config: ModuleConfig{Name: "cleanup"},
+					Module: &helpModule{text: "usage: shell <cmd> [options]"},
+					Config: ModuleConfig{Name: "shell", ForwardArgs: true},
 				},
 			}},
-			wantText: "Command with 2 module(s): setup, cleanup",
+			wantText: "\nUsage: run-command [args...]\n\nusage: shell <cmd> [options]",
 		},
 		{
-			name: "main among multiple modules",
-			cmd: Command{Modules: []Module{
-				{
-					Module: &helpModule{text: "helper"},
-					Config: ModuleConfig{Name: "helper"},
+			name:    "forwardArgs only, with desc",
+			cmdName: "run-command",
+			cmd: Command{
+				Desc: "Run a shell command on the device",
+				Modules: []Module{
+					{
+						Module: &helpModule{text: "usage: shell <cmd> [options]"},
+						Config: ModuleConfig{Name: "shell", ForwardArgs: true},
+					},
 				},
+			},
+			wantText: "Run a shell command on the device\n\nUsage: run-command [args...]\n\nusage: shell <cmd> [options]",
+		},
+		{
+			name:    "named args only, single arg",
+			cmdName: "flash-firmware",
+			cmd: Command{
+				Args: []ArgDecl{
+					{Name: "firmware-file", Desc: "Path to firmware binary"},
+				},
+				Modules: []Module{
+					{Module: &helpModule{text: "flash"}, Config: ModuleConfig{Name: "flash"}},
+				},
+			},
+			wantText: "\nUsage: flash-firmware <firmware-file>\n\nArguments:\n  firmware-file  Path to firmware binary\n",
+		},
+		{
+			name:    "named args only, multiple args with alignment",
+			cmdName: "flash-firmware",
+			cmd: Command{
+				Desc: "Flash firmware to the device",
+				Args: []ArgDecl{
+					{Name: "firmware-file", Desc: "Path to firmware binary"},
+					{Name: "backup-path", Desc: "Backup location"},
+				},
+				Modules: []Module{
+					{Module: &helpModule{text: "file"}, Config: ModuleConfig{Name: "file"}},
+					{Module: &helpModule{text: "flash"}, Config: ModuleConfig{Name: "flash"}},
+				},
+			},
+			// firmware-file (13 chars) is the longest; backup-path (11) padded to 13
+			wantText: "Flash firmware to the device\n\nUsage: flash-firmware <firmware-file> <backup-path>\n\nArguments:\n  firmware-file  Path to firmware binary\n  backup-path    Backup location\n",
+		},
+		{
+			name:    "forwardArgs combined with single named arg",
+			cmdName: "flash-and-run",
+			cmd: Command{
+				Desc: "Flash firmware, then run a command on the device",
+				Args: []ArgDecl{
+					{Name: "firmware-file", Desc: "Path to firmware binary"},
+				},
+				Modules: []Module{
+					{Module: &helpModule{text: "file"}, Config: ModuleConfig{Name: "file"}},
+					{Module: &helpModule{text: "flash"}, Config: ModuleConfig{Name: "flash"}},
+					{
+						Module: &helpModule{text: "usage: shell <cmd> [options]"},
+						Config: ModuleConfig{Name: "shell", ForwardArgs: true},
+					},
+				},
+			},
+			wantText: "Flash firmware, then run a command on the device\n\nUsage: flash-and-run <firmware-file> [args...]\n\nArguments:\n  firmware-file  Path to firmware binary\n\nusage: shell <cmd> [options]",
+		},
+		{
+			name:    "forwardArgs combined with multiple named args",
+			cmdName: "flash-and-run",
+			cmd: Command{
+				Args: []ArgDecl{
+					{Name: "firmware-file", Desc: "Path to firmware binary"},
+					{Name: "device-id", Desc: "Target device ID"},
+				},
+				Modules: []Module{
+					{Module: &helpModule{text: "file"}, Config: ModuleConfig{Name: "file"}},
+					{Module: &helpModule{text: "flash"}, Config: ModuleConfig{Name: "flash"}},
+					{
+						Module: &helpModule{text: "usage: shell <cmd> [options]"},
+						Config: ModuleConfig{Name: "shell", ForwardArgs: true},
+					},
+				},
+			},
+			// firmware-file (13) > device-id (9), so device-id is padded to 13
+			wantText: "\nUsage: flash-and-run <firmware-file> <device-id> [args...]\n\nArguments:\n  firmware-file  Path to firmware binary\n  device-id      Target device ID\n\nusage: shell <cmd> [options]",
+		},
+		{
+			name:    "forwardArgs not first module",
+			cmdName: "multi-step",
+			cmd: Command{Modules: []Module{
+				{Module: &helpModule{text: "setup"}, Config: ModuleConfig{Name: "setup"}},
 				{
-					Module: &helpModule{text: "main help"},
-					Config: ModuleConfig{Name: "main", Main: true},
+					Module: &helpModule{text: "usage: main-mod"},
+					Config: ModuleConfig{Name: "main-mod", ForwardArgs: true},
 				},
 			}},
-			wantText: "main help",
+			wantText: "\nUsage: multi-step [args...]\n\nusage: main-mod",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			text := tt.cmd.HelpText()
+			text := tt.cmd.HelpText(tt.cmdName)
 			if text != tt.wantText {
 				t.Errorf("text: expected %q, got %q", tt.wantText, text)
 			}

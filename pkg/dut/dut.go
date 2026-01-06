@@ -17,11 +17,10 @@ import (
 )
 
 var (
-	ErrDeviceNotFound      = errors.New("no such device")
-	ErrCommandNotFound     = errors.New("no such command")
-	ErrNoModules           = errors.New("command has no modules")
-	ErrMultipleMainModules = errors.New("command has multiple main modules")
-	ErrNoMainForArgs       = errors.New("arguments provided but command has no main module to receive them")
+	ErrDeviceNotFound             = errors.New("no such device")
+	ErrCommandNotFound            = errors.New("no such command")
+	ErrNoModules                  = errors.New("command has no modules")
+	ErrMultipleForwardArgsModules = errors.New("command has multiple forwardArgs modules")
 )
 
 // Devlist is a list of devices-under-test.
@@ -62,7 +61,7 @@ func (devs Devlist) CmdNames(device string) ([]string, error) {
 // FindCmd returns the device and command for a given device and command name.
 // If the device is not found, it returns ErrDeviceNotFound, if the command is not found,
 // it returns ErrCommandNotFound. If the requested command has no modules, it returns ErrNoModules.
-// If the requested command has multiple main modules, it returns ErrMultipleMainModules.
+// If the requested command has multiple forwardArgs modules, it returns ErrMultipleForwardArgsModules.
 func (devs Devlist) FindCmd(device, command string) (Device, Command, error) {
 	dev, ok := devs[device]
 	if !ok {
@@ -78,8 +77,8 @@ func (devs Devlist) FindCmd(device, command string) (Device, Command, error) {
 		return dev, cmd, ErrNoModules
 	}
 
-	if cmd.CountMain() > 1 {
-		return dev, cmd, ErrMultipleMainModules
+	if cmd.CountForwardArgs() > 1 {
+		return dev, cmd, ErrMultipleForwardArgsModules
 	}
 
 	return dev, cmd, nil
@@ -120,24 +119,19 @@ func (c *Command) UnmarshalYAML(node *yaml.Node) error {
 
 	*c = Command(cmd)
 
-	// Check presence of main module
+	// Check presence of forwardArgs module
 	if len(c.Modules) == 0 {
 		return errors.New("command must have at least one module")
 	}
 
-	if c.CountMain() > 1 {
-		return errors.New("command must have at most one main module")
+	if c.CountForwardArgs() > 1 {
+		return errors.New("command must have at most one forwardArgs module")
 	}
 
-	// Validate mutual exclusion: cannot have both main module AND command args
-	if c.CountMain() > 0 && len(c.Args) > 0 {
-		return errors.New("command cannot have both main module and args declaration")
-	}
-
-	// Check for presence of args in non-main modules only
+	// Check for presence of args in non-forwardArgs modules only
 	for _, mod := range c.Modules {
-		if mod.Config.Main && len(mod.Config.Args) > 0 {
-			return errors.New("main module should not have args set. They are passed as command line arguments via the dutctl client")
+		if mod.Config.ForwardArgs && len(mod.Config.Args) > 0 {
+			return errors.New("forwardArgs module should not have args set. They are passed as command line arguments via the dutctl client")
 		}
 	}
 
@@ -150,12 +144,12 @@ func (c *Command) UnmarshalYAML(node *yaml.Node) error {
 	return nil
 }
 
-// CountMain returns the number of modules marked as main in the command.
-func (c *Command) CountMain() int {
+// CountForwardArgs returns the number of modules marked as forwardArgs in the command.
+func (c *Command) CountForwardArgs() int {
 	count := 0
 
 	for _, mod := range c.Modules {
-		if mod.Config.Main {
+		if mod.Config.ForwardArgs {
 			count++
 		}
 	}
@@ -164,22 +158,32 @@ func (c *Command) CountMain() int {
 }
 
 // ModuleArgs builds the argument list for each module in the command.
-// Main modules receive runtimeArgs directly. Non-main modules
-// receive their statically configured Args with template references substituted
-// using runtimeArgs. The returned slice has the same length and ordering as c.Modules.
+// Runtime args are split: the first len(c.Args) are used for template substitution
+// in non-forwardArgs modules; any remaining args are passed to the forwardArgs module.
+// When no command args are declared, all runtime args go to the forwardArgs module.
 func (c *Command) ModuleArgs(runtimeArgs []string) ([][]string, error) {
-	if len(runtimeArgs) > 0 && c.CountMain() == 0 {
-		return nil, ErrNoMainForArgs
-	}
-
 	result := make([][]string, len(c.Modules))
 
+	// Split runtime args into named (for template substitution) and forwarded portions.
+	namedArgCount := len(c.Args)
+	namedArgs := runtimeArgs
+
+	var forwardedArgs []string
+
+	if namedArgCount == 0 {
+		forwardedArgs = runtimeArgs
+		namedArgs = nil
+	} else if len(runtimeArgs) > namedArgCount {
+		namedArgs = runtimeArgs[:namedArgCount]
+		forwardedArgs = runtimeArgs[namedArgCount:]
+	}
+
 	for idx, mod := range c.Modules {
-		if mod.Config.Main {
-			result[idx] = runtimeArgs
+		if mod.Config.ForwardArgs {
+			result[idx] = forwardedArgs
 		} else {
-			// Apply argument substitution for non-interactive modules
-			substituted, err := c.SubstituteArgs(mod.Config.Args, runtimeArgs)
+			// Apply argument substitution for non-forwardArgs modules
+			substituted, err := c.SubstituteArgs(mod.Config.Args, namedArgs)
 			if err != nil {
 				return nil, err
 			}
@@ -191,34 +195,58 @@ func (c *Command) ModuleArgs(runtimeArgs []string) ([][]string, error) {
 	return result, nil
 }
 
-// HelpText returns the help string of the main module.
-// If no main module exists, returns an overview of all modules and false.
-func (c *Command) HelpText() string {
-	for _, mod := range c.Modules {
-		if mod.Config.Main {
-			return mod.Help()
-		}
+// HelpText returns a user-facing help string for the command.
+// It includes the command description (if set), a usage synopsis, named arg
+// documentation (if declared), and the forwardArgs module's Help() output (if present).
+func (c *Command) HelpText(name string) string {
+	var helpText strings.Builder
+
+	if c.Desc != "" {
+		helpText.WriteString(c.Desc)
+		helpText.WriteString("\n")
 	}
 
-	// If no main module, provide overview of all modules
+	// Usage synopsis: <name> <arg1> <arg2> [args...]
+	helpText.WriteString("\nUsage: ")
+	helpText.WriteString(name)
 
-	moduleNames := make([]string, 0, len(c.Modules))
-	for _, module := range c.Modules {
-		moduleNames = append(moduleNames, module.Config.Name)
+	for _, arg := range c.Args {
+		helpText.WriteString(" <" + arg.Name + ">")
 	}
 
-	helpStr := fmt.Sprintf("Command with %d module(s): %s",
-		len(c.Modules), strings.Join(moduleNames, ", "))
+	if c.CountForwardArgs() > 0 {
+		helpText.WriteString(" [args...]")
+	}
 
-	// Append command args documentation if declared
+	helpText.WriteString("\n")
+
+	// Named args block with aligned descriptions
 	if len(c.Args) > 0 {
-		helpStr += "\n\nArguments:\n"
+		maxLen := 0
 		for _, arg := range c.Args {
-			helpStr += fmt.Sprintf("  %s: %s\n", arg.Name, arg.Desc)
+			if len(arg.Name) > maxLen {
+				maxLen = len(arg.Name)
+			}
+		}
+
+		helpText.WriteString("\nArguments:\n")
+
+		for _, arg := range c.Args {
+			helpText.WriteString(fmt.Sprintf("  %-*s  %s\n", maxLen, arg.Name, arg.Desc))
 		}
 	}
 
-	return helpStr
+	// ForwardArgs module help
+	for _, mod := range c.Modules {
+		if mod.Config.ForwardArgs {
+			helpText.WriteString("\n")
+			helpText.WriteString(mod.Help())
+
+			break
+		}
+	}
+
+	return helpText.String()
 }
 
 // Module is a wrapper for any module implementation.
@@ -229,10 +257,10 @@ type Module struct {
 }
 
 type ModuleConfig struct {
-	Name    string `yaml:"module"`
-	Main    bool
-	Args    []string
-	Options map[string]any `yaml:"with"`
+	Name        string `yaml:"module"`
+	ForwardArgs bool   `yaml:"forwardArgs"`
+	Args        []string
+	Options     map[string]any `yaml:"with"`
 }
 
 // UnmarshalYAML unmarshals a Module from a YAML node and adds custom validation.

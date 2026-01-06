@@ -8,14 +8,14 @@ devices:
         desc: "Push the big red button"
         uses:
           - module: gpio-button
-            main: true
+            forwardArgs: true
             with:
               pin: 9
       reset:
         desc: "Reset the rocket"
         uses:
           - module: gpio-button
-            main: true
+            forwardArgs: true
             with:
               pin: 10
               activelow: true
@@ -23,7 +23,7 @@ devices:
         desc: "Turn on the light"
         uses:
           - module: gpio-switch
-            main: true
+            forwardArgs: true
             with:
               pin: 11
               initial: on

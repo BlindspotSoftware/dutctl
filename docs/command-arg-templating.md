@@ -1,76 +1,48 @@
 # Command Arguments Guide
 
-This guide explains the three ways to handle arguments in dutctl commands: non-main, main, and templating.
+This guide explains how runtime arguments are distributed to modules in a dutctl command.
 
-## Three Mutually Exclusive Approaches
+## Overview
 
-Commands support three approaches for arguments. **These approaches are mutually exclusive** - a command must use exactly one:
+Each module in a command receives its arguments in one of two ways:
 
-1. **Non-Main Commands** - Static values only, no runtime arguments
-2. **Main Commands** - Single main module receives all runtime arguments
-3. **Command-Level Templating** - Named arguments distributed to modules via templates
+- **Static args** — values fixed in the YAML config (`args: [...]`)
+- **Runtime args** — values provided by the caller at invocation time
 
-You cannot mix approaches (e.g., a command cannot have both an main module AND command-level args).
+There are two mechanisms for delivering runtime args to modules: command-level templating and `forwardArgs`. They can be used independently or together.
 
-## Non-Main Commands
+---
 
-For commands without runtime arguments, you specify static values directly in module args:
+## Static Args
+
+Modules that do not need runtime input have their arguments fixed in the config:
 
 ```yaml
-devices:
-  my-device:
-    cmds:
-      power-cycle:
-        desc: "Power cycle the device"
-        modules:
-          - module: gpio-switch
-            args: ["power-pin", "off"]
-          - module: time-wait
-            args: ["2000"]
-          - module: gpio-switch
-            args: ["power-pin", "on"]
+power-cycle:
+  desc: "Power cycle the device"
+  modules:
+    - module: gpio-switch
+      args: ["power-pin", "off"]
+    - module: time-wait
+      args: ["2000"]
+    - module: gpio-switch
+      args: ["power-pin", "on"]
 ```
-
-Usage:
 
 ```bash
 dutctl run my-device power-cycle
+# No runtime arguments needed.
 ```
 
-No runtime arguments needed - all values are configured in the YAML.
-
-## Main Commands
-
-Commands with an main module pass all runtime arguments directly to that module:
-
-```yaml
-devices:
-  my-device:
-    cmds:
-      run-command:
-        desc: "Run shell command"
-        modules:
-          - module: shell
-            main: true
-```
-
-Usage:
-
-```bash
-dutctl run my-device run-command ls -la /tmp
-```
-
-The main module receives: `["ls", "-la", "/tmp"]`
-
-All runtime arguments go to the main module - you cannot have multiple main modules in one command.
+---
 
 ## Command-Level Templating
 
-Declare named arguments at the command level and distribute them to modules using `${arg-name}` template syntax. Arguments are mapped positionally in declaration order.
+Declare named arguments under `args:` and reference them in module args with `${name}` syntax. Arguments are matched positionally in declaration order.
 
 ```yaml
 flash-firmware:
-  desc: "Flash firmware to device"
+  desc: "Flash firmware to the device"
   args:
     - name: firmware-file
       desc: "Path to firmware binary"
@@ -85,54 +57,56 @@ flash-firmware:
       args: ["/tmp/fw.bin"]
 ```
 
-Usage: `dutctl run device flash-firmware fw.bin /backup/old.bin`
+```bash
+dutctl run device flash-firmware fw.bin /backup/old.bin
+# firmware-file = "fw.bin"
+# backup-path   = "/backup/old.bin"
+```
 
-Templates can be embedded in strings (`/configs/${name}.yaml`) and mixed with static values (`["${file}", "static", "${other}"]`).
+Templates can be embedded anywhere in a string: `"/configs/${name}.yaml"`, `"--device=${id}"`.
 
-## Examples
+---
 
-### Flash with Verification
+## forwardArgs
+
+Mark one module with `forwardArgs: true` to receive all runtime arguments not consumed by command-level template substitution. If no `args:` are declared, all runtime arguments are forwarded.
+
+At most one module per command may be marked `forwardArgs`.
 
 ```yaml
-flash-verify:
-  desc: "Flash firmware and verify"
+run-command:
+  desc: "Run a shell command on the device"
+  modules:
+    - module: shell
+      forwardArgs: true
+```
+
+```bash
+dutctl run my-device run-command ls -la /tmp
+# shell receives: ["ls", "-la", "/tmp"]
+```
+
+When combined with command-level templating, the first `N` runtime args (one per declared `args` entry) are consumed for template substitution. The remaining args are forwarded:
+
+```yaml
+flash-and-run:
+  desc: "Flash firmware, then run a command on the device"
   args:
-    - name: firmware-path
+    - name: firmware-file
       desc: "Path to firmware binary"
   modules:
     - module: file
-      args: ["${firmware-path}", "/tmp/fw.bin"]
+      args: ["${firmware-file}", "/tmp/fw.bin"]
     - module: flash
       args: ["/tmp/fw.bin"]
-    - module: time-wait
-      args: ["500"]
     - module: shell
-      args: ["flashrom", "-v", "/tmp/fw.bin"]
+      forwardArgs: true
 ```
 
 ```bash
-dutctl run device flash-verify /path/to/firmware.bin
+dutctl run device flash-and-run firmware.bin verify --verbose
+# firmware-file = "firmware.bin"  →  consumed by template substitution
+# ["verify", "--verbose"]         →  forwarded to shell
 ```
 
-### GPIO Control with Parameters
-
-```yaml
-gpio-pulse:
-  desc: "Pulse GPIO pin"
-  args:
-    - name: pin-name
-      desc: "GPIO pin identifier"
-    - name: duration
-      desc: "Pulse duration in milliseconds"
-  modules:
-    - module: gpio-switch
-      args: ["${pin-name}", "on"]
-    - module: time-wait
-      args: ["${duration}"]
-    - module: gpio-switch
-      args: ["${pin-name}", "off"]
-```
-
-```bash
-dutctl run device gpio-pulse reset-button 100
-```
+---

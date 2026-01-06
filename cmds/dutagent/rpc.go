@@ -110,7 +110,7 @@ func (a *rpcService) Details(
 		return nil, e
 	}
 
-	helpStr := cmd.HelpText()
+	helpStr := cmd.HelpText(wantCmd)
 
 	res := connect.NewResponse(&pb.DetailsResponse{
 		Details: helpStr,

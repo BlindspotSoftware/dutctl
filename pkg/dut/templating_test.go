@@ -50,11 +50,11 @@ func TestTemplateValidation(t *testing.T) {
 			errMsg:    "references undefined argument",
 		},
 		{
-			name: "main module with templates skipped",
+			name: "forwardArgs module with templates skipped",
 			cmd: Command{
 				Args: []ArgDecl{{Name: "file", Desc: "File to copy"}},
 				Modules: []Module{
-					{Config: ModuleConfig{Name: "main", Main: true}},
+					{Config: ModuleConfig{Name: "forwardArgs", ForwardArgs: true}},
 					{Config: ModuleConfig{Name: "test", Args: []string{"${file}"}}},
 				},
 			},

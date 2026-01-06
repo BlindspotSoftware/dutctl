@@ -8,7 +8,7 @@ devices:
         desc: "Report status"
         uses:
           - module: dummy-status
-            main: true
+            forwardArgs: true
   device2:
     desc: "Device 2"
     cmds:
@@ -23,7 +23,7 @@ devices:
         desc: "Repeat input"
         uses:
           - module: dummy-repeat
-            main: true
+            forwardArgs: true
   device3:
     desc: "Device 3"
     cmds:
@@ -31,7 +31,7 @@ devices:
         desc: "Report status"
         uses:
           - module: dummy-status
-            main: true
+            forwardArgs: true
       file-transfer:
         desc: "Transfer a file"
         args:
