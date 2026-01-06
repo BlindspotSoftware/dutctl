@@ -95,9 +95,11 @@ func findDUTCmd(_ context.Context, args runCmdArgs) (runCmdArgs, fsm.State[runCm
 // prepareModuleArgs validates runtime arguments and prepares args for all modules in the command.
 // It returns a slice where each element contains the args for the corresponding module.
 // Returns an error if validation fails.
-//
-//nolint:unparam
 func prepareModuleArgs(cmd dut.Command, runtimeArgs []string) ([][]string, error) {
+	if len(runtimeArgs) > 0 && cmd.CountMain() == 0 {
+		return nil, fmt.Errorf("arguments provided but command has no main module to receive them")
+	}
+
 	// Prepare args for each module
 	moduleArgs := make([][]string, len(cmd.Modules))
 	for i, module := range cmd.Modules {

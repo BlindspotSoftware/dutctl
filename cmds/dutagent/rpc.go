@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 
 	"connectrpc.com/connect"
 	"github.com/BlindspotSoftware/dutctl/internal/fsm"
@@ -112,25 +113,26 @@ func (a *rpcService) Details(
 		return nil, e
 	}
 
-	var (
-		helpStr   string
-		foundMain bool
-	)
+	var helpStr string
 
+	// Find help text: prefer main module's help, otherwise describe all modules
 	for _, module := range cmd.Modules {
 		if module.Config.Main {
-			foundMain = true
 			helpStr = module.Help()
+
+			break
 		}
 	}
 
-	if !foundMain {
-		e := connect.NewError(
-			connect.CodeInternal,
-			fmt.Errorf("no main module found for command %q at device %q", wantCmd, wantDev),
-		)
+	// If no main module, provide overview of all modules
+	if helpStr == "" {
+		var moduleNames []string
+		for _, module := range cmd.Modules {
+			moduleNames = append(moduleNames, module.Config.Name)
+		}
 
-		return nil, e
+		helpStr = fmt.Sprintf("Command with %d module(s): %s",
+			len(cmd.Modules), strings.Join(moduleNames, ", "))
 	}
 
 	res := connect.NewResponse(&pb.DetailsResponse{
