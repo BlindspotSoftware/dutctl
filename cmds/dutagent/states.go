@@ -92,6 +92,25 @@ func findDUTCmd(_ context.Context, args runCmdArgs) (runCmdArgs, fsm.State[runCm
 	return args, executeModules, nil
 }
 
+// prepareModuleArgs validates runtime arguments and prepares args for all modules in the command.
+// It returns a slice where each element contains the args for the corresponding module.
+// Returns an error if validation fails.
+//
+//nolint:unparam
+func prepareModuleArgs(cmd dut.Command, runtimeArgs []string) ([][]string, error) {
+	// Prepare args for each module
+	moduleArgs := make([][]string, len(cmd.Modules))
+	for i, module := range cmd.Modules {
+		if module.Config.Main {
+			moduleArgs[i] = runtimeArgs
+		} else {
+			moduleArgs[i] = module.Config.Args
+		}
+	}
+
+	return moduleArgs, nil
+}
+
 // executeModules is a state of the Run RPC.
 //
 // It starts the execution the current command's modules. The execution is done
@@ -105,6 +124,16 @@ func executeModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State
 	// (tests may still pass a custom channel).
 	if args.moduleErrCh == nil {
 		args.moduleErrCh = make(chan error, 1)
+	}
+
+	runtimeArgs := args.cmdMsg.GetArgs()
+
+	// Validate and prepare args for all modules
+	moduleArgs, err := prepareModuleArgs(args.cmd, runtimeArgs)
+	if err != nil {
+		e := connect.NewError(connect.CodeInvalidArgument, err)
+
+		return args, nil, e
 	}
 
 	rpcCtx := ctx
@@ -129,14 +158,7 @@ func executeModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State
 
 			log.Printf("Running module %d of %d: %q", idx+1, cnt, module.Config.Name)
 
-			var moduleArgs []string
-			if module.Config.Main {
-				moduleArgs = args.cmdMsg.GetArgs()
-			} else {
-				moduleArgs = module.Config.Args
-			}
-
-			err := module.Run(rpcCtx, moduleSession, moduleArgs...)
+			err := module.Run(rpcCtx, moduleSession, moduleArgs[idx]...)
 			if err != nil {
 				args.moduleErrCh <- err
 
