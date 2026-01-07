@@ -90,7 +90,7 @@ type Device struct {
 // modules and are executed in the order they are defined.
 type Command struct {
 	Desc    string
-	Modules []Module
+	Modules []Module `yaml:"uses"`
 }
 
 // commandAlias is used when parsing YAML to avoid recursion.
@@ -153,7 +153,7 @@ type ModuleConfig struct {
 	Name    string `yaml:"module"`
 	Main    bool
 	Args    []string
-	Options map[string]any
+	Options map[string]any `yaml:"with"`
 }
 
 // UnmarshalYAML unmarshals a Module from a YAML node and adds custom validation.
@@ -178,7 +178,7 @@ func (m *Module) UnmarshalYAML(node *yaml.Node) error {
 		return err
 	}
 
-	// validate Module options
+	// validate Module configuration
 	validate := validator.New()
 
 	err = validate.Struct(m.Module)

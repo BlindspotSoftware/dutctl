@@ -6,11 +6,11 @@ devices:
     cmds:
       status:
         desc: "Report status"
-        modules:
+        uses:
           - module: dummy-status
             main: true
       repeat:
         desc: "Repeat input"
-        modules:
+        uses:
           - module: dummy-repeat
             main: true

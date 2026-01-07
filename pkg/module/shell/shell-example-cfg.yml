@@ -10,7 +10,7 @@ devices:
         desc: |
           Demonstrates the shell module by writing a greeting to a file, giving the user the chance to edit, 
           then reading it back and deleting the file. E.g try: dutctl self greet "echo 'Hello World' >> /tmp/shell-test.txt"
-        modules:
+        uses:
           - module: shell
             options:
               path: bash
