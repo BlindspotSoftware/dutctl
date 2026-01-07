@@ -3,31 +3,31 @@
 The _DUT Agent_ is configured by a YAML configuration file.
 
 The configuration mainly consists of a list of devices connected to an agent and a list of the _Commands_ available
-for those devices. Commands are meant to be the high-level tasks you want to perform on the device, e.g. 
+for those devices. Commands are meant to be the high-level tasks you want to perform on the device, e.g.
 "Flash the firmware with the given image." To achieve this high-level task, commands can be built up of one or multiple
 _Modules_. Modules represent the basic operations and represent the actual implementation for the hardware interaction.
 The implementation of a Module determines its capabilities and also exposes information on how to use and configure it.  
 
-The DUT Control project offers a collection of Module implementations but also allows for easy integration of [custom modules](./module_guide.md). 
+The DUT Control project offers a collection of Module implementations but also allows for easy integration of [custom modules](./module_guide.md).
 Often a _Command_ can consist of only one _Module_ to get the job done, e.g., power cycles the device. But in some cases
 like the flash example mentioned earlier, eventually it is mandatory to toggle some GPIOs before doing the actual SPI flash
 operation. In this case the command is built up of a Module dealing with GPIO manipulation and a Module performing a
 flash writing with a specific programmer. See the second device in the [example](#example-config-file) down below on what this
 could look like.
 
-### DUT Agent Configuration Schema
+## DUT Agent Configuration Schema
 
 | Attribute | Type                 | Default | Description                                             | Mandatory |
 |-----------|----------------------|---------|---------------------------------------------------------|-----------|
 | version   | string               |         | Version of this config schema                           | yes       |
-| devices   | [] [Device](#Device) |         | List of dives-under-test (DUTs) connected to this agent | yes       |
+| devices   | [] [Device](#device) |         | List of devices-under-test (DUTs) connected to this agent | yes       |
 
 ### Device
 
 | Attribute   | Type                    | Default | Description                                                                                                | Mandatory |
 |-------------|-------------------------|---------|------------------------------------------------------------------------------------------------------------|-----------|
 | description | string                  |         | Device description. May be used to state technical details which are important when working with this DUT. | no        |
-| commands    | [] [Command](#Commands) |         | List of available device commands. Commands are the hig level tasks that can be performed on the device.   | no        |
+| commands    | [] [Command](#commands) |         | List of available device commands. Commands are the high level tasks that can be performed on the device.   | no        |
 
 ### Commands
 
