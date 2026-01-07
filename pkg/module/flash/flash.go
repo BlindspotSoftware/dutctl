@@ -173,7 +173,7 @@ func (f *Flash) Run(_ context.Context, sesh module.Session, args ...string) erro
 	log.Printf("flash module: Executing command: %s", cmdStr)
 	sesh.Print(fmt.Sprintf("Executing: %s", cmdStr))
 
-	err := execute(f.Tool, f.cmdline()...)
+	err := execute(sesh, f.Tool, f.cmdline()...)
 	if err != nil {
 		return fmt.Errorf("flash operation failed: %w", err)
 	}
@@ -192,11 +192,16 @@ func (f *Flash) Run(_ context.Context, sesh module.Session, args ...string) erro
 	return nil
 }
 
-func execute(tool string, args ...string) error {
+func execute(sesh module.Session, tool string, args ...string) error {
 	//nolint:noctx
 	shell := exec.Command(tool, args...)
 
 	output, err := shell.CombinedOutput()
+
+	if len(output) > 0 {
+		sesh.Print(string(output))
+	}
+
 	if err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
