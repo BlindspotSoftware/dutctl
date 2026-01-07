@@ -9,10 +9,10 @@ devices:
           "Basic demo of the SSH module: Use SSH as the main module to connect
           to the DUT. The SSH module is used to connect from the dutagent to the DUT
           and execute commands that are passed to the module from the dutctl client.
-        modules:
+        uses:
           - module: ssh
             main: true
-            options:
+            with:
               host: enigma
               user: oscar
               privatekey: ./keys/id_ed25519

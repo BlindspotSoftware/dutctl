@@ -5,10 +5,10 @@ devices:
     cmds:
       power-on:
         desc: "Turn the power ON via PDU"
-        modules:
+        uses:
           - module: pdu
             main: true
-            options:
+            with:
               host: http://192.168.1.100
               user: admin
               password: admin

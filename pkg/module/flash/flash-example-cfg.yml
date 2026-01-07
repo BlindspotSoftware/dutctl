@@ -7,9 +7,9 @@ devices:
       flash:
         desc: |
           Basic demo of the Flash module.
-        modules:
+        uses:
           - module: flash
             main: true
-            options:
+            with:
               tool: "/usr/sbin/flashprog"
               programmer: "dediprog"

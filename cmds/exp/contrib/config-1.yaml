@@ -6,6 +6,6 @@ devices:
     cmds:
       status:
         desc: "Report status"
-        modules:
+        uses:
           - module: dummy-status
             main: true
