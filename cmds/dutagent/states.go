@@ -96,17 +96,33 @@ func findDUTCmd(_ context.Context, args runCmdArgs) (runCmdArgs, fsm.State[runCm
 // It returns a slice where each element contains the args for the corresponding module.
 // Returns an error if validation fails.
 func prepareModuleArgs(cmd dut.Command, runtimeArgs []string) ([][]string, error) {
-	if len(runtimeArgs) > 0 && cmd.CountInteractive() == 0 {
-		return nil, fmt.Errorf("arguments provided but command has no main module to receive them")
+	// Validate that runtime args are only provided when an interactive module exists OR command declares args
+	hasInteractive := cmd.CountInteractive() > 0
+	hasCommandArgs := len(cmd.Args) > 0
+
+	if len(runtimeArgs) > 0 && !hasInteractive && !hasCommandArgs {
+		return nil, fmt.Errorf("arguments provided but command has no interactive module and no args declaration")
+	}
+
+	// If command declares args, validate count matches
+	if hasCommandArgs && len(runtimeArgs) != len(cmd.Args) {
+		return nil, fmt.Errorf("command expects %d argument(s) but got %d",
+			len(cmd.Args), len(runtimeArgs))
 	}
 
 	// Prepare args for each module
 	moduleArgs := make([][]string, len(cmd.Modules))
-	for i, module := range cmd.Modules {
+	for idx, module := range cmd.Modules {
 		if module.Config.Interactive {
-			moduleArgs[i] = runtimeArgs
+			moduleArgs[idx] = runtimeArgs
 		} else {
-			moduleArgs[i] = module.Config.Args
+			// Non-interactive: substitute templates in configured args
+			substitutedArgs, err := cmd.SubstituteArgs(module.Config.Args, runtimeArgs)
+			if err != nil {
+				return nil, fmt.Errorf("template substitution failed for module %q: %w", module.Config.Name, err)
+			}
+
+			moduleArgs[idx] = substitutedArgs
 		}
 	}
 

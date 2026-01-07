@@ -75,8 +75,6 @@ func (a *rpcService) Commands(
 }
 
 // Details is the handler for the Details RPC.
-//
-//nolint:funlen
 func (a *rpcService) Details(
 	_ context.Context,
 	req *connect.Request[pb.DetailsRequest],
@@ -113,6 +111,19 @@ func (a *rpcService) Details(
 		return nil, e
 	}
 
+	helpStr := buildCommandHelp(cmd)
+
+	res := connect.NewResponse(&pb.DetailsResponse{
+		Details: helpStr,
+	})
+
+	log.Print("Details-RPC finished")
+
+	return res, nil
+}
+
+// buildCommandHelp constructs help text for a command based on its configuration.
+func buildCommandHelp(cmd dut.Command) string {
 	var helpStr string
 
 	// Find help text: prefer interactive module's help, otherwise describe all modules
@@ -135,13 +146,15 @@ func (a *rpcService) Details(
 			len(cmd.Modules), strings.Join(moduleNames, ", "))
 	}
 
-	res := connect.NewResponse(&pb.DetailsResponse{
-		Details: helpStr,
-	})
+	// Append command args documentation if declared
+	if len(cmd.Args) > 0 {
+		helpStr += "\n\nArguments:\n"
+		for _, arg := range cmd.Args {
+			helpStr += fmt.Sprintf("  %s: %s\n", arg.Name, arg.Desc)
+		}
+	}
 
-	log.Print("Details-RPC finished")
-
-	return res, nil
+	return helpStr
 }
 
 // streamAdapter decouples a connect.BidiStream to the dutagent.Stream interface.
