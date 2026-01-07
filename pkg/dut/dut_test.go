@@ -203,6 +203,21 @@ func TestModuleArgs(t *testing.T) {
 			want:        [][]string{{"run1"}, {"static1", "static2"}},
 		},
 		{
+			name: "template substitution in non-main module",
+			cmd: Command{
+				Args: []ArgDecl{
+					{Name: "file", Desc: "Input file"},
+					{Name: "device", Desc: "Device ID"},
+				},
+				Modules: []Module{
+					{Config: ModuleConfig{Main: true}},
+					{Config: ModuleConfig{Args: []string{"flash", "${file}", "--device=${device}"}}},
+				},
+			},
+			runtimeArgs: []string{"firmware.bin", "dev123"},
+			want:        [][]string{{"firmware.bin", "dev123"}, {"flash", "firmware.bin", "--device=dev123"}},
+		},
+		{
 			name:        "empty modules",
 			cmd:         Command{},
 			runtimeArgs: []string{"a"},
