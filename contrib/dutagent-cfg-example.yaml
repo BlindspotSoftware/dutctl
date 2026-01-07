@@ -16,7 +16,9 @@ devices:
         desc: "Report status"
         uses:
           - module: dummy-status
-            main: true
+            args:
+              - foo
+              - bar
       repeat:
         desc: "Repeat input"
         uses:
@@ -32,10 +34,17 @@ devices:
             main: true
       file-transfer:
         desc: "Transfer a file"
+        args:
+          - name: source-file
+            desc: "Source file path"
+          - name: dest-file
+            desc: "Destination file path"
         uses:
           - module: dummy-status
             args:
-              - foo
-              - bar
+              - transferring
+              - "${source-file}"
           - module: dummy-ft
-            main: true
+            args:
+              - "${source-file}"
+              - "${dest-file}"
