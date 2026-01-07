@@ -86,15 +86,19 @@ DUT agent on it. Below you can find the currently supported modules with example
 
 | Modules                                                            | Status                   |
 | ------------------------------------------------------------------ | ------------------------ |
+| [Agent Status](./pkg/module/agent/README.md)                       | :white_check_mark:       |
+| [File Transfer](./pkg/module/file/README.md)                       | :white_check_mark:       |
 | [GPIO Button](./pkg/module/gpio/README.md)                         | :white_check_mark:       |
 | [GPIO Switch](./pkg/module/gpio/README.md)                         | :white_check_mark:       |
-| [IPMI Power Control](./pkg/module/gpio/README.md)                  | :white_check_mark:       |
+| [IPMI Power Control](./pkg/module/ipmi/README.md)                  | :white_check_mark:       |
 | [Power Distribution Unit (Intellinet)](./pkg/module/pdu/README.md) | :white_check_mark:       |
 | Power Distribution Unit (Delock)                                   | :hourglass_flowing_sand: |
 | [SPI Flasher](./pkg/module/flash/README.md)                        | :white_check_mark:       |
 | [Serial Console](./pkg/module/serial/README.md)                    | :white_check_mark:       |
 | [Shell Execution](./pkg/module/shell/README.md)                    | :white_check_mark:       |
 | [Secure Shell (SSH)](./pkg/module/ssh/README.md)                   | :white_check_mark:       |
+| [Time Wait](./pkg/module/time/README.md)                           | :white_check_mark:       |
+| [WiFi Socket (Tasmota)](./pkg/module/wifisocket/README.md)         | :white_check_mark:       |
 
 
 If you have special needs, you can extend the system with your own modules. Read about the [module plugin system](./docs/module_guide.md).
