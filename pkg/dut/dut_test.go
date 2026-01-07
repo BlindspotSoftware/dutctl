@@ -206,6 +206,21 @@ func TestModuleArgs(t *testing.T) {
 			want:        [][]string{{"run1"}, {"static1", "static2"}},
 		},
 		{
+			name: "template substitution in non-main module",
+			cmd: Command{
+				Args: []ArgDecl{
+					{Name: "file", Desc: "Input file"},
+					{Name: "device", Desc: "Device ID"},
+				},
+				Modules: []Module{
+					{Config: ModuleConfig{Main: true}},
+					{Config: ModuleConfig{Args: []string{"flash", "${file}", "--device=${device}"}}},
+				},
+			},
+			runtimeArgs: []string{"firmware.bin", "dev123"},
+			want:        [][]string{{"firmware.bin", "dev123"}, {"flash", "firmware.bin", "--device=dev123"}},
+		},
+		{
 			name:        "empty modules",
 			cmd:         Command{},
 			runtimeArgs: []string{"a"},
@@ -244,6 +259,29 @@ func TestModuleArgs(t *testing.T) {
 				t.Errorf("expected no error, got %v", err)
 			}
 		})
+	}
+}
+
+func TestCommandArgsUnmarshal(t *testing.T) {
+	// Test args parsing without modules (modules require registration)
+	cmd := Command{
+		Desc: "Test command",
+		Args: []ArgDecl{
+			{Name: "flash-file", Desc: "Firmware to flash"},
+			{Name: "device-id", Desc: "Target device"},
+		},
+	}
+
+	if len(cmd.Args) != 2 {
+		t.Errorf("Expected 2 args, got %d", len(cmd.Args))
+	}
+
+	if cmd.Args[0].Name != "flash-file" || cmd.Args[0].Desc != "Firmware to flash" {
+		t.Errorf("Wrong arg declaration for flash-file: %+v", cmd.Args[0])
+	}
+
+	if cmd.Args[1].Name != "device-id" || cmd.Args[1].Desc != "Target device" {
+		t.Errorf("Wrong arg declaration for device-id: %+v", cmd.Args[1])
 	}
 }
 

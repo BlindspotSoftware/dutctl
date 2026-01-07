@@ -96,7 +96,14 @@ type Device struct {
 // modules and are executed in the order they are defined.
 type Command struct {
 	Desc    string
+	Args    []ArgDecl
 	Modules []Module `yaml:"uses"`
+}
+
+// ArgDecl declares a command argument with its name and description.
+type ArgDecl struct {
+	Name string `yaml:"name"`
+	Desc string `yaml:"desc"`
 }
 
 // commandAlias is used when parsing YAML to avoid recursion.
@@ -122,11 +129,22 @@ func (c *Command) UnmarshalYAML(node *yaml.Node) error {
 		return errors.New("command must have at most one main module")
 	}
 
+	// Validate mutual exclusion: cannot have both main module AND command args
+	if c.CountMain() > 0 && len(c.Args) > 0 {
+		return errors.New("command cannot have both main module and args declaration")
+	}
+
 	// Check for presence of args in non-main modules only
 	for _, mod := range c.Modules {
 		if mod.Config.Main && len(mod.Config.Args) > 0 {
 			return errors.New("main module should not have args set. They are passed as command line arguments via the dutctl client")
 		}
+	}
+
+	// Validate template references in module args
+	err = c.validateTemplateReferences()
+	if err != nil {
+		return err
 	}
 
 	return nil
@@ -146,9 +164,9 @@ func (c *Command) CountMain() int {
 }
 
 // ModuleArgs builds the argument list for each module in the command.
-// The main module receives runtimeArgs; non-main modules receive their
-// statically configured Args. The returned slice has the same length
-// and ordering as c.Modules.
+// Main modules receive runtimeArgs directly. Non-main modules
+// receive their statically configured Args with template references substituted
+// using runtimeArgs. The returned slice has the same length and ordering as c.Modules.
 func (c *Command) ModuleArgs(runtimeArgs []string) ([][]string, error) {
 	if len(runtimeArgs) > 0 && c.CountMain() == 0 {
 		return nil, ErrNoMainForArgs
@@ -156,11 +174,17 @@ func (c *Command) ModuleArgs(runtimeArgs []string) ([][]string, error) {
 
 	result := make([][]string, len(c.Modules))
 
-	for i, mod := range c.Modules {
+	for idx, mod := range c.Modules {
 		if mod.Config.Main {
-			result[i] = runtimeArgs
+			result[idx] = runtimeArgs
 		} else {
-			result[i] = mod.Config.Args
+			// Apply argument substitution for non-interactive modules
+			substituted, err := c.SubstituteArgs(mod.Config.Args, runtimeArgs)
+			if err != nil {
+				return nil, err
+			}
+
+			result[idx] = substituted
 		}
 	}
 
@@ -185,6 +209,14 @@ func (c *Command) HelpText() string {
 
 	helpStr := fmt.Sprintf("Command with %d module(s): %s",
 		len(c.Modules), strings.Join(moduleNames, ", "))
+
+	// Append command args documentation if declared
+	if len(c.Args) > 0 {
+		helpStr += "\n\nArguments:\n"
+		for _, arg := range c.Args {
+			helpStr += fmt.Sprintf("  %s: %s\n", arg.Name, arg.Desc)
+		}
+	}
 
 	return helpStr
 }
