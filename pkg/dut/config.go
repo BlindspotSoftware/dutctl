@@ -49,9 +49,10 @@ func (e *ConfigError) Unwrap() error {
 
 var (
 	ErrNoModules           = errors.New("command must have at least one module")
-	ErrMultipleMainModules = errors.New("command must have exactly one main module")
-	ErrMainModuleWithArgs  = errors.New("main module must not have args set")
-	ErrModuleNotFound      = errors.New("module not found")
+	ErrMultipleMainModules  = errors.New("command must have at most one main module")
+	ErrMainModuleWithArgs   = errors.New("main module must not have args set")
+	ErrMainWithCommandArgs  = errors.New("command cannot have both main module and args declaration")
+	ErrModuleNotFound       = errors.New("module not found")
 	ErrEmptyDevices        = errors.New("devices must not be empty")
 	ErrNoCommands          = errors.New("device must have at least one command")
 )
@@ -237,11 +238,22 @@ func (c *Command) UnmarshalYAML(node *yaml.Node) error {
 		return &ConfigError{Line: node.Line, Err: ErrMultipleMainModules}
 	}
 
+	// Validate mutual exclusion: cannot have both main module AND command args
+	if c.CountMain() > 0 && len(c.Args) > 0 {
+		return &ConfigError{Line: node.Line, Err: ErrMainWithCommandArgs}
+	}
+
 	// Check for presence of args in non-main modules only
 	for _, mod := range c.Modules {
 		if mod.Config.Main && len(mod.Config.Args) > 0 {
 			return &ConfigError{Line: node.Line, Err: ErrMainModuleWithArgs}
 		}
+	}
+
+	// Validate template references in module args
+	err = c.validateTemplateReferences()
+	if err != nil {
+		return &ConfigError{Line: node.Line, Err: err}
 	}
 
 	return nil

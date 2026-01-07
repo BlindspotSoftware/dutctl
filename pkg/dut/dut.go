@@ -92,7 +92,14 @@ type Device struct {
 // modules and are executed in the order they are defined.
 type Command struct {
 	Desc    string
+	Args    []ArgDecl
 	Modules []Module `yaml:"uses"`
+}
+
+// ArgDecl declares a command argument with its name and description.
+type ArgDecl struct {
+	Name string `yaml:"name"`
+	Desc string `yaml:"desc"`
 }
 
 // CountMain returns the number of modules marked as main in the command.
@@ -110,8 +117,8 @@ func (c *Command) CountMain() int {
 
 // ModuleArgs builds the argument list for each module in the command.
 // Main modules receive runtimeArgs directly. Non-main modules
-// receive their statically configured Args. The returned slice has the same length
-// and ordering as c.Modules.
+// receive their statically configured Args with template references substituted
+// using runtimeArgs. The returned slice has the same length and ordering as c.Modules.
 func (c *Command) ModuleArgs(runtimeArgs []string) ([][]string, error) {
 	if len(runtimeArgs) > 0 && c.CountMain() == 0 {
 		return nil, ErrNoMainForArgs
@@ -119,11 +126,17 @@ func (c *Command) ModuleArgs(runtimeArgs []string) ([][]string, error) {
 
 	result := make([][]string, len(c.Modules))
 
-	for i, mod := range c.Modules {
+	for idx, mod := range c.Modules {
 		if mod.Config.Main {
-			result[i] = runtimeArgs
+			result[idx] = runtimeArgs
 		} else {
-			result[i] = mod.Config.Args
+			// Apply argument substitution for non-interactive modules
+			substituted, err := c.SubstituteArgs(mod.Config.Args, runtimeArgs)
+			if err != nil {
+				return nil, err
+			}
+
+			result[idx] = substituted
 		}
 	}
 
@@ -148,6 +161,14 @@ func (c *Command) HelpText() string {
 
 	helpStr := fmt.Sprintf("Command with %d module(s): %s",
 		len(c.Modules), strings.Join(moduleNames, ", "))
+
+	// Append command args documentation if declared
+	if len(c.Args) > 0 {
+		helpStr += "\n\nArguments:\n"
+		for _, arg := range c.Args {
+			helpStr += fmt.Sprintf("  %s: %s\n", arg.Name, arg.Desc)
+		}
+	}
 
 	return helpStr
 }
