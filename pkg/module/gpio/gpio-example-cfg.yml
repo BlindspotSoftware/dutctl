@@ -6,24 +6,24 @@ devices:
     cmds:
       fire:
         desc: "Push the big red button"
-        modules:
+        uses:
           - module: gpio-button
             main: true
-            options:
+            with:
               pin: 9
       reset:
         desc: "Reset the rocket"
-        modules:
+        uses:
           - module: gpio-button
             main: true
-            options:
+            with:
               pin: 10
               activelow: true
       light:
         desc: "Turn on the light"
-        modules:
+        uses:
           - module: gpio-switch
             main: true
-            options:
+            with:
               pin: 11
               initial: on

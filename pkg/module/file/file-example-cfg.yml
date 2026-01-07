@@ -8,10 +8,10 @@ devices:
       # Upload any file - preserves directory structure
       upload:
         desc: "Upload file to device"
-        modules:
+        uses:
           - module: file
             main: true
-            options:
+            with:
               operation: "upload"
         # Usage:
         #   dutctl example-device upload ./build/firmware.bin
@@ -23,10 +23,10 @@ devices:
       # Upload with destination configured - arg becomes source
       upload-script:
         desc: "Upload and install a script"
-        modules:
+        uses:
           - module: file
             main: true
-            options:
+            with:
               operation: "upload"
               destination: "/opt/scripts/install.sh"
               permission: "0755" # Make it executable
@@ -37,10 +37,10 @@ devices:
       # Download with source configured - arg becomes destination
       fetch-logs:
         desc: "Download logs from device"
-        modules:
+        uses:
           - module: file
             main: true
-            options:
+            with:
               operation: "download"
               source: "/var/log.txt"
         # Usage:
@@ -50,10 +50,10 @@ devices:
       # Upload with both paths configured - no arg allowed
       upload-config:
         desc: "Upload configuration file with fixed paths"
-        modules:
+        uses:
           - module: file
             main: true
-            options:
+            with:
               operation: "upload"
               source: "./configs/device.conf"
               destination: "/etc/device/device.conf"

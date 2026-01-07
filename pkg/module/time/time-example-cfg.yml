@@ -6,16 +6,15 @@ devices:
     cmds:
       system-double-check:
         desc: "Report status twice"
-        modules:
+        uses:
           - module: agent-status
             main: true
           - module: time-wait
-            options:
+            with:
               duration: 2s
           - module: agent-status
       just-wait:
         desc: "Do nothing and finish after the provided amount of time"
-        modules:
+        uses:
           - module: time-wait
             main: true
-  

@@ -7,9 +7,9 @@ devices:
         desc: |
           Basic demo of the Serial module: After the DUT is powered on, use Serial
           as the main module to wait for magic strings in the DUT's boot log.
-        modules:
+        uses:
           - module: serial
             main: true
-            options:
+            with:
               port: /tmp/ttyS0
               baudrate: 115200
