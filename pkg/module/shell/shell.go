@@ -86,7 +86,7 @@ func (s *Shell) Deinit() error {
 	return nil
 }
 
-func (s *Shell) Run(_ context.Context, sesh module.Session, args ...string) error {
+func (s *Shell) Run(ctx context.Context, sesh module.Session, args ...string) error {
 	log.Println("shell module: Run called")
 
 	if len(args) == 0 {
@@ -100,8 +100,7 @@ func (s *Shell) Run(_ context.Context, sesh module.Session, args ...string) erro
 	cmdStr := args[0]
 	binary := s.Path
 
-	//nolint:noctx
-	shell := exec.Command(binary, "-c", cmdStr)
+	shell := exec.CommandContext(ctx, binary, "-c", cmdStr)
 
 	out, err := shell.CombinedOutput()
 

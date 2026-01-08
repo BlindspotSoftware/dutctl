@@ -45,13 +45,12 @@ func (m *Status) Deinit() error {
 	return nil
 }
 
-func (m *Status) Run(_ context.Context, s module.Session, _ ...string) error {
+func (m *Status) Run(ctx context.Context, s module.Session, _ ...string) error {
 	log.Println("agent.Status module: Run called")
 
 	var out strings.Builder
 
-	//nolint:noctx
-	cmd := exec.Command("uname", "-a")
+	cmd := exec.CommandContext(ctx, "uname", "-a")
 	cmd.Stdout = &out
 
 	err := cmd.Run()

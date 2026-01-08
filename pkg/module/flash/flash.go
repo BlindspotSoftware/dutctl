@@ -37,6 +37,10 @@ func init() {
 // during read/write operations.
 const localImagePath = "./image"
 
+// requiredArgsCount is the minimum number of arguments required for flash operations.
+// Args: [operation] [image-path].
+const requiredArgsCount = 2
+
 // op represents the flash operation.
 type op string
 
@@ -136,10 +140,7 @@ func (f *Flash) Deinit() error {
 	return os.RemoveAll(f.localImagePath)
 }
 
-//nolint:cyclop
-func (f *Flash) Run(_ context.Context, sesh module.Session, args ...string) error {
-	log.Println("flash module: Run called")
-
+func (f *Flash) validateAndParseArgs(args []string) error {
 	if len(args) < 1 {
 		return errors.New("missing argument: flash operation")
 	}
@@ -153,13 +154,40 @@ func (f *Flash) Run(_ context.Context, sesh module.Session, args ...string) erro
 		return fmt.Errorf("unknown operation %q", op)
 	}
 
-	//nolint:mnd
-	if len(args) < 2 {
+	if len(args) < requiredArgsCount {
 		return errors.New("missing argument: image file name")
 	}
 
 	f.clientImagePath = args[1]
 	f.localImagePath = localImagePath
+
+	return nil
+}
+
+func (f *Flash) performFlashOperation(ctx context.Context, sesh module.Session) error {
+	cmdStr := fmt.Sprintf("%s %s", f.Tool, strings.Join(f.cmdline(), " "))
+
+	log.Printf("flash module: Executing command: %s", cmdStr)
+	sesh.Print(fmt.Sprintf("Executing: %s", cmdStr))
+
+	err := execute(ctx, sesh, f.Tool, f.cmdline()...)
+	if err != nil {
+		return fmt.Errorf("flash operation failed: %w", err)
+	}
+
+	sesh.Print("Flash operation completed successfully")
+	time.Sleep(1 * time.Second)
+
+	return nil
+}
+
+func (f *Flash) Run(ctx context.Context, sesh module.Session, args ...string) error {
+	log.Println("flash module: Run called")
+
+	err := f.validateAndParseArgs(args)
+	if err != nil {
+		return err
+	}
 
 	if f.op == opWrite {
 		err := uploadImage(sesh, f.clientImagePath, f.localImagePath)
@@ -168,19 +196,10 @@ func (f *Flash) Run(_ context.Context, sesh module.Session, args ...string) erro
 		}
 	}
 
-	cmdStr := fmt.Sprintf("%s %s", f.Tool, strings.Join(f.cmdline(), " "))
-
-	log.Printf("flash module: Executing command: %s", cmdStr)
-	sesh.Print(fmt.Sprintf("Executing: %s", cmdStr))
-
-	err := execute(sesh, f.Tool, f.cmdline()...)
+	err = f.performFlashOperation(ctx, sesh)
 	if err != nil {
-		return fmt.Errorf("flash operation failed: %w", err)
+		return err
 	}
-
-	sesh.Print("Flash operation completed successfully")
-
-	time.Sleep(1 * time.Second)
 
 	if f.op == opRead {
 		err := downloadImage(sesh, f.localImagePath, f.clientImagePath)
@@ -192,9 +211,8 @@ func (f *Flash) Run(_ context.Context, sesh module.Session, args ...string) erro
 	return nil
 }
 
-func execute(sesh module.Session, tool string, args ...string) error {
-	//nolint:noctx
-	shell := exec.Command(tool, args...)
+func execute(ctx context.Context, sesh module.Session, tool string, args ...string) error {
+	shell := exec.CommandContext(ctx, tool, args...)
 
 	output, err := shell.CombinedOutput()
 

@@ -46,11 +46,13 @@ var _ module.Module = &Serial{}
 
 const abstract = `Serial connection to the DUT
 `
+
 const usage = `
 ARGUMENTS:
 	[-t <duration>] [<expect>]
 
 `
+
 const description = `
 The serial connection is read-only and does not support stdin yet.
 If a regex is provided, the module will wait for the regex to match on the serial output, 
@@ -101,7 +103,76 @@ func (s *Serial) Deinit() error {
 	return nil
 }
 
-//nolint:cyclop,funlen,gocognit
+func (s *Serial) handleContextDone(ctx context.Context, session module.Session) error {
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		session.Print("\n--- Timeout reached, no match found ---\n")
+
+		return fmt.Errorf("timeout of %s reached, pattern %q not found", s.timeout, s.expect)
+	}
+
+	session.Print("\n--- Connection closed ---\n")
+
+	return ctx.Err()
+}
+
+func (s *Serial) processSerialData(readBuffer []byte, sbytes int, lineBuffer *bytes.Buffer, session module.Session) bool {
+	for i := range sbytes {
+		b := readBuffer[i]
+		lineBuffer.WriteByte(b)
+
+		// If we reach a newline or a buffer limit, process the line
+		if b == '\n' || lineBuffer.Len() >= 1024 {
+			line := lineBuffer.String()
+			session.Print(line)
+
+			// Check for regex match if we have one
+			if s.expect != nil && s.expect.MatchString(line) {
+				session.Print("\n--- Pattern matched, connection closed ---\n")
+
+				return true // Success - pattern found
+			}
+
+			lineBuffer.Reset()
+		}
+	}
+
+	return false
+}
+
+func (s *Serial) readLoop(ctx context.Context, port *serial.Port, session module.Session) error {
+	const bufferSize = 4096
+
+	readBuffer := make([]byte, bufferSize)
+	lineBuffer := &bytes.Buffer{}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return s.handleContextDone(ctx, session)
+		default:
+			sbytes, err := port.Read(readBuffer)
+			if err != nil {
+				// Ignore timeout errors as these are expected with the read timeout config
+				if err != io.EOF && !strings.Contains(err.Error(), "timeout") {
+					return fmt.Errorf("error reading from serial port: %w", err)
+				}
+
+				continue
+			}
+
+			if sbytes == 0 {
+				continue
+			}
+
+			matched := s.processSerialData(readBuffer, sbytes, lineBuffer, session)
+
+			if matched {
+				return nil
+			}
+		}
+	}
+}
+
 func (s *Serial) Run(ctx context.Context, session module.Session, args ...string) error {
 	log.Println("serial module: Run called")
 
@@ -119,69 +190,16 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 	log.Printf("serial module: connected to %s at %d baud", s.Port, s.Baud)
 	session.Print(fmt.Sprintf("--- Connected to %s at %d baud ---\n", s.Port, s.Baud))
 
-	var cancel context.CancelFunc
-
 	if s.timeout > 0 {
 		log.Printf("serial module: setting timeout of %s", s.timeout)
-		ctx, cancel = context.WithTimeout(ctx, s.timeout)
 
+		var cancel context.CancelFunc
+
+		ctx, cancel = context.WithTimeout(ctx, s.timeout)
 		defer cancel()
 	}
 
-	const bufferSize = 4096
-
-	readBuffer := make([]byte, bufferSize)
-	lineBuffer := &bytes.Buffer{}
-
-	for {
-		select {
-		case <-ctx.Done():
-			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-				session.Print("\n--- Timeout reached, no match found ---\n")
-
-				return fmt.Errorf("timeout of %s reached, pattern %q not found", s.timeout, s.expect)
-			}
-
-			session.Print("\n--- Connection closed ---\n")
-
-			return ctx.Err()
-		default:
-			sbytes, err := port.Read(readBuffer)
-			if err != nil {
-				// Ignore timeout errors as these are expected with the read timeout config
-				if err != io.EOF && !strings.Contains(err.Error(), "timeout") {
-					return fmt.Errorf("error reading from serial port: %w", err)
-				}
-
-				continue
-			}
-
-			if sbytes == 0 {
-				continue
-			}
-
-			// Process the data read character by character
-			for i := range sbytes {
-				b := readBuffer[i]
-				lineBuffer.WriteByte(b)
-
-				// If we reach a newline or a buffer limit, process the line
-				if b == '\n' || lineBuffer.Len() >= 1024 {
-					line := lineBuffer.String()
-					session.Print(line)
-
-					// Check for regex match if we have one
-					if s.expect != nil && s.expect.MatchString(line) {
-						session.Print("\n--- Pattern matched, connection closed ---\n")
-
-						return nil // Success - pattern found
-					}
-
-					lineBuffer.Reset()
-				}
-			}
-		}
-	}
+	return s.readLoop(ctx, port, session)
 }
 
 func (s *Serial) evalArgs(args []string) error {

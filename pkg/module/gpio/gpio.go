@@ -33,8 +33,10 @@ func init() {
 	})
 }
 
-type Pin uint8
-type State uint8
+type (
+	Pin   uint8
+	State uint8
+)
 
 // gpio is an interface for different internal gpio access methods.
 type gpio interface {
@@ -80,11 +82,13 @@ var _ module.Module = &Button{}
 
 const abstractButton = `Simulate a button press by changing the state of a GPIO pin
 `
+
 const usageButton = `
 ARGUMENTS:
 	[duration]
 
 `
+
 const description1Button = `
 The duration controls the time the button is pressed. If no duration is passed, a default is used.
 `
@@ -96,6 +100,7 @@ and a unit suffix, such as "300ms", "-1.5h" or "2h45m".
 Valid time units are "ns", "us" (or "µs"), "ms", "s", "m", "h".
 
 `
+
 const description3Button = `
 It is the users responsibility to ensure that the used GPIO pin is not also used by 
 other modules or otherwise occupied by the system!
@@ -206,15 +211,18 @@ var _ module.Module = &Switch{}
 
 const abstractSwitch = `Simulate an on/off switch by changing the state of a GPIO pin
 `
+
 const usageSwitch = `
 ARGUMENTS:
 	[on|off|toggle]
 `
+
 const description1Switch = `
 The on, off and toggle commands control the state of the switch.
 If no argument is passed, the current state is printed.
 
 `
+
 const description2Switch = `
 It is the users responsibility to ensure that the used GPIO pin is not also used by 
 other modules or otherwise occupied by the system!
@@ -261,7 +269,59 @@ func (s *Switch) Deinit() error {
 	return s.Low(s.Pin)
 }
 
-//nolint:cyclop
+func (s *Switch) handleOn(sesh module.Session) error {
+	err := s.on()
+	if err != nil {
+		return err
+	}
+
+	if s.state == on {
+		sesh.Print("Already on")
+	} else {
+		sesh.Print("Turned on")
+	}
+
+	s.state = on
+
+	return nil
+}
+
+func (s *Switch) handleOff(sesh module.Session) error {
+	err := s.off()
+	if err != nil {
+		return err
+	}
+
+	if s.state == off {
+		sesh.Print("Already off")
+	} else {
+		sesh.Print("Turned off")
+	}
+
+	s.state = off
+
+	return nil
+}
+
+func (s *Switch) handleToggle(sesh module.Session) error {
+	err := s.Toggle(s.Pin)
+	if err != nil {
+		return err
+	}
+
+	if s.state == on {
+		sesh.Print("Turned off")
+
+		s.state = off
+	} else {
+		sesh.Print("Turned on")
+
+		s.state = on
+	}
+
+	return nil
+}
+
 func (s *Switch) Run(_ context.Context, sesh module.Session, args ...string) error {
 	log.Println("gpio.Switch module: Run called")
 
@@ -273,55 +333,14 @@ func (s *Switch) Run(_ context.Context, sesh module.Session, args ...string) err
 
 	switch args[0] {
 	case "on":
-		err := s.on()
-		if err != nil {
-			return err
-		}
-
-		if s.state == on {
-			sesh.Print("Already on")
-		} else {
-			sesh.Print("Turned on")
-		}
-
-		s.state = on
-
-		return nil
+		return s.handleOn(sesh)
 	case "off":
-		err := s.off()
-		if err != nil {
-			return err
-		}
-
-		if s.state == off {
-			sesh.Print("Already off")
-		} else {
-			sesh.Print("Turned off")
-		}
-
-		s.state = off
-
-		return nil
+		return s.handleOff(sesh)
 	case "toggle":
-		err := s.Toggle(s.Pin)
-		if err != nil {
-			return err
-		}
-
-		if s.state == on {
-			sesh.Print("Turned off")
-
-			s.state = off
-		} else {
-			sesh.Print("Turned on")
-
-			s.state = on
-		}
+		return s.handleToggle(sesh)
 	default:
 		return fmt.Errorf("unknown argument: %s", args[0])
 	}
-
-	return nil
 }
 
 func (s *Switch) on() error {
