@@ -211,22 +211,63 @@ func newInsecureClient() *http.Client {
 	return &http.Client{
 		Transport: &http2.Transport{
 			AllowHTTP: true,
-			DialTLS: func(network, addr string, _ *tls.Config) (net.Conn, error) {
+			DialTLSContext: func(ctx context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
 				// If you're also using this client for non-h2c traffic, you may want
 				// to delegate to tls.Dial if the network isn't TCP or the addr isn't
 				// in an allowlist.
+				dialer := &net.Dialer{}
 
-				//nolint:noctx
-				return net.Dial(network, addr)
+				return dialer.DialContext(ctx, network, addr)
 			},
 			// TODO: Don't forget timeouts!
 		},
 	}
 }
 
+func (agt *agent) handleConfigLoad() {
+	err := agt.loadConfig()
+	if agt.checkConfig {
+		if err != nil {
+			log.Printf("Bad configuration: %v", err)
+			agt.cleanup(exit0)
+		}
+
+		log.Print("Configuration is valid")
+		agt.cleanup(exit0)
+	} else if err != nil {
+		log.Printf("Loading config failed: %v", err)
+		agt.cleanup(exit1)
+	}
+}
+
+func (agt *agent) handleModuleInit() {
+	err := agt.initModules()
+	if agt.dryRun {
+		if err != nil {
+			printInitErr(err)
+			log.Print("Initialization FAILED - Dry run finished")
+			agt.cleanup(exit0)
+		}
+
+		log.Print("Initialization SUCCESSFUL - Dry run finished")
+		agt.cleanup(exit0)
+	} else if err != nil {
+		printInitErr(err)
+		agt.cleanup(exit1)
+	}
+}
+
+func (agt *agent) handleServerRegistration() {
+	if agt.server != "" {
+		err := agt.registerWithServer()
+		if err != nil {
+			log.Printf("Registering with server %q failed: %v", agt.server, err)
+			agt.cleanup(exit1)
+		}
+	}
+}
+
 // start orchestrates the dutagent execution.
-//
-//nolint:cyclop
 func (agt *agent) start() {
 	log.SetOutput(agt.stdout)
 
@@ -247,44 +288,11 @@ func (agt *agent) start() {
 
 	agt.watchInterrupt()
 
-	err := agt.loadConfig()
-	if agt.checkConfig {
-		if err != nil {
-			log.Printf("Bad configuration: %v", err)
-			agt.cleanup(exit0)
-		}
+	agt.handleConfigLoad()
+	agt.handleModuleInit()
+	agt.handleServerRegistration()
 
-		log.Print("Configuration is valid")
-		agt.cleanup(exit0)
-	} else if err != nil {
-		log.Printf("Loading config failed: %v", err)
-		agt.cleanup(exit1)
-	}
-
-	err = agt.initModules()
-	if agt.dryRun {
-		if err != nil {
-			printInitErr(err)
-			log.Print("Initialization FAILED - Dry run finished")
-			agt.cleanup(exit0)
-		}
-
-		log.Print("Initialization SUCCESSFUL - Dry run finished")
-		agt.cleanup(exit0)
-	} else if err != nil {
-		printInitErr(err)
-		agt.cleanup(exit1)
-	}
-
-	if agt.server != "" {
-		err := agt.registerWithServer()
-		if err != nil {
-			log.Printf("Registering with server %q failed: %v", agt.server, err)
-			agt.cleanup(exit1)
-		}
-	}
-
-	err = agt.startRPCService()
+	err := agt.startRPCService()
 	log.Printf("internal RPC handler error: %v", err)
 	agt.cleanup(exit1)
 }

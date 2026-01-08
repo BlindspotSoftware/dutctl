@@ -73,28 +73,18 @@ func (a *rpcService) Commands(
 	return res, nil
 }
 
-// Details is the handler for the Details RPC.
-//
-//nolint:funlen
-func (a *rpcService) Details(
-	_ context.Context,
-	req *connect.Request[pb.DetailsRequest],
-) (*connect.Response[pb.DetailsResponse], error) {
-	log.Println("Server received Details request")
-
-	wantDev := req.Msg.GetDevice()
-	wantCmd := req.Msg.GetCmd()
-	keyword := req.Msg.GetKeyword()
-
+func (a *rpcService) validateKeyword(keyword string) error {
 	if keyword != "help" {
-		e := connect.NewError(
+		return connect.NewError(
 			connect.CodeInvalidArgument,
 			fmt.Errorf("unknown keyword %q, possible values are: 'help'", keyword),
 		)
-
-		return nil, e
 	}
 
+	return nil
+}
+
+func (a *rpcService) findCommandWithError(wantDev, wantCmd string) (dut.Command, error) {
 	_, cmd, err := a.devices.FindCmd(wantDev, wantCmd)
 	if err != nil {
 		var code connect.Code
@@ -104,14 +94,16 @@ func (a *rpcService) Details(
 			code = connect.CodeInternal
 		}
 
-		e := connect.NewError(
+		return dut.Command{}, connect.NewError(
 			code,
 			fmt.Errorf("device %q, command %q: %w", wantDev, wantCmd, err),
 		)
-
-		return nil, e
 	}
 
+	return cmd, nil
+}
+
+func (a *rpcService) getMainModuleHelp(cmd dut.Command, wantCmd, wantDev string) (string, error) {
 	var (
 		helpStr   string
 		foundMain bool
@@ -125,12 +117,39 @@ func (a *rpcService) Details(
 	}
 
 	if !foundMain {
-		e := connect.NewError(
+		return "", connect.NewError(
 			connect.CodeInternal,
 			fmt.Errorf("no main module found for command %q at device %q", wantCmd, wantDev),
 		)
+	}
 
-		return nil, e
+	return helpStr, nil
+}
+
+// Details is the handler for the Details RPC.
+func (a *rpcService) Details(
+	_ context.Context,
+	req *connect.Request[pb.DetailsRequest],
+) (*connect.Response[pb.DetailsResponse], error) {
+	log.Println("Server received Details request")
+
+	wantDev := req.Msg.GetDevice()
+	wantCmd := req.Msg.GetCmd()
+	keyword := req.Msg.GetKeyword()
+
+	err := a.validateKeyword(keyword)
+	if err != nil {
+		return nil, err
+	}
+
+	cmd, err := a.findCommandWithError(wantDev, wantCmd)
+	if err != nil {
+		return nil, err
+	}
+
+	helpStr, err := a.getMainModuleHelp(cmd, wantCmd, wantDev)
+	if err != nil {
+		return nil, err
 	}
 
 	res := connect.NewResponse(&pb.DetailsResponse{
