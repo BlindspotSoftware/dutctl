@@ -77,6 +77,7 @@ func newApp(stdin io.Reader, stdout, stderr io.Writer, exitFunc func(int), args 
 	fs.StringVar(&app.outputFormat, "f", "", outputFormatInfo)
 	fs.BoolVar(&app.verbose, "v", false, verboseInfo)
 	fs.BoolVar(&app.noColor, "no-color", false, noColorInfo)
+	fs.BoolVar(&app.insecure, "insecure", false, "Disable TLS (use plain HTTP)")
 
 	//nolint:errcheck // flag.Parse always returns no error because of flag.ExitOnError
 	fs.Parse(args[1:])
@@ -105,6 +106,7 @@ type application struct {
 	outputFormat      string
 	verbose           bool
 	noColor           bool
+	insecure          bool
 	args              []string
 	printFlagDefaults func()
 
@@ -113,13 +115,13 @@ type application struct {
 }
 
 func (app *application) setupRPCClient() {
-	client := dutctlv1connect.NewDeviceServiceClient(
-		rpc.NewInsecureClient(),
-		fmt.Sprintf("http://%s", app.serverAddr),
+	client, scheme := rpc.NewClient(app.insecure)
+
+	app.rpcClient = dutctlv1connect.NewDeviceServiceClient(
+		client,
+		fmt.Sprintf("%s://%s", scheme, app.serverAddr),
 		connect.WithGRPC(),
 	)
-
-	app.rpcClient = client
 }
 
 var errInvalidCmdline = fmt.Errorf("invalid command line")
