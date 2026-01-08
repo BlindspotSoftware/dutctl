@@ -9,13 +9,11 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"log"
-	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -25,6 +23,7 @@ import (
 	"github.com/BlindspotSoftware/dutctl/internal/buildinfo"
 	"github.com/BlindspotSoftware/dutctl/internal/dutagent"
 	"github.com/BlindspotSoftware/dutctl/pkg/dut"
+	"github.com/BlindspotSoftware/dutctl/pkg/rpc"
 	"github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1/dutctlv1connect"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
@@ -199,29 +198,10 @@ func spawnClient(agendURL string) dutctlv1connect.RelayServiceClient {
 	log.Printf("Spawning new client for agent %q", agendURL)
 
 	return dutctlv1connect.NewRelayServiceClient(
-		// Instead of http.DefaultClient, use the HTTP/2 protocol without TLS
-		newInsecureClient(),
+		rpc.NewInsecureClient(),
 		fmt.Sprintf("http://%s", agendURL),
 		connect.WithGRPC(),
 	)
-}
-
-// TODO: refactor into pkg and reuse in dutctl and dutserver.
-func newInsecureClient() *http.Client {
-	return &http.Client{
-		Transport: &http2.Transport{
-			AllowHTTP: true,
-			DialTLS: func(network, addr string, _ *tls.Config) (net.Conn, error) {
-				// If you're also using this client for non-h2c traffic, you may want
-				// to delegate to tls.Dial if the network isn't TCP or the addr isn't
-				// in an allowlist.
-
-				//nolint:noctx
-				return net.Dial(network, addr)
-			},
-			// TODO: Don't forget timeouts!
-		},
-	}
 }
 
 // start orchestrates the dutagent execution.
