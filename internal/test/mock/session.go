@@ -45,8 +45,7 @@ func (m *Session) Println(a ...any) {
 	m.PrintText = fmt.Sprintln(a...)
 }
 
-//nolint:nonamedreturns
-func (m *Session) Console() (stdin io.Reader, stdout, stderr io.Writer) {
+func (m *Session) Console() (io.Reader, io.Writer, io.Writer) {
 	m.ConsoleCalled = true
 
 	if m.Stdin == nil {

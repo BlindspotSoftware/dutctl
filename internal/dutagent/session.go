@@ -39,8 +39,9 @@ func (s *session) Println(a ...any) {
 	s.printCh <- fmt.Sprintln(a...)
 }
 
-//nolint:nonamedreturns
-func (s *session) Console() (stdin io.Reader, stdout, stderr io.Writer) {
+// Console returns the console streams for the session.
+// Returns: stdin (Reader), stdout (Writer), stderr (Writer).
+func (s *session) Console() (io.Reader, io.Writer, io.Writer) {
 	var (
 		stdinReader                io.Reader
 		stdoutWriter, stderrWriter io.Writer
