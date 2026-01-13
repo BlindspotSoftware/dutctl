@@ -86,11 +86,9 @@ func (s *Serial) Init() error {
 		s.Baud = DefaultBaudRate
 	}
 
-	port, err := s.openPort()
-	if err != nil {
-		return err
-	}
-	defer port.Close()
+	// Note: We don't open the port here to allow dutagent to start
+	// even if the serial device is not yet available (e.g., powered off).
+	// The port will be opened when Run() is called.
 
 	return nil
 }
