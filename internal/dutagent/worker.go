@@ -12,9 +12,59 @@ import (
 	"log"
 
 	"github.com/BlindspotSoftware/dutctl/internal/chanio"
-
 	pb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1"
+	"github.com/google/uuid"
 )
+
+// sendFileInChunks sends a file to the client in chunks using the new FileTransfer protocol.
+// It uses a 1MB chunk size for efficient streaming.
+func sendFileInChunks(stream Stream, path string, r io.Reader, transferID string) error {
+	const chunkSize = 1024 * 1024 // 1MB chunks
+
+	buf := make([]byte, chunkSize)
+	var offset uint64
+
+	for {
+		n, err := r.Read(buf)
+		if err != nil && !errors.Is(err, io.EOF) {
+			return fmt.Errorf("failed to read from file: %w", err)
+		}
+
+		if n == 0 {
+			break
+		}
+
+		isLast := errors.Is(err, io.EOF)
+
+		chunk := &pb.FileTransferChunk{
+			TransferId: transferID,
+			Offset:     offset,
+			Data:       buf[:n],
+			IsLast:     isLast,
+		}
+
+		res := &pb.RunResponse{
+			Msg: &pb.RunResponse_FileTransferChunk{
+				FileTransferChunk: chunk,
+			},
+		}
+
+		err = stream.Send(res)
+		if err != nil {
+			return fmt.Errorf("failed to send chunk at offset %d: %w", offset, err)
+		}
+
+		log.Printf("Sent chunk: path=%q, offset=%d, size=%d, isLast=%v", path, offset, n, isLast)
+
+		offset += uint64(n)
+
+		if isLast {
+			break
+		}
+	}
+
+	return nil
+}
 
 // toClientWorker sends messages from the module session to the client.
 // This function is an infinite loop. It terminates when the session's done channel is closed.
@@ -69,26 +119,15 @@ func toClientWorker(ctx context.Context, stream Stream, s *session) error {
 				return err
 			}
 
-			content, err := io.ReadAll(r)
+			log.Printf("Received file from module, sending to client in chunks. Name: %q", s.currentFile)
+
+			transferID := uuid.New().String()
+			err = sendFileInChunks(stream, s.currentFile, r, transferID)
 			if err != nil {
-				return err
+				return fmt.Errorf("failed to send file in chunks: %w", err)
 			}
 
-			log.Printf("Received file from module, sending to client. Name: %q, Size %d", s.currentFile, len(content))
-
-			res := &pb.RunResponse{
-				Msg: &pb.RunResponse_File{
-					File: &pb.File{
-						Path:    s.currentFile,
-						Content: content,
-					},
-				},
-			}
-
-			err = stream.Send(res)
-			if err != nil {
-				return err
-			}
+			log.Printf("Finished sending file chunks for: %q", s.currentFile)
 
 			s.currentFile = ""
 		}
@@ -223,6 +262,70 @@ func fromClientWorker(ctx context.Context, stream Stream, s *session) error {
 				log.Println("Passed file to module (buffered in the session)")
 
 				s.currentFile = ""
+			case *pb.RunRequest_FileTransferStart:
+				startMsg := msg.FileTransferStart
+				log.Printf("Received FileTransferStart: transfer_id=%s, path=%s, size=%d\n", startMsg.TransferId, startMsg.Path, startMsg.TotalSize)
+
+				// Send FileTransferStartAck
+				ack := &pb.FileTransferStartAck{
+					TransferId: startMsg.TransferId,
+					Accepted:   true,
+				}
+				res := &pb.RunResponse{
+					Msg: &pb.RunResponse_FileTransferStartAck{
+						FileTransferStartAck: ack,
+					},
+				}
+				if err := stream.Send(res); err != nil {
+					return fmt.Errorf("failed to send FileTransferStartAck: %w", err)
+				}
+				log.Printf("Sent FileTransferStartAck for transfer_id=%s\n", startMsg.TransferId)
+
+			case *pb.RunRequest_FileTransferChunk:
+				chunkMsg := msg.FileTransferChunk
+				log.Printf("Received FileTransferChunk: transfer_id=%s, offset=%d, size=%d, is_last=%v\n", chunkMsg.TransferId, chunkMsg.Offset, len(chunkMsg.Data), chunkMsg.IsLast)
+
+				// Process the chunk through the session
+				err := s.receiveFileChunkData(chunkMsg.Data, chunkMsg.Offset, chunkMsg.IsLast)
+				if err != nil {
+					log.Printf("Error receiving file chunk: %v", err)
+				}
+
+				// Send FileTransferChunkAck
+				ack := &pb.FileTransferChunkAck{
+					TransferId: chunkMsg.TransferId,
+					Offset:     chunkMsg.Offset + uint64(len(chunkMsg.Data)),
+				}
+				if err != nil {
+					ack.ErrorMessage = fmt.Sprintf("failed to write chunk: %v", err)
+				}
+				res := &pb.RunResponse{
+					Msg: &pb.RunResponse_FileTransferChunkAck{
+						FileTransferChunkAck: ack,
+					},
+				}
+				if err := stream.Send(res); err != nil {
+					return fmt.Errorf("failed to send FileTransferChunkAck: %w", err)
+				}
+
+			case *pb.RunRequest_FileTransferComplete:
+				completeMsg := msg.FileTransferComplete
+				log.Printf("Received FileTransferComplete: transfer_id=%s, bytes=%d\n", completeMsg.TransferId, completeMsg.BytesTransferred)
+
+				// Send FileTransferCompleteAck
+				ack := &pb.FileTransferCompleteAck{
+					TransferId: completeMsg.TransferId,
+					Success:    true,
+				}
+				res := &pb.RunResponse{
+					Msg: &pb.RunResponse_FileTransferCompleteAck{
+						FileTransferCompleteAck: ack,
+					},
+				}
+				if err := stream.Send(res); err != nil {
+					return fmt.Errorf("failed to send FileTransferCompleteAck: %w", err)
+				}
+
 			default:
 				log.Printf("Unexpected message type %T", msg)
 			}

@@ -11,11 +11,13 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"hash"
 	"io"
 	"log"
 	"net"
 	"net/http"
 	"os"
+	"sync"
 
 	"connectrpc.com/connect"
 	"github.com/BlindspotSoftware/dutctl/internal/buildinfo"
@@ -92,6 +94,15 @@ func newApp(stdin io.Reader, stdout, stderr io.Writer, exitFunc func(int), args 
 		NoColor: app.noColor,
 	})
 
+	// Initialize file chunk tracking
+	app.receivingFiles = make(map[string]*os.File)
+	app.receivingFileOffsets = make(map[string]uint64)
+	app.receivingFileSizes = make(map[string]uint64)
+	app.receivingFileTempPaths = make(map[string]string)
+	app.receivingFileHashers = make(map[string]hash.Hash)
+	app.receivingFileExpectedHash = make(map[string][]byte)
+	app.receivingFilePermissions = make(map[string]uint32)
+
 	return &app
 }
 
@@ -111,6 +122,17 @@ type application struct {
 
 	rpcClient dutctlv1connect.DeviceServiceClient
 	formatter output.Formatter
+
+	// File chunk tracking for receiving chunked files
+	// Protected by mu to prevent concurrent map access
+	mu                        sync.Mutex
+	receivingFiles            map[string]*os.File  // path -> file handle
+	receivingFileOffsets      map[string]uint64    // path -> expected next offset
+	receivingFileSizes        map[string]uint64    // path -> expected total size
+	receivingFileTempPaths    map[string]string    // path -> temp file path for atomic rename
+	receivingFileHashers      map[string]hash.Hash // path -> running SHA256 hash of file
+	receivingFileExpectedHash map[string][]byte    // path -> expected final SHA256 hash
+	receivingFilePermissions  map[string]uint32    // path -> file permissions mode
 }
 
 func (app *application) setupRPCClient() {
@@ -186,9 +208,37 @@ func (app *application) start() {
 	app.exit(err)
 }
 
+// cleanupReceivingFiles closes and removes all temporary files created during receiving.
+// This prevents file descriptor and disk space leaks on application exit or error.
+func (app *application) cleanupReceivingFiles() {
+	app.mu.Lock()
+	defer app.mu.Unlock()
+
+	for path, file := range app.receivingFiles {
+		if file != nil {
+			_ = file.Close()
+		}
+		// Remove temp file if it exists
+		if tempPath, ok := app.receivingFileTempPaths[path]; ok {
+			_ = os.Remove(tempPath)
+		}
+	}
+	// Clear all maps
+	app.receivingFiles = make(map[string]*os.File)
+	app.receivingFileOffsets = make(map[string]uint64)
+	app.receivingFileSizes = make(map[string]uint64)
+	app.receivingFileTempPaths = make(map[string]string)
+	app.receivingFileHashers = make(map[string]hash.Hash)
+	app.receivingFileExpectedHash = make(map[string][]byte)
+	app.receivingFilePermissions = make(map[string]uint32)
+}
+
 // exit terminates the application. If the provided error is not nil, it is printed to
 // the standard error output. If printUsage is true, the usage information is printed additionally.
 func (app *application) exit(err error) {
+	// Always cleanup receiving files before exit
+	defer app.cleanupReceivingFiles()
+
 	if err == nil {
 		// Flush any buffered output before exiting
 		if app.formatter != nil {

@@ -52,6 +52,12 @@ message RunRequest {
     Command command = 1;
     Console console = 2;
     File file = 3;
+    FileTransferStart file_transfer_start = 6;
+    FileTransferStartAck file_transfer_start_ack = 7;
+    FileTransferChunk file_transfer_chunk = 8;
+    FileTransferChunkAck file_transfer_chunk_ack = 9;
+    FileTransferComplete file_transfer_complete = 10;
+    FileTransferCompleteAck file_transfer_complete_ack = 11;
   }
 }
 
@@ -63,6 +69,12 @@ message RunResponse {
     Console console = 2;
     FileRequest file_request = 3;
     File file = 4;
+    FileTransferStart file_transfer_start = 6;
+    FileTransferStartAck file_transfer_start_ack = 7;
+    FileTransferChunk file_transfer_chunk = 8;
+    FileTransferChunkAck file_transfer_chunk_ack = 9;
+    FileTransferComplete file_transfer_complete = 10;
+    FileTransferCompleteAck file_transfer_complete_ack = 11;
   }
 }
 
@@ -94,9 +106,54 @@ message FileRequest {
 }
 
 // File is used by the client and the agent to transfer a file.
+// DEPRECATED: Use FileChunk for large file transfers to avoid memory issues.
+// This message is kept for backward compatibility with small files.
 message File {
   string path = 1;
   bytes content = 2;
+}
+
+// FileTransferStart initiates a file transfer session with a unique transfer ID.
+message FileTransferStart {
+  string transfer_id = 1;   // UUID: uniquely identifies this transfer session
+  string path = 2;          // File path (absolute or relative)
+  uint64 total_size = 3;    // Total file size in bytes
+  string direction = 4;     // "upload" or "download"
+}
+
+// FileTransferStartAck acknowledges the FileTransferStart and indicates readiness.
+message FileTransferStartAck {
+  string transfer_id = 1;
+  bool accepted = 2;        // true = ready to receive/send chunks
+  string error_message = 3; // If accepted=false, the reason why
+}
+
+// FileTransferChunk sends one chunk of file data.
+message FileTransferChunk {
+  string transfer_id = 1;   // Links to FileTransferStart
+  uint64 offset = 2;        // Position in file this chunk represents
+  bytes data = 3;           // Actual chunk data (up to 1MB)
+  bool is_last = 4;         // true = this is the final chunk
+}
+
+// FileTransferChunkAck confirms chunk receipt.
+message FileTransferChunkAck {
+  string transfer_id = 1;
+  uint64 offset = 2;        // Confirms reception up to this offset
+  string error_message = 3; // If error, why this chunk failed
+}
+
+// FileTransferComplete signals transfer completion.
+message FileTransferComplete {
+  string transfer_id = 1;
+  uint64 bytes_transferred = 2; // Total bytes sent/received
+}
+
+// FileTransferCompleteAck confirms completion.
+message FileTransferCompleteAck {
+  string transfer_id = 1;
+  bool success = 2;         // true = file successfully written
+  string error_message = 3; // If success=false, why it failed
 }
 
 // RelayService defines the service for forwarding communication via relay server.
