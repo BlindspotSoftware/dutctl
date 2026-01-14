@@ -16,6 +16,58 @@ import (
 	pb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1"
 )
 
+// sendFileInChunks sends a file to the client in chunks to avoid loading the entire file into memory.
+// It uses a 1MB chunk size for efficient streaming.
+func sendFileInChunks(stream Stream, path string, r io.Reader) error {
+	const chunkSize = 1024 * 1024 // 1MB chunks
+
+	buf := make([]byte, chunkSize)
+	var offset uint64
+	var totalSize uint64 // Will be set when we know the full size (if available)
+
+	for {
+		n, err := r.Read(buf)
+		if err != nil && !errors.Is(err, io.EOF) {
+			return fmt.Errorf("failed to read from file: %w", err)
+		}
+
+		if n == 0 {
+			break
+		}
+
+		isLast := errors.Is(err, io.EOF)
+
+		chunk := &pb.FileChunk{
+			Path:      path,
+			Data:      buf[:n],
+			Offset:    offset,
+			TotalSize: totalSize, // May be 0 if size is unknown
+			IsLast:    isLast,
+		}
+
+		res := &pb.RunResponse{
+			Msg: &pb.RunResponse_FileChunk{
+				FileChunk: chunk,
+			},
+		}
+
+		err = stream.Send(res)
+		if err != nil {
+			return fmt.Errorf("failed to send chunk at offset %d: %w", offset, err)
+		}
+
+		log.Printf("Sent chunk: path=%q, offset=%d, size=%d, isLast=%v", path, offset, n, isLast)
+
+		offset += uint64(n)
+
+		if isLast {
+			break
+		}
+	}
+
+	return nil
+}
+
 // toClientWorker sends messages from the module session to the client.
 // This function is an infinite loop. It terminates when the session's done channel is closed.
 //
@@ -69,26 +121,14 @@ func toClientWorker(ctx context.Context, stream Stream, s *session) error {
 				return err
 			}
 
-			content, err := io.ReadAll(r)
+			log.Printf("Received file from module, sending to client in chunks. Name: %q", s.currentFile)
+
+			err = sendFileInChunks(stream, s.currentFile, r)
 			if err != nil {
-				return err
+				return fmt.Errorf("failed to send file in chunks: %w", err)
 			}
 
-			log.Printf("Received file from module, sending to client. Name: %q, Size %d", s.currentFile, len(content))
-
-			res := &pb.RunResponse{
-				Msg: &pb.RunResponse_File{
-					File: &pb.File{
-						Path:    s.currentFile,
-						Content: content,
-					},
-				},
-			}
-
-			err = stream.Send(res)
-			if err != nil {
-				return err
-			}
+			log.Printf("Finished sending file chunks for: %q", s.currentFile)
 
 			s.currentFile = ""
 		}
@@ -223,6 +263,40 @@ func fromClientWorker(ctx context.Context, stream Stream, s *session) error {
 				log.Println("Passed file to module (buffered in the session)")
 
 				s.currentFile = ""
+			case *pb.RunRequest_FileChunk:
+				chunkMsg := msg.FileChunk
+				if chunkMsg == nil {
+					log.Println("Received empty file chunk message")
+
+					return fmt.Errorf("bad file transfer: received empty file-chunk message")
+				}
+
+				if s.currentFile == "" {
+					log.Println("Received file chunk without a request")
+
+					return fmt.Errorf("bad file transfer: received file-chunk without a former request")
+				}
+
+				path := chunkMsg.GetPath()
+				if path != s.currentFile {
+					log.Printf("Received unexpected file chunk for %q - ignoring!", path)
+
+					return fmt.Errorf("bad file transfer: received file-chunk for %q but requested %q", path, s.currentFile)
+				}
+
+				data := chunkMsg.GetData()
+				offset := chunkMsg.GetOffset()
+				isLast := chunkMsg.GetIsLast()
+
+				log.Printf("Server received file chunk: path=%q, offset=%d, size=%d, isLast=%v", path, offset, len(data), isLast)
+
+				if err := s.receiveFileChunk(chunkMsg); err != nil {
+					return fmt.Errorf("failed to receive file chunk: %w", err)
+				}
+
+				if isLast {
+					s.currentFile = ""
+				}
 			default:
 				log.Printf("Unexpected message type %T", msg)
 			}

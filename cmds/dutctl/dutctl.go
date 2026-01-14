@@ -92,6 +92,9 @@ func newApp(stdin io.Reader, stdout, stderr io.Writer, exitFunc func(int), args 
 		NoColor: app.noColor,
 	})
 
+	// Initialize file chunk tracking
+	app.receivingFiles = make(map[string]*os.File)
+
 	return &app
 }
 
@@ -111,6 +114,9 @@ type application struct {
 
 	rpcClient dutctlv1connect.DeviceServiceClient
 	formatter output.Formatter
+
+	// File chunk tracking for receiving chunked files
+	receivingFiles map[string]*os.File
 }
 
 func (app *application) setupRPCClient() {

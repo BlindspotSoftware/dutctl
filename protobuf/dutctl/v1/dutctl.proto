@@ -52,6 +52,7 @@ message RunRequest {
     Command command = 1;
     Console console = 2;
     File file = 3;
+    FileChunk file_chunk = 4;
   }
 }
 
@@ -63,6 +64,7 @@ message RunResponse {
     Console console = 2;
     FileRequest file_request = 3;
     File file = 4;
+    FileChunk file_chunk = 5;
   }
 }
 
@@ -94,9 +96,21 @@ message FileRequest {
 }
 
 // File is used by the client and the agent to transfer a file.
+// DEPRECATED: Use FileChunk for large file transfers to avoid memory issues.
+// This message is kept for backward compatibility with small files.
 message File {
   string path = 1;
   bytes content = 2;
+}
+
+// FileChunk is used to transfer files in chunks to avoid loading entire files into memory.
+// Multiple FileChunk messages are sent in sequence for a single file transfer.
+message FileChunk {
+  string path = 1;        // File path (sent in every chunk for identification)
+  bytes data = 2;         // Chunk data (up to 1MB recommended)
+  uint64 offset = 3;      // Byte offset of this chunk in the file
+  uint64 total_size = 4;  // Total file size in bytes (sent in first chunk)
+  bool is_last = 5;       // True if this is the last chunk
 }
 
 // RelayService defines the service for forwarding communication via relay server.
