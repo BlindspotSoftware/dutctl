@@ -17,6 +17,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -107,7 +108,21 @@ func (p *PiKVM) handleMediaCommand(ctx context.Context, s module.Session, comman
 			return nil
 		}
 
-		return p.handleMount(ctx, s, args[1])
+		// Check if hash and size were provided (optimized workflow)
+		var precomputedHash string
+		var precomputedSize int64
+
+		if len(args) >= 3 {
+			precomputedHash = args[2]
+		}
+
+		if len(args) >= 4 {
+			if size, err := strconv.ParseInt(args[3], 10, 64); err == nil {
+				precomputedSize = size
+			}
+		}
+
+		return p.handleMount(ctx, s, args[1], precomputedHash, precomputedSize)
 	case mountURL:
 		if len(args) < minArgsRequired {
 			s.Println("Error: 'mount-url' command requires URL argument")
@@ -125,8 +140,47 @@ func (p *PiKVM) handleMediaCommand(ctx context.Context, s module.Session, comman
 	}
 }
 
-func (p *PiKVM) handleMount(ctx context.Context, s module.Session, imagePath string) error {
+func (p *PiKVM) handleMount(ctx context.Context, s module.Session, imagePath string, precomputedHash string, precomputedSize int64) error {
 	s.Printf("Preparing to mount image: %s\n", filepath.Base(imagePath))
+
+	var hashSum string
+	var fileSize int64
+
+	// If hash was precomputed by client, use it to check PiKVM first
+	if precomputedHash != "" {
+		hashSum = precomputedHash
+		fileSize = precomputedSize
+
+		s.Printf("Using precomputed hash: %s\n", hashSum)
+
+		// Check if image already exists on PiKVM
+		err := p.checkImageExists(ctx, hashSum)
+		if err == nil {
+			s.Println("Image already exists on PiKVM, skipping upload.")
+
+			// Unplug USB if currently connected
+			err = p.unplugUSBIfConnected(ctx, s)
+			if err != nil {
+				return err
+			}
+
+			// Configure and plug USB using image hash
+			err = p.configureAndPlugUSB(ctx, s, hashSum)
+			if err != nil {
+				return err
+			}
+
+			s.Printf("Image mounted successfully: %s\n", filepath.Base(imagePath))
+
+			return nil
+		}
+
+		if !errors.Is(err, ErrMissingImage) {
+			return fmt.Errorf("failed to check if image exists: %v", err)
+		}
+
+		s.Println("Image not found on PiKVM, will transfer from client.")
+	}
 
 	// Request file from client
 	s.Println("Requesting file from client...")
@@ -154,13 +208,16 @@ func (p *PiKVM) handleMount(ctx context.Context, s module.Session, imagePath str
 
 	s.Printf("Transferred %d bytes from client\n", bytesWritten)
 
-	// Calculate SHA256 hash of the image
-	hashSum, err := calcSHA256(tmpPath)
-	if err != nil {
-		return fmt.Errorf("failed to calculate image hash: %v", err)
-	}
+	// If hash wasn't precomputed, calculate it now
+	if hashSum == "" {
+		hashSum, err = calcSHA256(tmpPath)
+		if err != nil {
+			return fmt.Errorf("failed to calculate image hash: %v", err)
+		}
 
-	s.Printf("Image hash: %s\n", hashSum)
+		s.Printf("Image hash: %s\n", hashSum)
+		fileSize = bytesWritten
+	}
 
 	// Unplug USB if currently connected
 	err = p.unplugUSBIfConnected(ctx, s)
@@ -169,7 +226,7 @@ func (p *PiKVM) handleMount(ctx context.Context, s module.Session, imagePath str
 	}
 
 	// Upload image if not already in storage
-	err = p.uploadImageIfMissing(ctx, s, tmpPath, hashSum, bytesWritten)
+	err = p.uploadImageIfMissing(ctx, s, tmpPath, hashSum, fileSize)
 	if err != nil {
 		return err
 	}
