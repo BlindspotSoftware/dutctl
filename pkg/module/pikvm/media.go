@@ -128,19 +128,39 @@ func (p *PiKVM) handleMediaCommand(ctx context.Context, s module.Session, comman
 func (p *PiKVM) handleMount(ctx context.Context, s module.Session, imagePath string) error {
 	s.Printf("Preparing to mount image: %s\n", filepath.Base(imagePath))
 
+	// Request file from client
+	s.Println("Requesting file from client...")
+	fileReader, err := s.RequestFile(imagePath)
+	if err != nil {
+		return fmt.Errorf("failed to request file from client: %w", err)
+	}
+
+	// Create temporary file on dutagent to store the image
+	tmpFile, err := os.CreateTemp("", "pikvm-image-*")
+	if err != nil {
+		return fmt.Errorf("failed to create temporary file: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+	defer os.Remove(tmpPath) // Clean up temp file when done
+
+	// Copy file from client to temporary location
+	s.Println("Transferring file from client...")
+	bytesWritten, err := io.Copy(tmpFile, fileReader)
+	if err != nil {
+		tmpFile.Close()
+		return fmt.Errorf("failed to transfer file from client: %w", err)
+	}
+	tmpFile.Close()
+
+	s.Printf("Transferred %d bytes from client\n", bytesWritten)
+
 	// Calculate SHA256 hash of the image
-	hashSum, err := calcSHA256(imagePath)
+	hashSum, err := calcSHA256(tmpPath)
 	if err != nil {
 		return fmt.Errorf("failed to calculate image hash: %v", err)
 	}
 
 	s.Printf("Image hash: %s\n", hashSum)
-
-	// Get file info for size
-	fileInfo, err := getFileInfo(imagePath)
-	if err != nil {
-		return err
-	}
 
 	// Unplug USB if currently connected
 	err = p.unplugUSBIfConnected(ctx, s)
@@ -149,7 +169,7 @@ func (p *PiKVM) handleMount(ctx context.Context, s module.Session, imagePath str
 	}
 
 	// Upload image if not already in storage
-	err = p.uploadImageIfMissing(ctx, s, imagePath, hashSum, fileInfo.Size())
+	err = p.uploadImageIfMissing(ctx, s, tmpPath, hashSum, bytesWritten)
 	if err != nil {
 		return err
 	}
@@ -163,17 +183,6 @@ func (p *PiKVM) handleMount(ctx context.Context, s module.Session, imagePath str
 	s.Printf("Image mounted successfully: %s\n", filepath.Base(imagePath))
 
 	return nil
-}
-
-// getFileInfo opens a file and returns its FileInfo.
-func getFileInfo(path string) (os.FileInfo, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open image file: %v", err)
-	}
-	defer file.Close()
-
-	return file.Stat()
 }
 
 // unplugUSBIfConnected checks if USB is connected and unplugs it if necessary.
