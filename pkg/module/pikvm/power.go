@@ -14,6 +14,19 @@ import (
 	"github.com/BlindspotSoftware/dutctl/pkg/module"
 )
 
+// Power command constants.
+const (
+	on         = "on"
+	off        = "off"
+	forceOff   = "force-off"
+	reset      = "reset"
+	forceReset = "force-reset"
+	status     = "status"
+
+	statusOn  = "On"
+	statusOff = "Off"
+)
+
 // handlePowerCommandRouter routes power commands based on the first argument.
 func (p *PiKVM) handlePowerCommandRouter(ctx context.Context, s module.Session, args []string) error {
 	if len(args) == 0 {
@@ -52,7 +65,7 @@ func (p *PiKVM) handlePowerCommand(ctx context.Context, s module.Session, comman
 func (p *PiKVM) sendATXPower(ctx context.Context, s module.Session, action string) error {
 	endpoint := fmt.Sprintf("/api/atx/power?action=%s", action)
 
-	resp, err := p.doRequest(ctx, http.MethodPost, endpoint, nil, "")
+	resp, err := p.doRequest(ctx, http.MethodPost, endpoint, nil, "", requestOptions{})
 	if err != nil {
 		return fmt.Errorf("ATX power %s failed: %v", action, err)
 	}
@@ -67,7 +80,7 @@ func (p *PiKVM) sendATXPower(ctx context.Context, s module.Session, action strin
 func (p *PiKVM) sendATXClick(ctx context.Context, s module.Session, button string) error {
 	endpoint := fmt.Sprintf("/api/atx/click?button=%s", button)
 
-	resp, err := p.doRequest(ctx, http.MethodPost, endpoint, nil, "")
+	resp, err := p.doRequest(ctx, http.MethodPost, endpoint, nil, "", requestOptions{})
 	if err != nil {
 		return fmt.Errorf("ATX %s button click failed: %v", button, err)
 	}
@@ -95,7 +108,7 @@ type ATXStatusResult struct {
 }
 
 func (p *PiKVM) handleStatusCommand(ctx context.Context, s module.Session) error {
-	resp, err := p.doRequest(ctx, http.MethodGet, "/api/atx", nil, "")
+	resp, err := p.doRequest(ctx, http.MethodGet, "/api/atx", nil, "", requestOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to get ATX status: %v", err)
 	}

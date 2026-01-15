@@ -14,7 +14,7 @@ devices:
               user: admin
               password: admin
               timeout: 10s
-              command: power
+              mode: power
 
       # Keyboard Control
       keyboard:
@@ -26,7 +26,7 @@ devices:
               host: https://pikvm.local
               user: admin
               password: admin
-              command: keyboard
+              mode: keyboard
 
       # Virtual Media
       media:
@@ -38,7 +38,7 @@ devices:
               host: https://pikvm.local
               user: admin
               password: admin
-              command: media
+              mode: media
 
       # Screenshot
       screenshot:
@@ -50,4 +50,4 @@ devices:
               host: https://pikvm.local
               user: admin
               password: admin
-              command: screenshot
+              mode: screenshot

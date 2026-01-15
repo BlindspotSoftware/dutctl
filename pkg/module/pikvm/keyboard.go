@@ -16,30 +16,84 @@ import (
 	"github.com/BlindspotSoftware/dutctl/pkg/module"
 )
 
+// Keyboard command constants.
 const (
-	keyDelay           = 500 * time.Millisecond
+	typeCmd  = "type"
+	key      = "key"
+	keyCombo = "key-combo"
+)
+
+const (
 	maxTextLength      = 1024
 	minComboKeys       = 2
 	invalidCharNul     = "\x00"
 	invalidCharNewline = "\n"
 	invalidCharReturn  = "\r"
+	defaultKeyDelay    = 500 * time.Millisecond
 )
+
+func parseKeyboardFlags(args []string) (delay time.Duration, remaining []string, err error) {
+	delay = defaultKeyDelay
+
+	for len(args) > 0 {
+		arg := args[0]
+		if !strings.HasPrefix(arg, "--") {
+			break
+		}
+
+		if strings.HasPrefix(arg, "--delay=") {
+			value := strings.TrimPrefix(arg, "--delay=")
+			parsed, parseErr := time.ParseDuration(value)
+			if parseErr != nil || parsed <= 0 {
+				return 0, nil, fmt.Errorf("invalid --delay value %q", value)
+			}
+			delay = parsed
+			args = args[1:]
+			continue
+		}
+
+		if arg == "--delay" {
+			if len(args) < 2 {
+				return 0, nil, fmt.Errorf("--delay requires a duration value")
+			}
+			value := args[1]
+			parsed, parseErr := time.ParseDuration(value)
+			if parseErr != nil || parsed <= 0 {
+				return 0, nil, fmt.Errorf("invalid --delay value %q", value)
+			}
+			delay = parsed
+			args = args[2:]
+			continue
+		}
+
+		return 0, nil, fmt.Errorf("unknown flag %q", arg)
+	}
+
+	return delay, args, nil
+}
 
 // handleKeyboardCommandRouter routes keyboard commands based on the first argument.
 func (p *PiKVM) handleKeyboardCommandRouter(ctx context.Context, s module.Session, args []string) error {
-	if len(args) == 0 {
+	delay, remaining, err := parseKeyboardFlags(args)
+	if err != nil {
+		s.Printf("Error: %v\n", err)
+		s.Println("Usage: keyboard [--delay <duration>] <action> ...")
+		return nil
+	}
+
+	if len(remaining) == 0 {
 		s.Println("Keyboard command requires an action: type|key|key-combo")
 
 		return nil
 	}
 
-	command := strings.ToLower(args[0])
+	command := strings.ToLower(remaining[0])
 
-	return p.handleKeyboardCommand(ctx, s, command, args)
+	return p.handleKeyboardCommand(ctx, s, command, remaining, delay)
 }
 
 // handleKeyboardCommand dispatches keyboard-related commands.
-func (p *PiKVM) handleKeyboardCommand(ctx context.Context, s module.Session, command string, args []string) error {
+func (p *PiKVM) handleKeyboardCommand(ctx context.Context, s module.Session, command string, args []string, delay time.Duration) error {
 	switch command {
 	case typeCmd:
 		if len(args) < minArgsRequired {
@@ -64,7 +118,7 @@ func (p *PiKVM) handleKeyboardCommand(ctx context.Context, s module.Session, com
 			return nil
 		}
 
-		return p.handleCombo(ctx, s, args[1])
+		return p.handleCombo(ctx, s, args[1], delay)
 	default:
 		return fmt.Errorf("unknown keyboard action: %s (must be: type, key, key-combo)", command)
 	}
@@ -77,10 +131,8 @@ func (p *PiKVM) handleType(ctx context.Context, s module.Session, text string) e
 	}
 
 	// Check for invalid characters
-	for _, c := range []string{invalidCharNul, invalidCharNewline, invalidCharReturn} {
-		if strings.Contains(text, c) {
-			return fmt.Errorf("text contains invalid character: %q", c)
-		}
+	if idx := strings.IndexAny(text, invalidCharNul+invalidCharNewline+invalidCharReturn); idx != -1 {
+		return fmt.Errorf("text contains invalid character: %q", rune(text[idx]))
 	}
 
 	// Limit text length
@@ -91,7 +143,7 @@ func (p *PiKVM) handleType(ctx context.Context, s module.Session, text string) e
 	s.Printf("Typing text: %s\n", text)
 
 	// Use the /api/hid/print endpoint for text input
-	resp, err := p.doRequest(ctx, http.MethodPost, "/api/hid/print?slow=true", bytes.NewBufferString(text), "text/plain")
+	resp, err := p.doRequest(ctx, http.MethodPost, "/api/hid/print?slow=true", bytes.NewBufferString(text), "text/plain", requestOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to type text: %v", err)
 	}
@@ -122,7 +174,7 @@ func (p *PiKVM) handleKey(ctx context.Context, s module.Session, keyName string)
 	return nil
 }
 
-func (p *PiKVM) handleCombo(ctx context.Context, s module.Session, comboStr string) error {
+func (p *PiKVM) handleCombo(ctx context.Context, s module.Session, comboStr string, delay time.Duration) error {
 	// Parse combo like "Ctrl+Alt+Delete" into array of keys
 	keys := strings.Split(comboStr, "+")
 	for idx := range keys {
@@ -145,7 +197,7 @@ func (p *PiKVM) handleCombo(ctx context.Context, s module.Session, comboStr stri
 	}
 
 	// Execute the key combination
-	err = p.executeKeyCombo(ctx, mappedModifiers, mainKeyMapped)
+	err = p.executeKeyCombo(ctx, mappedModifiers, mainKeyMapped, delay)
 	if err != nil {
 		return err
 	}
@@ -187,7 +239,7 @@ func (p *PiKVM) validateAndMapComboKeys(modifiers []string, mainKey string) (str
 }
 
 // executeKeyCombo executes a key combination by pressing modifiers, main key, and releasing modifiers.
-func (p *PiKVM) executeKeyCombo(ctx context.Context, modifiers []string, mainKey string) error {
+func (p *PiKVM) executeKeyCombo(ctx context.Context, modifiers []string, mainKey string, delay time.Duration) error {
 	// Press down all modifier keys
 	for _, modifier := range modifiers {
 		err := p.sendKeyRequest(ctx, fmt.Sprintf("/api/hid/events/send_key?key=%s&state=1", url.QueryEscape(modifier)))
@@ -195,7 +247,7 @@ func (p *PiKVM) executeKeyCombo(ctx context.Context, modifiers []string, mainKey
 			return err
 		}
 
-		time.Sleep(keyDelay)
+		time.Sleep(delay)
 	}
 
 	// Press and release the main key
@@ -204,7 +256,7 @@ func (p *PiKVM) executeKeyCombo(ctx context.Context, modifiers []string, mainKey
 		return err
 	}
 
-	time.Sleep(keyDelay)
+	time.Sleep(delay)
 
 	// Release all modifier keys in reverse order
 	for idx := len(modifiers) - 1; idx >= 0; idx-- {
@@ -213,7 +265,7 @@ func (p *PiKVM) executeKeyCombo(ctx context.Context, modifiers []string, mainKey
 			return err
 		}
 
-		time.Sleep(keyDelay)
+		time.Sleep(delay)
 	}
 
 	return nil
@@ -221,7 +273,7 @@ func (p *PiKVM) executeKeyCombo(ctx context.Context, modifiers []string, mainKey
 
 // sendKeyRequest sends a key request to PiKVM.
 func (p *PiKVM) sendKeyRequest(ctx context.Context, urlPath string) error {
-	resp, err := p.doRequest(ctx, http.MethodPost, urlPath, nil, "")
+	resp, err := p.doRequest(ctx, http.MethodPost, urlPath, nil, "", requestOptions{})
 	if err != nil {
 		return err
 	}

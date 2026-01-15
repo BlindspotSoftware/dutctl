@@ -13,7 +13,7 @@ func TestInitWithDefaults(t *testing.T) {
 	p := &PiKVM{
 		Host:     "pikvm.local",
 		Password: "admin",
-		Command:  "power",
+		Mode:     "power",
 	}
 
 	err := p.Init()
@@ -42,7 +42,7 @@ func TestInitWithExplicitHTTP(t *testing.T) {
 		Host:     "http://192.168.1.100",
 		User:     "admin",
 		Password: "admin",
-		Command:  "keyboard",
+		Mode:     "keyboard",
 	}
 
 	err := p.Init()
@@ -61,7 +61,7 @@ func TestInitWithCustomTimeout(t *testing.T) {
 		User:     "admin",
 		Password: "admin",
 		Timeout:  "30s",
-		Command:  "media",
+		Mode:     "media",
 	}
 
 	err := p.Init()
@@ -78,7 +78,7 @@ func TestInitWithInvalidTimeout(t *testing.T) {
 		User:     "admin",
 		Password: "admin",
 		Timeout:  "invalid",
-		Command:  "screenshot",
+		Mode:     "screenshot",
 	}
 
 	// Should still succeed but fall back to default timeout
@@ -135,6 +135,90 @@ func TestHelp(t *testing.T) {
 		if !strings.Contains(help, section) {
 			t.Fatalf("Help should contain %q, but doesn't", section)
 		}
+	}
+}
+
+func TestHelpWithMode(t *testing.T) {
+	tests := []struct {
+		name           string
+		mode           string
+		mustContain    []string
+		mustNotContain []string
+	}{
+		{
+			name: "power",
+			mode: cmdTypePower,
+			mustContain: []string{
+				"Power Management",
+				"pikvm on",
+				"Configured PiKVM: pikvm.local",
+			},
+			mustNotContain: []string{
+				"Keyboard Control",
+				"Virtual Media",
+				"Screenshot:",
+			},
+		},
+		{
+			name: "keyboard",
+			mode: cmdTypeKeyboard,
+			mustContain: []string{
+				"Keyboard Control",
+				"--delay",
+				"pikvm type",
+				"Configured PiKVM: pikvm.local",
+			},
+			mustNotContain: []string{
+				"Power Management",
+				"Virtual Media",
+				"Screenshot:",
+			},
+		},
+		{
+			name: "media",
+			mode: cmdTypeMedia,
+			mustContain: []string{
+				"Virtual Media",
+				"pikvm mount",
+				"Configured PiKVM: pikvm.local",
+			},
+			mustNotContain: []string{
+				"Power Management",
+				"Keyboard Control",
+				"Screenshot:",
+			},
+		},
+		{
+			name: "screenshot",
+			mode: cmdTypeScreenshot,
+			mustContain: []string{
+				"Screenshot:",
+				"pikvm screenshot",
+				"Configured PiKVM: pikvm.local",
+			},
+			mustNotContain: []string{
+				"Power Management",
+				"Keyboard Control",
+				"Virtual Media",
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			p := &PiKVM{Host: "pikvm.local", Mode: tc.mode}
+			help := p.Help()
+			for _, s := range tc.mustContain {
+				if !strings.Contains(help, s) {
+					t.Fatalf("Help should contain %q, but doesn't", s)
+				}
+			}
+			for _, s := range tc.mustNotContain {
+				if strings.Contains(help, s) {
+					t.Fatalf("Help should not contain %q, but does", s)
+				}
+			}
+		})
 	}
 }
 

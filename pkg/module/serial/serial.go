@@ -46,11 +46,13 @@ var _ module.Module = &Serial{}
 
 const abstract = `Serial connection to the DUT
 `
+
 const usage = `
 ARGUMENTS:
 	[-t <duration>] [<expect>]
 
 `
+
 const description = `
 The serial connection is read-only and does not support stdin yet.
 If a regex is provided, the module will wait for the regex to match on the serial output, 
@@ -85,12 +87,6 @@ func (s *Serial) Init() error {
 	if s.Baud == 0 {
 		s.Baud = DefaultBaudRate
 	}
-
-	port, err := s.openPort()
-	if err != nil {
-		return err
-	}
-	defer port.Close()
 
 	return nil
 }

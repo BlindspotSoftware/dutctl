@@ -24,6 +24,16 @@ import (
 	"github.com/BlindspotSoftware/dutctl/pkg/module"
 )
 
+// Media command constants.
+const (
+	mount       = "mount"
+	mountURL    = "mount-url"
+	unmount     = "unmount"
+	mediaStatus = "media-status"
+
+	mediaNone = "None"
+)
+
 const (
 	safetyMargin         = 10 * 1024 * 1024 // 10 MB safety margin
 	scanningDelay        = 5 * time.Second  // Delay after deleting to allow PiKVM storage to update
@@ -255,7 +265,7 @@ func (p *PiKVM) unplugUSBIfConnected(ctx context.Context, s module.Session) erro
 
 	s.Println("Unplugging USB port...")
 
-	resp, err := p.doRequest(ctx, http.MethodPost, "/api/msd/set_connected?connected=0", nil, "")
+	resp, err := p.doRequest(ctx, http.MethodPost, "/api/msd/set_connected?connected=0", nil, "", requestOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to unplug USB device: %v", err)
 	}
@@ -332,13 +342,13 @@ func (p *PiKVM) uploadImageFile(ctx context.Context, file *os.File, hashSum stri
 	contentLength := int64(len(header)) + size + int64(len(footer))
 	body := io.MultiReader(bytes.NewReader(header), file, bytes.NewReader(footer))
 
-	uploadResp, err := p.doRequestWithContentLength(
+	uploadResp, err := p.doRequest(
 		ctx,
 		http.MethodPost,
 		fmt.Sprintf("/api/msd/write?image=%s", hashSum),
 		body,
 		writer.FormDataContentType(),
-		contentLength,
+		requestOptions{contentLength: contentLength, noTimeout: true},
 	)
 	if err != nil {
 		return fmt.Errorf("failed to upload image: %v", err)
@@ -353,7 +363,7 @@ func (p *PiKVM) uploadImageFile(ctx context.Context, file *os.File, hashSum stri
 func (p *PiKVM) configureAndPlugUSB(ctx context.Context, s module.Session, imageName string) error {
 	s.Println("Configuring image...")
 
-	configResp, err := p.doRequest(ctx, http.MethodPost, fmt.Sprintf("/api/msd/set_params?image=%s&cdrom=0&rw=1", imageName), nil, "")
+	configResp, err := p.doRequest(ctx, http.MethodPost, fmt.Sprintf("/api/msd/set_params?image=%s&cdrom=0&rw=1", imageName), nil, "", requestOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to configure USB device: %v", err)
 	}
@@ -362,7 +372,7 @@ func (p *PiKVM) configureAndPlugUSB(ctx context.Context, s module.Session, image
 
 	s.Println("Plugging USB port...")
 
-	plugResp, err := p.doRequest(ctx, http.MethodPost, "/api/msd/set_connected?connected=1", nil, "")
+	plugResp, err := p.doRequest(ctx, http.MethodPost, "/api/msd/set_connected?connected=1", nil, "", requestOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to plug USB device: %v", err)
 	}
@@ -433,7 +443,7 @@ func (p *PiKVM) downloadRemoteImage(ctx context.Context, s module.Session, image
 		remoteDownloadTimout,
 		url.QueryEscape(imageName))
 
-	resp, err := p.doRequestNoTimeout(ctx, http.MethodPost, endpoint, nil, "")
+	resp, err := p.doRequest(ctx, http.MethodPost, endpoint, nil, "", requestOptions{noTimeout: true})
 	if err != nil {
 		return fmt.Errorf("failed to mount image from URL: %v", err)
 	}
@@ -507,7 +517,7 @@ func parseStreamingJSON(bodyBytes []byte) (*remoteImageResponse, error) {
 }
 
 func (p *PiKVM) handleUnmount(ctx context.Context, s module.Session) error {
-	resp, err := p.doRequest(ctx, http.MethodPost, "/api/msd/set_connected?connected=0", nil, "")
+	resp, err := p.doRequest(ctx, http.MethodPost, "/api/msd/set_connected?connected=0", nil, "", requestOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to unmount media: %v", err)
 	}
@@ -540,7 +550,7 @@ func (p *PiKVM) handleMediaStatus(ctx context.Context, s module.Session) error {
 
 // getStatus retrieves the current MSD status from PiKVM.
 func (p *PiKVM) getStatus(ctx context.Context) (*Status, error) {
-	resp, err := p.doRequest(ctx, http.MethodGet, "/api/msd", nil, "")
+	resp, err := p.doRequest(ctx, http.MethodGet, "/api/msd", nil, "", requestOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to get MSD status: %w", err)
 	}
@@ -628,7 +638,7 @@ func getFreeSpace(status *Status) (uint64, error) {
 
 // deleteImage deletes an image from PiKVM storage by its name (hash).
 func (p *PiKVM) deleteImage(ctx context.Context, imageName string) error {
-	resp, err := p.doRequest(ctx, http.MethodPost, fmt.Sprintf("/api/msd/remove?image=%s", imageName), nil, "")
+	resp, err := p.doRequest(ctx, http.MethodPost, fmt.Sprintf("/api/msd/remove?image=%s", imageName), nil, "", requestOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to delete image: %w", err)
 	}

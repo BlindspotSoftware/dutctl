@@ -20,7 +20,7 @@ import (
 func (p *PiKVM) handleScreenshot(ctx context.Context, s module.Session) error {
 	s.Println("Capturing screenshot...")
 
-	resp, err := p.doRequest(ctx, http.MethodGet, "/api/streamer/snapshot", nil, "")
+	resp, err := p.doRequest(ctx, http.MethodGet, "/api/streamer/snapshot", nil, "", requestOptions{})
 	if err != nil {
 		// Check if error contains "Service Unavailable" which indicates the device is likely off
 		if strings.Contains(err.Error(), "Service Unavailable") || strings.Contains(err.Error(), "503") {

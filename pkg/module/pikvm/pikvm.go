@@ -36,7 +36,7 @@ type PiKVM struct {
 	User     string // User for authentication (default: "admin")
 	Password string // Password for authentication
 	Timeout  string // Timeout for HTTP requests (default: "10s")
-	Command  string // Required: Command type to execute (must be: "power", "keyboard", "media", or "screenshot")
+	Mode     string // Required: Mode to execute (must be: "power", "keyboard", "media", or "screenshot")
 
 	client  *http.Client
 	baseURL *url.URL
@@ -45,29 +45,13 @@ type PiKVM struct {
 // Ensure implementing the Module interface.
 var _ module.Module = &PiKVM{}
 
-// isValidCommand checks if the command is one of the valid command types.
-func isValidCommand(command string) bool {
-	switch command {
-	case cmdTypePower, cmdTypeKeyboard, cmdTypeMedia, cmdTypeScreenshot:
-		return true
-	default:
-		return false
-	}
-}
-
 const (
 	defaultUser     = "admin"
 	defaultTimeout  = 10 * time.Second
 	minArgsRequired = 2 // Minimum arguments required for commands with parameters
-
-	// Status values.
-	statusUnknown = "Unknown"
-	statusOn      = "On"
-	statusOff     = "Off"
-	mediaNone     = "None"
 )
 
-// Command type constants.
+// Mode constants.
 const (
 	cmdTypePower      = "power"
 	cmdTypeKeyboard   = "keyboard"
@@ -75,55 +59,56 @@ const (
 	cmdTypeScreenshot = "screenshot"
 )
 
-// Power command constants.
-const (
-	on         = "on"
-	off        = "off"
-	forceOff   = "force-off"
-	reset      = "reset"
-	forceReset = "force-reset"
-	status     = "status"
-)
-
-// Keyboard command constants.
-const (
-	typeCmd  = "type"
-	key      = "key"
-	keyCombo = "key-combo"
-)
-
-// Media command constants.
-const (
-	mount       = "mount"
-	mountURL    = "mount-url"
-	unmount     = "unmount"
-	mediaStatus = "media-status"
-)
-
 func (p *PiKVM) Help() string {
 	log.Println("pikvm module: Help called")
 
 	help := strings.Builder{}
-	help.WriteString("PiKVM Control Module\n\n")
-	help.WriteString("Power Management:\n")
-	help.WriteString("  pikvm on           - Power on (does nothing if already on)\n")
-	help.WriteString("  pikvm off          - Graceful shutdown (soft power-off)\n")
-	help.WriteString("  pikvm force-off    - Force power off (hard shutdown, 5+ second press)\n")
-	help.WriteString("  pikvm reset        - Reset via ATX reset button\n")
-	help.WriteString("  pikvm force-reset  - Force reset (hardware hot reset)\n")
-	help.WriteString("  pikvm status       - Query current power state\n\n")
-	help.WriteString("Keyboard Control:\n")
-	help.WriteString("  pikvm type <text>      - Type a text string\n")
-	help.WriteString("  pikvm key <key>        - Send a single key (e.g., Enter, Escape, F12)\n")
-	help.WriteString("  pikvm key-combo <keys> - Send key combination (e.g., Ctrl+Alt+Delete)\n\n")
-	help.WriteString("Virtual Media:\n")
-	help.WriteString("  pikvm mount <path>      - Mount an image file from local filesystem\n")
-	help.WriteString("  pikvm mount-url <url>   - Mount an image from a URL\n")
-	help.WriteString("  pikvm unmount           - Unmount current virtual media\n")
-	help.WriteString("  pikvm media-status      - Show mounted media information\n\n")
-	help.WriteString("Screenshot:\n")
-	help.WriteString("  pikvm screenshot        - Capture a screenshot (saved to current directory)\n\n")
-	help.WriteString("This module provides comprehensive control of a PiKVM device.\n")
+	help.WriteString("PiKVM Control Module\n")
+	help.WriteString("PiKVM is a Raspberry Pi based KVM-over-IP device (KVM = Keyboard, Video, Mouse).\n")
+	help.WriteString("This module provides comprehensive control of a PiKVM device.\n\n")
+	writePowerHelp := func() {
+		help.WriteString("Power Management:\n")
+		help.WriteString("  pikvm on           - Power on (does nothing if already on)\n")
+		help.WriteString("  pikvm off          - Graceful shutdown (soft power-off)\n")
+		help.WriteString("  pikvm force-off    - Force power off (hard shutdown, 5+ second press)\n")
+		help.WriteString("  pikvm reset        - Reset via ATX reset button\n")
+		help.WriteString("  pikvm force-reset  - Force reset (hardware hot reset)\n")
+		help.WriteString("  pikvm status       - Query current power state\n\n")
+	}
+	writeKeyboardHelp := func() {
+		help.WriteString("Keyboard Control:\n")
+		help.WriteString("  pikvm [--delay <duration>] <action> ... - Optional key delay (default: 500ms)\n")
+		help.WriteString("  pikvm type <text>      - Type a text string\n")
+		help.WriteString("  pikvm key <key>        - Send a single key (e.g., Enter, Escape, F12)\n")
+		help.WriteString("  pikvm key-combo <keys> - Send key combination (e.g., Ctrl+Alt+Delete)\n\n")
+	}
+	writeMediaHelp := func() {
+		help.WriteString("Virtual Media:\n")
+		help.WriteString("  pikvm mount <path>      - Mount an image file from local filesystem\n")
+		help.WriteString("  pikvm mount-url <url>   - Mount an image from a URL\n")
+		help.WriteString("  pikvm unmount           - Unmount current virtual media\n")
+		help.WriteString("  pikvm media-status      - Show mounted media information\n\n")
+	}
+	writeScreenshotHelp := func() {
+		help.WriteString("Screenshot:\n")
+		help.WriteString("  pikvm screenshot        - Capture a screenshot (saved to current directory)\n\n")
+	}
+
+	switch p.Mode {
+	case cmdTypePower:
+		writePowerHelp()
+	case cmdTypeKeyboard:
+		writeKeyboardHelp()
+	case cmdTypeMedia:
+		writeMediaHelp()
+	case cmdTypeScreenshot:
+		writeScreenshotHelp()
+	default:
+		writePowerHelp()
+		writeKeyboardHelp()
+		writeMediaHelp()
+		writeScreenshotHelp()
+	}
 	help.WriteString("Configured PiKVM: " + p.Host + "\n")
 
 	return help.String()
@@ -132,19 +117,8 @@ func (p *PiKVM) Help() string {
 func (p *PiKVM) Init() error {
 	log.Printf("pikvm module: Init starting for host %s", p.Host)
 
-	if p.Host == "" {
-		return fmt.Errorf("pikvm: host is not set")
-	}
-
-	// Validate that Command is set and is valid
-	if p.Command == "" {
-		return fmt.Errorf("pikvm: command option is required (must be: %s, %s, %s, or %s)",
-			cmdTypePower, cmdTypeKeyboard, cmdTypeMedia, cmdTypeScreenshot)
-	}
-
-	if !isValidCommand(p.Command) {
-		return fmt.Errorf("pikvm: invalid command %q (must be: %s, %s, %s, or %s)",
-			p.Command, cmdTypePower, cmdTypeKeyboard, cmdTypeMedia, cmdTypeScreenshot)
+	if err := p.validateMode(); err != nil {
+		return err
 	}
 
 	// Set default user if not provided
@@ -178,19 +152,6 @@ func (p *PiKVM) Init() error {
 		Transport: transport,
 	}
 
-	// Normalize host: add scheme if missing
-	host := strings.TrimSpace(p.Host)
-	if !strings.HasPrefix(host, "http://") && !strings.HasPrefix(host, "https://") {
-		host = "https://" + host
-	}
-
-	baseURL, err := url.Parse(strings.TrimRight(host, "/"))
-	if err != nil {
-		return fmt.Errorf("pikvm: invalid host URL: %v", err)
-	}
-
-	p.baseURL = baseURL
-
 	log.Printf("pikvm module: Init completed successfully for %s", p.baseURL.String())
 
 	return nil
@@ -207,8 +168,8 @@ func (p *PiKVM) Run(ctx context.Context, s module.Session, args ...string) error
 		return fmt.Errorf("pikvm: client not initialized")
 	}
 
-	// Route based on the configured command type
-	switch p.Command {
+	// Route based on the configured mode
+	switch p.Mode {
 	case cmdTypePower:
 		return p.handlePowerCommandRouter(ctx, s, args)
 	case cmdTypeKeyboard:
@@ -218,7 +179,29 @@ func (p *PiKVM) Run(ctx context.Context, s module.Session, args ...string) error
 	case cmdTypeScreenshot:
 		return p.handleScreenshot(ctx, s)
 	default:
-		return fmt.Errorf("pikvm: unknown command type %q", p.Command)
+		return fmt.Errorf("pikvm: invalid configuration: unknown mode %q", p.Mode)
+	}
+}
+
+func (p *PiKVM) validateMode() error {
+	baseURL, err := normalizeAndParseHost(p.Host)
+	if err != nil {
+		return err
+	}
+	// store normalized/parsed host for later request building
+	p.baseURL = baseURL
+
+	if p.Mode == "" {
+		return fmt.Errorf("pikvm: mode option is required (must be: %s, %s, %s, or %s)",
+			cmdTypePower, cmdTypeKeyboard, cmdTypeMedia, cmdTypeScreenshot)
+	}
+
+	switch p.Mode {
+	case cmdTypePower, cmdTypeKeyboard, cmdTypeMedia, cmdTypeScreenshot:
+		return nil
+	default:
+		return fmt.Errorf("pikvm: invalid mode %q (must be: %s, %s, %s, or %s)",
+			p.Mode, cmdTypePower, cmdTypeKeyboard, cmdTypeMedia, cmdTypeScreenshot)
 	}
 }
 
@@ -227,37 +210,8 @@ type requestOptions struct {
 	noTimeout     bool
 }
 
-// doRequest creates and executes an HTTP request with authentication.
-func (p *PiKVM) doRequest(ctx context.Context, method, urlPath string, body io.Reader, contentType string) (*http.Response, error) {
-	return p.doRequestWithOptions(ctx, method, urlPath, body, contentType, requestOptions{})
-}
-
-// doRequestWithContentLength creates an HTTP request with explicit Content-Length (for large uploads).
-func (p *PiKVM) doRequestWithContentLength(
-	ctx context.Context,
-	method, urlPath string,
-	body io.Reader,
-	contentType string,
-	contentLength int64,
-) (*http.Response, error) {
-	return p.doRequestWithOptions(ctx, method, urlPath, body, contentType, requestOptions{
-		contentLength: contentLength,
-		noTimeout:     true,
-	})
-}
-
-// doRequestNoTimeout creates an HTTP request without timeout (for long-running operations).
-func (p *PiKVM) doRequestNoTimeout(
-	ctx context.Context,
-	method, urlPath string,
-	body io.Reader,
-	contentType string,
-) (*http.Response, error) {
-	return p.doRequestWithOptions(ctx, method, urlPath, body, contentType, requestOptions{noTimeout: true})
-}
-
-// doRequestWithOptions is the core request method that handles all HTTP requests.
-func (p *PiKVM) doRequestWithOptions(
+// doRequest is the core request method that handles all HTTP requests.
+func (p *PiKVM) doRequest(
 	ctx context.Context,
 	method, urlPath string,
 	body io.Reader,
@@ -299,15 +253,21 @@ func (p *PiKVM) doRequestWithOptions(
 
 // buildRequestURL constructs the full request URL from base URL and path.
 func (p *PiKVM) buildRequestURL(urlPath string) (string, error) {
-	targetURL := *p.baseURL
-
-	parsedPath, err := url.Parse(urlPath)
-	if err != nil {
-		return "", fmt.Errorf("invalid URL path: %v", err)
+	if p.baseURL == nil {
+		return "", fmt.Errorf("pikvm: base URL is not initialized")
 	}
 
-	targetURL.Path = path.Join(targetURL.Path, parsedPath.Path)
-	targetURL.RawQuery = parsedPath.RawQuery
+	targetURL := *p.baseURL
+
+	pathPart := urlPath
+	rawQuery := ""
+	if before, after, ok := strings.Cut(urlPath, "?"); ok {
+		pathPart = before
+		rawQuery = after
+	}
+
+	targetURL.Path = path.Join(targetURL.Path, pathPart)
+	targetURL.RawQuery = rawQuery
 
 	return targetURL.String(), nil
 }
@@ -352,4 +312,22 @@ func checkResponseStatus(resp *http.Response) error {
 	resp.Body.Close()
 
 	return fmt.Errorf("pikvm: API returned %s: %s", resp.Status, string(bodyBytes))
+}
+
+func normalizeAndParseHost(host string) (*url.URL, error) {
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return nil, fmt.Errorf("pikvm: host is not set")
+	}
+
+	if !strings.HasPrefix(host, "http://") && !strings.HasPrefix(host, "https://") {
+		host = "https://" + host
+	}
+
+	baseURL, err := url.Parse(strings.TrimRight(host, "/"))
+	if err != nil {
+		return nil, fmt.Errorf("pikvm: invalid host URL: %v", err)
+	}
+
+	return baseURL, nil
 }
