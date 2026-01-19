@@ -10,7 +10,7 @@ require (
 	github.com/stianeikeland/go-rpio/v4 v4.6.0
 	github.com/tarm/serial v0.0.0-20180830185346-98f6abe2eb07
 	golang.org/x/crypto v0.47.0
-	golang.org/x/net v0.48.0
+	golang.org/x/net v0.49.0
 	google.golang.org/protobuf v1.36.11
 	gopkg.in/yaml.v3 v3.0.1
 )
