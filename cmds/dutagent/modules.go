@@ -19,6 +19,7 @@ import (
 	_ "github.com/BlindspotSoftware/dutctl/pkg/module/gpio"
 	_ "github.com/BlindspotSoftware/dutctl/pkg/module/ipmi"
 	_ "github.com/BlindspotSoftware/dutctl/pkg/module/pdu"
+	_ "github.com/BlindspotSoftware/dutctl/pkg/module/pikvm"
 	_ "github.com/BlindspotSoftware/dutctl/pkg/module/serial"
 	_ "github.com/BlindspotSoftware/dutctl/pkg/module/shell"
 	_ "github.com/BlindspotSoftware/dutctl/pkg/module/ssh"
