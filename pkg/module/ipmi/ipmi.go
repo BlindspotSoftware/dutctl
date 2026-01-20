@@ -104,7 +104,7 @@ func (i *IPMI) Init() error {
 	}
 
 	ipmiClient.WithTimeout(timeout)
-	ipmiClient.WithRetry(trials, time.Second)
+	ipmiClient.WithRetry(trials)
 
 	err = ipmiClient.Connect(context.Background())
 	if err != nil {
