@@ -46,7 +46,7 @@ could look like.
 | with   | map[string]any |         | A module can be configured via key-value pairs. The type of the value is generic and depends on the implementation of the module.                                                                  | yes                               |
 
 > [!IMPORTANT]  
-> Refer to option keys of a module in all-lowercase representation of the modules exported fields.
+> Refer to `with` keys in all-lowercase representation of the module's exported fields.
 > See the respective module's documentation for details.
 
 ### Example config file

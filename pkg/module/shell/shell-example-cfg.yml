@@ -12,7 +12,7 @@ devices:
           then reading it back and deleting the file. E.g try: dutctl self greet "echo 'Hello World' >> /tmp/shell-test.txt"
         uses:
           - module: shell
-            options:
+            with:
               path: bash
               quiet: true
             args:
@@ -20,13 +20,13 @@ devices:
           - module: shell
             main: true
           - module: shell
-            options:
+            with:
               path: sh
               quiet: true
             args:
               - "ls /tmp/shell-test.txt"
           - module: shell
-            options:
+            with:
               path: /bin/bash
             args:
               - "cat /tmp/shell-test.txt && rm -f /tmp/shell-test.txt"

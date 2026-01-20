@@ -51,8 +51,8 @@ _ "github.com/BlindspotSoftware/dutctl/pkg/module/dummy"
 ```
 
 ## Configuration
-A module can be dynamically configured when starting a _dutagent_ using the option map in the
-[_dutagent_ configuration](./dutagent-config.md#module). A module must be of type `struct` and have the options as
+A module can be dynamically configured when starting a _dutagent_ using the `with` map in the
+[_dutagent_ configuration](./dutagent-config.md#module). A module must be of type `struct` and have the configuration as
 fields. The parser will set the struct fields to match the map keys.
 
 For example, a module like the one below, registered with `ID` = `"my-module"`.
@@ -71,14 +71,14 @@ devices:
     cmds:
       some-cmd:
         desc: My cool module
-        modules:
+        uses:
           - module: my-module
-            options:
+            with:
               foo: 42
 ```
 > [!IMPORTANT]  
-> It is imperative that the module's documentation and Help() function provide a good explanation of its options.
-> The option map in the configuration file is generic (string → any type), so it is important that the user knows what
+> It is imperative that the module's documentation and Help() function provide a good explanation of its configuration.
+> The `with` map in the configuration file is generic (string → any type), so it is important that the user knows what
 > values are expected.
 
 The [project's dummy modules](../pkg/module/dummy/dummy_status.go) show all the details of a complete implementation.

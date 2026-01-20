@@ -18,7 +18,7 @@ The agent-status module can be used in a command like so.
 cmds:
       system-info:
         desc: "This simple command reports information about the dutagent system via the agent-status module."
-        modules:
+        uses:
           - module: agent-status
             main: true
 ```

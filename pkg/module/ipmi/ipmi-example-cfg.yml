@@ -7,7 +7,7 @@ devices:
         desc: "Power on the server using IPMI"
         uses:
           - module: ipmi-power
-            options:
+            with:
               host: 192.168.1.100
               port: 623
               user: user
