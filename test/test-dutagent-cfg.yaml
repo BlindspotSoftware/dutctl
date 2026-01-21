@@ -1,0 +1,32 @@
+---
+version: 0
+devices:
+  fwci-dutctl-tester:
+    desc: "A fwci dutctl tester"
+    cmds:
+      power-on:
+        desc: "Toggle power ON"
+        modules:
+          - module: gpio-switch
+            main: true
+            options:
+              pin: 26
+              # GPIO pin 26, physical pin 37
+              # https://pinout.xyz/pinout/pin26_gpio7/
+      power-off:
+        desc: "Toggle power OFF"
+        modules:
+          - module: gpio-switch
+            main: true
+            options:
+              pin: 26
+      serial:
+        desc: |
+          Basic demo of the Serial module: After the DUT is powered on, use Serial
+          as the main module to wait for magic strings in the DUT's boot log.
+        modules:
+          - module: serial
+            main: true
+            options:
+              port: /home/oscar/ttyS2
+              baudrate: 115200
