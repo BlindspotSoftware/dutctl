@@ -92,6 +92,43 @@ func findDUTCmd(_ context.Context, args runCmdArgs) (runCmdArgs, fsm.State[runCm
 	return args, executeModules, nil
 }
 
+// prepareModuleArgs validates runtime arguments and prepares args for all modules in the command.
+// It returns a slice where each element contains the args for the corresponding module.
+// Returns an error if validation fails.
+func prepareModuleArgs(cmd dut.Command, runtimeArgs []string) ([][]string, error) {
+	// Validate that runtime args are only provided when an interactive module exists OR command declares args
+	hasInteractive := cmd.CountInteractive() > 0
+	hasCommandArgs := len(cmd.Args) > 0
+
+	if len(runtimeArgs) > 0 && !hasInteractive && !hasCommandArgs {
+		return nil, fmt.Errorf("arguments provided but command has no interactive module and no args declaration")
+	}
+
+	// If command declares args, validate count matches
+	if hasCommandArgs && len(runtimeArgs) != len(cmd.Args) {
+		return nil, fmt.Errorf("command expects %d argument(s) but got %d",
+			len(cmd.Args), len(runtimeArgs))
+	}
+
+	// Prepare args for each module
+	moduleArgs := make([][]string, len(cmd.Modules))
+	for idx, module := range cmd.Modules {
+		if module.Config.Interactive {
+			moduleArgs[idx] = runtimeArgs
+		} else {
+			// Non-interactive: substitute templates in configured args
+			substitutedArgs, err := cmd.SubstituteArgs(module.Config.Args, runtimeArgs)
+			if err != nil {
+				return nil, fmt.Errorf("template substitution failed for module %q: %w", module.Config.Name, err)
+			}
+
+			moduleArgs[idx] = substitutedArgs
+		}
+	}
+
+	return moduleArgs, nil
+}
+
 // executeModules is a state of the Run RPC.
 //
 // It starts the execution the current command's modules. The execution is done
@@ -105,6 +142,16 @@ func executeModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State
 	// (tests may still pass a custom channel).
 	if args.moduleErrCh == nil {
 		args.moduleErrCh = make(chan error, 1)
+	}
+
+	runtimeArgs := args.cmdMsg.GetArgs()
+
+	// Validate and prepare args for all modules
+	moduleArgs, err := prepareModuleArgs(args.cmd, runtimeArgs)
+	if err != nil {
+		e := connect.NewError(connect.CodeInvalidArgument, err)
+
+		return args, nil, e
 	}
 
 	rpcCtx := ctx
@@ -129,14 +176,7 @@ func executeModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State
 
 			log.Printf("Running module %d of %d: %q", idx+1, cnt, module.Config.Name)
 
-			var moduleArgs []string
-			if module.Config.Main {
-				moduleArgs = args.cmdMsg.GetArgs()
-			} else {
-				moduleArgs = module.Config.Args
-			}
-
-			err := module.Run(rpcCtx, moduleSession, moduleArgs...)
+			err := module.Run(rpcCtx, moduleSession, moduleArgs[idx]...)
 			if err != nil {
 				args.moduleErrCh <- err
 
