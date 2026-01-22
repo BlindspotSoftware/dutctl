@@ -86,9 +86,9 @@ func (d *FT) Run(_ context.Context, s module.Session, args ...string) error {
 	}
 
 	outFile := args[1]
-	log.Printf("dummy.FT module: Sending back processed file %q", outFile)
+	log.Printf("dummy.FT module: Sending back processed file %q (%d bytes)", outFile, len(result))
 
-	err = s.SendFile(outFile, bytes.NewBuffer(result))
+	err = s.SendFile(outFile, int64(len(result)), bytes.NewBuffer(result))
 	if err != nil {
 		return fmt.Errorf("failed to send file: %v", err)
 	}

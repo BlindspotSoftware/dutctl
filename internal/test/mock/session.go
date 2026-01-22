@@ -75,7 +75,7 @@ func (m *Session) RequestFile(name string) (io.Reader, error) {
 	return m.RequestedFileResponse, nil
 }
 
-func (m *Session) SendFile(name string, r io.Reader) error {
+func (m *Session) SendFile(name string, _ int64, r io.Reader) error {
 	m.SendFileCalled = true
 	m.SentFileName = name
 

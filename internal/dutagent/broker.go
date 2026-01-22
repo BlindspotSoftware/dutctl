@@ -30,12 +30,14 @@ type Broker struct {
 func (b *Broker) init() {
 	log.Print("Broker: Initializing")
 
-	b.session.printCh = make(chan string)
-	b.session.stdinCh = make(chan []byte)
-	b.session.stdoutCh = make(chan []byte)
-	b.session.stderrCh = make(chan []byte)
-	b.session.fileReqCh = make(chan string)
-	b.session.fileCh = make(chan chan []byte)
+	b.session.printCh = make(chan string, channelBufferSize)
+	b.session.stdinCh = make(chan []byte, channelBufferSize)
+	b.session.stdoutCh = make(chan []byte, channelBufferSize)
+	b.session.stderrCh = make(chan []byte, channelBufferSize)
+	b.session.shutdownCh = make(chan struct{})
+	b.session.fileTransferNotifyCh = make(chan struct{}, 1)
+	b.session.activeUploads = make(map[string]*uploadState)
+	b.session.activeDownloads = make(map[string]*downloadState)
 
 	// Buffer equals number of workers so error sends never block.
 	b.errCh = make(chan error, numWorkers)
@@ -101,4 +103,14 @@ func (b *Broker) fromClient(ctx context.Context, cancel context.CancelFunc) {
 		// Cancel companion regardless of outcome; toClientWorker will exit promptly.
 		cancel()
 	}()
+}
+
+// Shutdown signals workers to stop accepting new sends and begin graceful shutdown.
+func (b *Broker) Shutdown() {
+	b.session.Shutdown()
+}
+
+// WaitForTransfersToComplete blocks until all active file transfers complete.
+func (b *Broker) WaitForTransfersToComplete() {
+	b.session.WaitForTransfers()
 }
