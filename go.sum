@@ -1,7 +1,7 @@
 connectrpc.com/connect v1.19.1 h1:R5M57z05+90EfEvCY1b7hBxDVOUl45PrtXtAV2fOC14=
 connectrpc.com/connect v1.19.1/go.mod h1:tN20fjdGlewnSFeZxLKb0xwIZ6ozc3OQs2hTXy4du9w=
-github.com/bougou/go-ipmi v0.7.8 h1:JUlZ+aIjThhIzMOehPdiUt3n04gaH4rCbz7fMr5tprI=
-github.com/bougou/go-ipmi v0.7.8/go.mod h1:eGuyWU7G05IXH35Ys5tdxu8juxXlgXC30jj4Gw8uPLA=
+github.com/bougou/go-ipmi v0.8.1 h1:FEaKKkY9X8FpKzysAbSDh9ixpLfI+2m3wQdOZnNI+cg=
+github.com/bougou/go-ipmi v0.8.1/go.mod h1:qO/61MiadYdcUFMuzaeHqtdJQ9QpyOwOSdzfjs0iGs8=
 github.com/creack/pty v1.1.9/go.mod h1:oKZEueFk5CKHvIhNR5MUki03XCEU+Q6VDXinZuGJ33E=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
