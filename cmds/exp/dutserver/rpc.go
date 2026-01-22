@@ -386,8 +386,12 @@ func requestKind(req *pb.RunRequest) string {
 		return "command"
 	case req.GetConsole() != nil:
 		return "console"
-	case req.GetFile() != nil:
-		return "file"
+	case req.GetFileTransferRequest() != nil:
+		return "file-transfer-request"
+	case req.GetFileChunk() != nil:
+		return "file-chunk"
+	case req.GetFileTransferResponse() != nil:
+		return "file-transfer-response"
 	default:
 		return "unknown"
 	}
@@ -401,10 +405,12 @@ func responseKind(res *pb.RunResponse) string {
 		return "print"
 	case res.GetConsole() != nil:
 		return "console"
-	case res.GetFileRequest() != nil:
-		return "file-request"
-	case res.GetFile() != nil:
-		return "file"
+	case res.GetFileTransferRequest() != nil:
+		return "file-transfer-request"
+	case res.GetFileChunk() != nil:
+		return "file-chunk"
+	case res.GetFileTransferResponse() != nil:
+		return "file-transfer-response"
 	default:
 		return "unknown"
 	}

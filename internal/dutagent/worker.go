@@ -10,97 +10,303 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/BlindspotSoftware/dutctl/internal/chanio"
 	"github.com/BlindspotSoftware/dutctl/internal/log"
 
 	pb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1"
 )
 
+// sendToClient serializes all sends on the bidirectional stream and recovers
+// from a panic that can occur when the stream is already closed during graceful
+// shutdown. The connect BidiStream is not safe for concurrent Send calls, and
+// both workers send responses, so every send goes through this single lock.
+func (s *session) sendToClient(stream Stream, res *pb.RunResponse) (err error) {
+	s.sendMu.Lock()
+	defer s.sendMu.Unlock()
+
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger().Warn("recovered from panic in stream.Send", "err", r)
+
+			err = nil
+		}
+	}()
+
+	return stream.Send(res)
+}
+
+// sendDownloadError sends an error response for a download transfer and cleans up.
+func sendDownloadError(stream Stream, s *session, transferID string, downloadMetadataSent map[string]bool, err error) {
+	s.logger().Warn("error getting chunk for download", "transfer_id", transferID, "err", err)
+
+	res := &pb.RunResponse{
+		Msg: &pb.RunResponse_FileTransferResponse{
+			FileTransferResponse: &pb.FileTransferResponse{
+				TransferId:        transferID,
+				Status:            pb.FileTransferResponse_ERROR,
+				ErrorMessage:      fmt.Sprintf("error reading file: %v", err),
+				NextChunkExpected: 0,
+			},
+		},
+	}
+
+	sendErr := s.sendToClient(stream, res)
+	if sendErr != nil {
+		s.logger().Warn("error sending download error response", "transfer_id", transferID, "err", sendErr)
+	}
+
+	s.removeDownload(transferID)
+	delete(downloadMetadataSent, transferID)
+}
+
+// sendDownloadMetadata sends the file metadata to the client.
+// Returns true if metadata was sent, false otherwise.
+func sendDownloadMetadata(stream Stream, s *session, transferID string, downloadMetadataSent map[string]bool) bool {
+	if downloadMetadataSent[transferID] {
+		return false
+	}
+
+	download := s.getDownload(transferID)
+	if download == nil {
+		return false
+	}
+
+	res := &pb.RunResponse{
+		Msg: &pb.RunResponse_FileTransferRequest{
+			FileTransferRequest: &pb.FileTransferRequest{
+				TransferId: transferID,
+				Metadata:   download.metadata,
+				Direction:  pb.FileTransferRequest_DOWNLOAD,
+			},
+		},
+	}
+
+	sendErr := s.sendToClient(stream, res)
+	if sendErr != nil {
+		s.logger().Warn("error sending download metadata", "transfer_id", transferID, "err", sendErr)
+
+		return false
+	}
+
+	downloadMetadataSent[transferID] = true
+
+	return true
+}
+
+// handleDownloadFileTransfer processes a single download transfer for sending to the client.
+// Returns true if work was done (a message was sent), false if nothing to do.
+func handleDownloadFileTransfer(stream Stream, s *session, transferID string, downloadMetadataSent map[string]bool) bool {
+	// Skip if waiting for client acknowledgment
+	if s.isDownloadAwaitingAck(transferID) {
+		return false
+	}
+
+	// Send metadata first
+	if !downloadMetadataSent[transferID] {
+		return sendDownloadMetadata(stream, s, transferID, downloadMetadataSent)
+	}
+
+	// Get next chunk
+	chunk, isFinal, err := s.getNextChunk(transferID)
+	if err != nil {
+		sendDownloadError(stream, s, transferID, downloadMetadataSent, err)
+
+		return true
+	}
+
+	if chunk == nil {
+		return false
+	}
+
+	res := &pb.RunResponse{
+		Msg: &pb.RunResponse_FileChunk{FileChunk: chunk},
+	}
+
+	sendErr := s.sendToClient(stream, res)
+	if sendErr != nil {
+		s.logger().Warn("error sending download chunk", "transfer_id", transferID, "err", sendErr)
+
+		return false
+	}
+
+	if isFinal {
+		s.markDownloadAwaitingAck(transferID)
+	}
+
+	return true
+}
+
+// processFileTransfers handles pending upload requests and download chunks.
+// Returns true if any work was done.
+func processFileTransfers(stream Stream, s *session, downloadMetadataSent map[string]bool) bool {
+	sent := false
+
+	// Send FileTransferRequest for new uploads that haven't been announced yet.
+	if !s.IsShuttingDown() {
+		for _, transferID := range s.getActiveUploads() {
+			upload := s.getUpload(transferID)
+			if upload == nil {
+				continue
+			}
+
+			// metadata is written by fromClientWorker under upload.mu, so read
+			// it (and requestSent) under the same lock.
+			upload.mu.Lock()
+			metadata := upload.metadata
+			alreadySent := upload.requestSent
+			upload.mu.Unlock()
+
+			if metadata == nil || alreadySent {
+				continue
+			}
+
+			res := &pb.RunResponse{
+				Msg: &pb.RunResponse_FileTransferRequest{
+					FileTransferRequest: &pb.FileTransferRequest{
+						TransferId: transferID,
+						Metadata:   metadata,
+						Direction:  pb.FileTransferRequest_UPLOAD,
+					},
+				},
+			}
+
+			sendErr := s.sendToClient(stream, res)
+			if sendErr != nil {
+				s.logger().Warn("error sending upload request", "transfer_id", transferID, "err", sendErr)
+
+				return sent
+			}
+
+			upload.mu.Lock()
+			upload.requestSent = true
+			upload.mu.Unlock()
+
+			sent = true
+
+			break // One at a time
+		}
+	}
+
+	// Send download metadata or chunks. Iterate active downloads and process
+	// the first one that has work available.
+	for _, transferID := range s.getActiveDownloads() {
+		if handleDownloadFileTransfer(stream, s, transferID, downloadMetadataSent) {
+			sent = true
+
+			break // One at a time for fairness
+		}
+	}
+
+	return sent
+}
+
+// handleConsoleMessage handles stdout/stderr console messages.
+func handleConsoleMessage(stream Stream, s *session, bytes []byte, isStderr bool) error {
+	// During shutdown, discard messages but don't send
+	if s.IsShuttingDown() {
+		return nil
+	}
+
+	var res *pb.RunResponse
+	if isStderr {
+		res = &pb.RunResponse{
+			Msg: &pb.RunResponse_Console{
+				Console: &pb.Console{
+					Data: &pb.Console_Stderr{Stderr: bytes},
+				},
+			},
+		}
+	} else {
+		res = &pb.RunResponse{
+			Msg: &pb.RunResponse_Console{
+				Console: &pb.Console{
+					Data: &pb.Console_Stdout{Stdout: bytes},
+				},
+			},
+		}
+	}
+
+	err := s.sendToClient(stream, res)
+	if err != nil {
+		if isStderr {
+			s.logger().Warn("error sending stderr", "err", err)
+		} else {
+			s.logger().Warn("error sending stdout", "err", err)
+		}
+
+		return err
+	}
+
+	return nil
+}
+
 // toClientWorker sends messages from the module session to the client.
-// This function is an infinite loop. It terminates when the session's done channel is closed.
+// This function is an infinite loop. It terminates when the context is cancelled.
 //
-//nolint:cyclop, funlen
+// It handles:
+// - Print/Console messages from modules.
+// - FileTransferRequest messages with metadata to initiate downloads.
+// - FileChunk messages for downloads (agent -> client).
+//
+//nolint:cyclop // main select loop inherently has multiple cases
 func toClientWorker(ctx context.Context, stream Stream, s *session) error {
 	l := log.FromContext(ctx)
+
+	// Track which downloads have had their metadata sent
+	downloadMetadataSent := make(map[string]bool)
 
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
+
 		case str := <-s.printCh:
+			// During shutdown, discard messages but don't send
+			if s.IsShuttingDown() {
+				continue
+			}
+
 			res := &pb.RunResponse{
 				Msg: &pb.RunResponse_Print{Print: &pb.Print{Text: []byte(str)}},
 			}
 
-			err := stream.Send(res)
+			err := s.sendToClient(stream, res)
 			if err != nil {
+				l.Warn("error sending print", "err", err)
+
 				return err
 			}
+
 		case bytes := <-s.stdoutCh:
-			res := &pb.RunResponse{
-				Msg: &pb.RunResponse_Console{Console: &pb.Console{Data: &pb.Console_Stdout{Stdout: bytes}}},
-			}
-
-			err := stream.Send(res)
+			err := handleConsoleMessage(stream, s, bytes, false)
 			if err != nil {
 				return err
 			}
+
 		case bytes := <-s.stderrCh:
-			res := &pb.RunResponse{
-				Msg: &pb.RunResponse_Console{Console: &pb.Console{Data: &pb.Console_Stderr{Stderr: bytes}}},
-			}
-
-			err := stream.Send(res)
-			if err != nil {
-				return err
-			}
-		case name := <-s.fileReqCh:
-			res := &pb.RunResponse{
-				Msg: &pb.RunResponse_FileRequest{FileRequest: &pb.FileRequest{Path: name}},
-			}
-
-			err := stream.Send(res)
+			err := handleConsoleMessage(stream, s, bytes, true)
 			if err != nil {
 				return err
 			}
 
-			s.currentFile = name
-		case file := <-s.fileCh:
-			r, err := chanio.NewChanReader(file, l)
-			if err != nil {
-				return err
+		case <-s.fileTransferNotifyCh:
+			if processFileTransfers(stream, s, downloadMetadataSent) {
+				// Re-signal: more work may be pending.
+				s.notifyFileTransfer()
 			}
-
-			content, err := io.ReadAll(r)
-			if err != nil {
-				return err
-			}
-
-			l.Debug("file received from module", "name", s.currentFile, "bytes", len(content))
-
-			res := &pb.RunResponse{
-				Msg: &pb.RunResponse_File{
-					File: &pb.File{
-						Path:    s.currentFile,
-						Content: content,
-					},
-				},
-			}
-
-			err = stream.Send(res)
-			if err != nil {
-				return err
-			}
-
-			s.currentFile = ""
 		}
 	}
 }
 
-// fromClientWorker reads messages from the client and passes them to the module session.
-// This function is an infinite loop. It terminates when the session's done channel is closed.
+// fromClientWorker reads messages from the client and routes them appropriately.
+// This function is an infinite loop. It terminates when an error (including io.EOF) occurs.
 //
-//nolint:cyclop,funlen,gocognit
+// It handles:
+// - Console messages for interactive input
+// - FileChunk messages for uploads (client -> agent)
+// - FileTransferRequest messages to initiate downloads
+// - FileTransferResponse messages to acknowledge transfers
+//
+//nolint:cyclop,funlen,gocognit,gocyclo,maintidx
 func fromClientWorker(ctx context.Context, stream Stream, s *session) error {
 	l := log.FromContext(ctx)
 
@@ -111,6 +317,7 @@ func fromClientWorker(ctx context.Context, stream Stream, s *session) error {
 
 	// Single goroutine performing blocking Receive calls and forwarding results.
 	resCh := make(chan recvResult)
+
 	// Receive loop goroutine rationale:
 	//
 	// We offload blocking stream.Receive calls to this goroutine so the main select
@@ -147,6 +354,7 @@ func fromClientWorker(ctx context.Context, stream Stream, s *session) error {
 			default:
 				return nil
 			}
+
 		case r := <-resCh:
 			if r.err != nil {
 				if errors.Is(r.err, io.EOF) {
@@ -186,44 +394,160 @@ func fromClientWorker(ctx context.Context, stream Stream, s *session) error {
 				default:
 					l.Warn("unexpected console message", "type", fmt.Sprintf("%T", consoleMsg))
 				}
-			case *pb.RunRequest_File:
-				fileMsg := msg.File
-				if fileMsg == nil {
-					l.Warn("bad file transfer: empty file message")
 
-					return fmt.Errorf("bad file transfer: received empty file-message")
+			case *pb.RunRequest_FileChunk:
+				chunk := msg.FileChunk
+				if chunk == nil {
+					continue
 				}
 
-				if s.currentFile == "" {
-					l.Warn("bad file transfer: file without a request")
+				transferID := chunk.GetTransferId()
 
-					return fmt.Errorf("bad file transfer: received file-message without a former request")
+				// Register or update the upload with this chunk.
+				registerErr := s.registerUploadChunk(transferID, chunk)
+				if registerErr != nil {
+					l.Warn("error registering upload chunk", "transfer_id", transferID, "err", registerErr)
+
+					// Send error response
+					res := &pb.RunResponse{
+						Msg: &pb.RunResponse_FileTransferResponse{
+							FileTransferResponse: &pb.FileTransferResponse{
+								TransferId:   transferID,
+								Status:       pb.FileTransferResponse_ERROR,
+								ErrorMessage: fmt.Sprintf("error processing chunk: %v", registerErr),
+							},
+						},
+					}
+
+					sendErr := s.sendToClient(stream, res)
+					if sendErr != nil {
+						return sendErr
+					}
+
+					// Cleanup upload state - close pipe and remove from tracking
+					s.removeUpload(transferID)
+
+					continue
 				}
 
-				path := fileMsg.GetPath()
-				content := fileMsg.GetContent()
-
-				if content == nil {
-					l.Warn("bad file transfer: file message with empty content")
-
-					return fmt.Errorf("bad file transfer: received file-message without content")
+				// Send acknowledgment.
+				res := &pb.RunResponse{
+					Msg: &pb.RunResponse_FileTransferResponse{
+						FileTransferResponse: &pb.FileTransferResponse{
+							TransferId:        transferID,
+							Status:            pb.FileTransferResponse_CHUNK_RECEIVED,
+							NextChunkExpected: chunk.GetChunkNumber() + 1,
+						},
+					},
 				}
 
-				if path != s.currentFile {
-					l.Warn("bad file transfer: unexpected file", "received", path, "requested", s.currentFile)
+				sendErr := s.sendToClient(stream, res)
+				if sendErr != nil {
+					l.Warn("error sending chunk acknowledgment", "transfer_id", transferID, "err", sendErr)
 
-					return fmt.Errorf("bad file transfer: received file-message %q but requested %q", path, s.currentFile)
+					return sendErr
 				}
 
-				l.Debug("received file from client", "name", path, "bytes", len(content))
+				// If this was the final chunk, send completion response
+				if chunk.GetIsFinal() {
+					res := &pb.RunResponse{
+						Msg: &pb.RunResponse_FileTransferResponse{
+							FileTransferResponse: &pb.FileTransferResponse{
+								TransferId: transferID,
+								Status:     pb.FileTransferResponse_TRANSFER_COMPLETE,
+							},
+						},
+					}
 
-				file := make(chan []byte, 1)
-				s.fileCh <- file
-				file <- content
+					sendErr := s.sendToClient(stream, res)
+					if sendErr != nil {
+						l.Warn("error sending transfer complete", "transfer_id", transferID, "err", sendErr)
 
-				close(file)
+						return sendErr
+					}
 
-				s.currentFile = ""
+					s.removeUpload(transferID)
+				}
+			case *pb.RunRequest_FileTransferRequest:
+				ftReq := msg.FileTransferRequest
+				if ftReq == nil {
+					continue
+				}
+
+				transferID := ftReq.GetTransferId()
+				metadata := ftReq.GetMetadata()
+				// Check if this is a known transfer (module called RequestFile)
+				upload := s.getUpload(transferID)
+				if upload == nil {
+					// Send rejection
+					res := &pb.RunResponse{
+						Msg: &pb.RunResponse_FileTransferResponse{
+							FileTransferResponse: &pb.FileTransferResponse{
+								TransferId:   transferID,
+								Status:       pb.FileTransferResponse_TRANSFER_REJECTED,
+								ErrorMessage: "no matching request from module",
+							},
+						},
+					}
+
+					sendErr := s.sendToClient(stream, res)
+					if sendErr != nil {
+						return sendErr
+					}
+
+					continue
+				}
+
+				// Update metadata with client's info (protected by mutex)
+				upload.mu.Lock()
+				upload.metadata = metadata
+				upload.mu.Unlock()
+
+				// Send acceptance
+				res := &pb.RunResponse{
+					Msg: &pb.RunResponse_FileTransferResponse{
+						FileTransferResponse: &pb.FileTransferResponse{
+							TransferId: transferID,
+							Status:     pb.FileTransferResponse_ACCEPTED,
+						},
+					},
+				}
+
+				sendErr := s.sendToClient(stream, res)
+				if sendErr != nil {
+					l.Warn("error sending acceptance", "transfer_id", transferID, "err", sendErr)
+
+					return sendErr
+				}
+
+			case *pb.RunRequest_FileTransferResponse:
+				ftRes := msg.FileTransferResponse
+				if ftRes == nil {
+					continue
+				}
+
+				transferID := ftRes.GetTransferId()
+				status := ftRes.GetStatus()
+
+				switch status {
+				case pb.FileTransferResponse_ERROR:
+					s.removeDownload(transferID)
+					s.removeUpload(transferID)
+				case pb.FileTransferResponse_TRANSFER_COMPLETE:
+					// Remove download on client confirmation
+					if s.isDownloadAwaitingAck(transferID) {
+						s.removeDownload(transferID)
+					}
+				case pb.FileTransferResponse_TRANSFER_REJECTED:
+					s.removeUpload(transferID)
+				case pb.FileTransferResponse_CHUNK_RECEIVED:
+					// Used for upload flows, ignore for downloads
+				}
+
+			case *pb.RunRequest_Command:
+				// Command is handled by the broker, not here.
+				// This shouldn't arrive during an active session.
+
 			default:
 				l.Warn("unexpected message type", "type", fmt.Sprintf("%T", msg))
 			}

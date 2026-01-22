@@ -31,6 +31,7 @@ type runCmdArgs struct {
 	cmdMsg      *pb.Command
 	dev         dut.Device
 	cmd         dut.Command
+	broker      *dutagent.Broker
 	session     module.Session
 	moduleErrCh chan error
 	brokerErrCh <-chan error
@@ -164,13 +165,15 @@ func runModule(ctx context.Context, mod dut.Module, s module.Session, args ...st
 // in a separate goroutine, this state will not wait for the execution to finish.
 // Further, worker goroutines will be started to serve the module-to-client communication
 // during the module execution.
+//
+//nolint:funlen
 func executeModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State[runCmdArgs], error) {
 	// Module execution is the agent's core orchestration: scope it "agent" and
 	// tag the device and command, which then descend to every record on this path.
 	ctx = log.With(log.WithScope(ctx, "agent"), "device", args.cmdMsg.GetDevice(), "command", args.cmdMsg.GetCommand())
 	l := log.FromContext(ctx)
 
-	broker := &dutagent.Broker{}
+	args.broker = &dutagent.Broker{}
 
 	// Deferred initialization of the moduleErr channel: only create if not already provided
 	// (tests may still pass a custom channel).
@@ -181,7 +184,7 @@ func executeModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State
 	rpcCtx := ctx
 	modCtx, modCtxCancel := context.WithCancel(rpcCtx)
 
-	moduleSession, brokerErrCh := broker.Start(modCtx, args.stream)
+	moduleSession, brokerErrCh := args.broker.Start(modCtx, args.stream)
 	args.brokerErrCh = brokerErrCh
 	args.session = moduleSession
 
@@ -196,12 +199,18 @@ func executeModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State
 	// Run the modules in a goroutine.
 	// Termination of the module execution is signaled by closing the moduleErrCh channel.
 	go func() {
+		defer modCtxCancel() // Ensure workers exit even if stream doesn't close
+
 		cnt := len(args.cmd.Modules)
 
 		for idx, mod := range args.cmd.Modules {
 			if ctx.Err() != nil {
 				l.Warn("execution aborted", "modules-done", idx, "modules-total", cnt, "err", ctx.Err())
-				modCtxCancel()
+
+				// Signal graceful shutdown and let any in-flight file transfers
+				// finish before the workers exit (modCtx is cancelled by the defer).
+				args.broker.Shutdown()
+				args.broker.WaitForTransfersToComplete()
 
 				return
 			}
@@ -220,14 +229,23 @@ func executeModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State
 				args.moduleErrCh <- err
 
 				mlog.Error("module failed", "err", err)
-				modCtxCancel()
+
+				// Signal graceful shutdown and let any in-flight file transfers
+				// finish before the workers exit (modCtx is cancelled by the defer).
+				args.broker.Shutdown()
+				args.broker.WaitForTransfersToComplete()
 
 				return
 			}
 		}
 
 		l.Info("all modules finished successfully")
-		modCtxCancel()
+
+		// Signal graceful shutdown and let any in-flight file transfers finish
+		// before the workers exit (modCtx is cancelled by the defer).
+		args.broker.Shutdown()
+		args.broker.WaitForTransfersToComplete()
+
 		close(args.moduleErrCh)
 	}()
 

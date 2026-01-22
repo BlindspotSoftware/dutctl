@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -199,7 +198,7 @@ func (app *application) detailsRPC(device, command, keyword string) error {
 	return nil
 }
 
-//nolint:funlen,cyclop,gocognit,maintidx // coordinates two streaming worker goroutines; inherently branchy
+//nolint:funlen,cyclop,gocognit // coordinates two streaming worker goroutines; inherently branchy
 func (app *application) runRPC(device, command string, cmdArgs []string) error {
 	const numWorkers = 2 // The send and receive worker goroutines
 
@@ -213,6 +212,10 @@ func (app *application) runRPC(device, command string, cmdArgs []string) error {
 	defer cancelRunCtx()
 
 	errChan := make(chan error, numWorkers)
+
+	// ftManager tracks chunked file transfers for this run: it streams uploads
+	// requested by the agent and reassembles downloads chunk by chunk.
+	ftManager := newClientFileTransferManager(cmdArgs)
 
 	stream := app.rpcClient.Run(runCtx)
 	stream.RequestHeader().Set(lock.UserHeader, app.user)
@@ -296,58 +299,27 @@ func (app *application) runRPC(device, command string, cmdArgs []string) error {
 				case *pb.Console_Stdin:
 					slog.Warn("unexpected console stdin from agent", "data", string(consoleData.Stdin))
 				}
-			case *pb.RunResponse_FileRequest:
-				path := msg.FileRequest.GetPath()
-				slog.Debug("file requested by agent", "path", path)
+			case *pb.RunResponse_FileTransferRequest:
+				ftReq := msg.FileTransferRequest
 
-				content, err := os.ReadFile(path)
-				if err != nil {
-					errChan <- fmt.Errorf("reading requested file %q: %w", path, err)
-
-					return
-				}
-
-				err = stream.Send(&pb.RunRequest{
-					Msg: &pb.RunRequest_File{
-						File: &pb.File{
-							Path:    path,
-							Content: content,
-						},
-					},
-				})
-				if err != nil {
-					errChan <- fmt.Errorf("sending requested file %q: %w", path, err)
+				ftErr := ftManager.handleFileTransferRequest(ftReq, stream)
+				if ftErr != nil {
+					errChan <- ftErr
 
 					return
 				}
+			case *pb.RunResponse_FileChunk:
+				chunk := msg.FileChunk
 
-				app.formatter.WriteContent(output.Content{
-					Type:     output.TypeFileTransfer,
-					Data:     output.FileTransfer{Direction: "sent", Path: path, Bytes: len(content)},
-					Metadata: metadata,
-				})
-			case *pb.RunResponse_File:
-				path := msg.File.GetPath()
-				content := msg.File.GetContent()
-
-				if len(content) == 0 {
-					slog.Warn("received empty file content", "path", path)
-				}
-
-				perm := 0600
-
-				err = os.WriteFile(path, content, fs.FileMode(perm))
-				if err != nil {
-					errChan <- fmt.Errorf("saving received file %q: %w", path, err)
+				chunkErr := ftManager.handleFileChunk(chunk, stream)
+				if chunkErr != nil {
+					errChan <- chunkErr
 
 					return
 				}
-
-				app.formatter.WriteContent(output.Content{
-					Type:     output.TypeFileTransfer,
-					Data:     output.FileTransfer{Direction: "received", Path: path, Bytes: len(content)},
-					Metadata: metadata,
-				})
+			case *pb.RunResponse_FileTransferResponse:
+				ftRes := msg.FileTransferResponse
+				ftManager.handleFileTransferResponse(ftRes)
 
 			default:
 				slog.Warn("unexpected message type", "type", fmt.Sprintf("%T", msg))
