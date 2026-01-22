@@ -256,7 +256,7 @@ func (f *Flash) cmdline() []string {
 	return args
 }
 
-// uploadImage receives the flash image file from sesh and saves is locally.
+// uploadImage receives and saves the flash image from client.
 func uploadImage(sesh module.Session, remote, local string) error {
 	img, err := sesh.RequestFile(remote)
 	if err != nil {
@@ -276,14 +276,19 @@ func uploadImage(sesh module.Session, remote, local string) error {
 	return nil
 }
 
-// downloadImage sends the local flash image file to sesh.
+// downloadImage sends the flash image to client.
 func downloadImage(sesh module.Session, local, remote string) error {
 	file, err := os.Open(local)
 	if err != nil {
 		return fmt.Errorf("open flash image on dutagent after read operation: %w", err)
 	}
 
-	err = sesh.SendFile(remote, file)
+	fileInfo, err := file.Stat()
+	if err != nil {
+		return fmt.Errorf("stat flash image on dutagent after read operation: %w", err)
+	}
+
+	err = sesh.SendFile(remote, fileInfo.Size(), file)
 	if err != nil {
 		return fmt.Errorf("send flash image to client after read operation: %w", err)
 	}

@@ -10,9 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"log"
-	"os"
 	"strings"
 
 	"connectrpc.com/connect"
@@ -101,6 +99,8 @@ func (app *application) runRPC(device, command string, cmdArgs []string) error {
 
 	errChan := make(chan error, numWorkers)
 
+	ftManager := newClientFileTransferManager(cmdArgs)
+
 	stream := app.rpcClient.Run(runCtx)
 	req := &pb.RunRequest{
 		Msg: &pb.RunRequest_Command{
@@ -127,21 +127,24 @@ func (app *application) runRPC(device, command string, cmdArgs []string) error {
 
 	// Receive routine
 	go func() {
-		defer cancel()
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("Receive routine panic: %v", r)
+			}
+
+			cancel()
+		}()
 
 		for {
 			select {
 			case <-runCtx.Done():
-				log.Println("Receive routine terminating: Run-Context cancelled")
-
 				return
-			default: // Unblock select, continue with the forwarding logic.
+			default:
 			}
 
 			res, err := stream.Receive()
-			if errors.Is(err, io.EOF) {
-				log.Println("Receive routine terminating: Stream closed by agent")
 
+			if errors.Is(err, io.EOF) {
 				return
 			} else if err != nil {
 				errChan <- fmt.Errorf("receiving RPC message: %w", err)
@@ -175,50 +178,29 @@ func (app *application) runRPC(device, command string, cmdArgs []string) error {
 				case *pb.Console_Stdin:
 					log.Printf("Unexpected Console Stdin %q", string(consoleData.Stdin))
 				}
-			case *pb.RunResponse_FileRequest:
-				path := msg.FileRequest.GetPath()
-				log.Printf("File request for: %q\n", path)
+			case *pb.RunResponse_FileTransferRequest:
+				ftReq := msg.FileTransferRequest
 
-				content, err := os.ReadFile(path)
-				if err != nil {
-					errChan <- fmt.Errorf("reading requested file %q: %w", path, err)
-
-					return
-				}
-
-				err = stream.Send(&pb.RunRequest{
-					Msg: &pb.RunRequest_File{
-						File: &pb.File{
-							Path:    path,
-							Content: content,
-						},
-					},
-				})
-				if err != nil {
-					errChan <- fmt.Errorf("sending requested file %q: %w", path, err)
+				ftErr := ftManager.handleFileTransferRequest(ftReq, stream)
+				if ftErr != nil {
+					errChan <- ftErr
 
 					return
 				}
 
-				log.Printf("Sent file: %q\n", path)
-			case *pb.RunResponse_File:
-				path := msg.File.GetPath()
-				content := msg.File.GetContent()
+			case *pb.RunResponse_FileChunk:
+				chunk := msg.FileChunk
 
-				log.Printf("Received file: %q\n", path)
-
-				if len(content) == 0 {
-					log.Println("Received empty file content")
-				}
-
-				perm := 0600
-
-				err = os.WriteFile(path, content, fs.FileMode(perm))
-				if err != nil {
-					errChan <- fmt.Errorf("saving received file %q: %w", path, err)
+				chunkErr := ftManager.handleFileChunk(chunk, stream)
+				if chunkErr != nil {
+					errChan <- chunkErr
 
 					return
 				}
+
+			case *pb.RunResponse_FileTransferResponse:
+				ftRes := msg.FileTransferResponse
+				ftManager.handleFileTransferResponse(ftRes)
 
 			default:
 				log.Printf("Unexpected message type %T", msg)
@@ -226,10 +208,9 @@ func (app *application) runRPC(device, command string, cmdArgs []string) error {
 		}
 	}()
 
-	// Send routine
+	// Send routine - only for reading user input (stdin)
+	// This is a best-effort routine: EOF on stdin is normal and doesn't cancel the context
 	go func() {
-		defer cancel()
-
 		reader := bufio.NewReader(app.stdin)
 
 		for {
@@ -243,14 +224,17 @@ func (app *application) runRPC(device, command string, cmdArgs []string) error {
 
 			text, err := reader.ReadString('\n')
 			if err != nil {
-				if !errors.Is(err, io.EOF) {
-					errChan <- fmt.Errorf("reading stdin: %w", err)
+				if errors.Is(err, io.EOF) {
+					// EOF on stdin is normal when there's no interactive input
+					log.Println("Send routine: stdin closed (EOF), stopping stdin forwarding")
+				} else {
+					log.Printf("Send routine: error reading stdin: %v", err)
 				}
 
 				return
 			}
 
-			err = stream.Send(&pb.RunRequest{
+			sendErr := stream.Send(&pb.RunRequest{
 				Msg: &pb.RunRequest_Console{
 					Console: &pb.Console{
 						Data: &pb.Console_Stdin{
@@ -259,8 +243,8 @@ func (app *application) runRPC(device, command string, cmdArgs []string) error {
 					},
 				},
 			})
-			if err != nil {
-				errChan <- fmt.Errorf("sending RPC message: %w", err)
+			if sendErr != nil {
+				log.Printf("Send routine: error sending to stream: %v", sendErr)
 
 				return
 			}
