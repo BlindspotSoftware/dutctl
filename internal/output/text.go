@@ -206,7 +206,12 @@ func (f *TextFormatter) writeModuleOutputTo(content Content, writer io.Writer) {
 		// Print metadata before content
 		f.writeMetadata(content, writer)
 
-		fmt.Fprint(writer, output)
+		// If output doesn't end with a newline, add one to separate from next output
+		if len(output) > 0 && output[len(output)-1] != '\n' {
+			fmt.Fprintln(writer, output)
+		} else {
+			fmt.Fprint(writer, output)
+		}
 	} else {
 		f.writeGeneralTo(content, writer)
 	}
