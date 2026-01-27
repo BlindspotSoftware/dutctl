@@ -47,17 +47,6 @@ const (
 	RelayServiceRegisterProcedure = "/dutctl.v1.RelayService/Register"
 )
 
-// These variables are the protoreflect.Descriptor objects for the RPCs defined in this package.
-var (
-	deviceServiceServiceDescriptor        = v1.File_dutctl_v1_dutctl_proto.Services().ByName("DeviceService")
-	deviceServiceListMethodDescriptor     = deviceServiceServiceDescriptor.Methods().ByName("List")
-	deviceServiceCommandsMethodDescriptor = deviceServiceServiceDescriptor.Methods().ByName("Commands")
-	deviceServiceDetailsMethodDescriptor  = deviceServiceServiceDescriptor.Methods().ByName("Details")
-	deviceServiceRunMethodDescriptor      = deviceServiceServiceDescriptor.Methods().ByName("Run")
-	relayServiceServiceDescriptor         = v1.File_dutctl_v1_dutctl_proto.Services().ByName("RelayService")
-	relayServiceRegisterMethodDescriptor  = relayServiceServiceDescriptor.Methods().ByName("Register")
-)
-
 // DeviceServiceClient is a client for the dutctl.v1.DeviceService service.
 type DeviceServiceClient interface {
 	List(context.Context, *connect.Request[v1.ListRequest]) (*connect.Response[v1.ListResponse], error)
@@ -75,29 +64,30 @@ type DeviceServiceClient interface {
 // http://api.acme.com or https://acme.com/grpc).
 func NewDeviceServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) DeviceServiceClient {
 	baseURL = strings.TrimRight(baseURL, "/")
+	deviceServiceMethods := v1.File_dutctl_v1_dutctl_proto.Services().ByName("DeviceService").Methods()
 	return &deviceServiceClient{
 		list: connect.NewClient[v1.ListRequest, v1.ListResponse](
 			httpClient,
 			baseURL+DeviceServiceListProcedure,
-			connect.WithSchema(deviceServiceListMethodDescriptor),
+			connect.WithSchema(deviceServiceMethods.ByName("List")),
 			connect.WithClientOptions(opts...),
 		),
 		commands: connect.NewClient[v1.CommandsRequest, v1.CommandsResponse](
 			httpClient,
 			baseURL+DeviceServiceCommandsProcedure,
-			connect.WithSchema(deviceServiceCommandsMethodDescriptor),
+			connect.WithSchema(deviceServiceMethods.ByName("Commands")),
 			connect.WithClientOptions(opts...),
 		),
 		details: connect.NewClient[v1.DetailsRequest, v1.DetailsResponse](
 			httpClient,
 			baseURL+DeviceServiceDetailsProcedure,
-			connect.WithSchema(deviceServiceDetailsMethodDescriptor),
+			connect.WithSchema(deviceServiceMethods.ByName("Details")),
 			connect.WithClientOptions(opts...),
 		),
 		run: connect.NewClient[v1.RunRequest, v1.RunResponse](
 			httpClient,
 			baseURL+DeviceServiceRunProcedure,
-			connect.WithSchema(deviceServiceRunMethodDescriptor),
+			connect.WithSchema(deviceServiceMethods.ByName("Run")),
 			connect.WithClientOptions(opts...),
 		),
 	}
@@ -145,28 +135,29 @@ type DeviceServiceHandler interface {
 // By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
 // and JSON codecs. They also support gzip compression.
 func NewDeviceServiceHandler(svc DeviceServiceHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	deviceServiceMethods := v1.File_dutctl_v1_dutctl_proto.Services().ByName("DeviceService").Methods()
 	deviceServiceListHandler := connect.NewUnaryHandler(
 		DeviceServiceListProcedure,
 		svc.List,
-		connect.WithSchema(deviceServiceListMethodDescriptor),
+		connect.WithSchema(deviceServiceMethods.ByName("List")),
 		connect.WithHandlerOptions(opts...),
 	)
 	deviceServiceCommandsHandler := connect.NewUnaryHandler(
 		DeviceServiceCommandsProcedure,
 		svc.Commands,
-		connect.WithSchema(deviceServiceCommandsMethodDescriptor),
+		connect.WithSchema(deviceServiceMethods.ByName("Commands")),
 		connect.WithHandlerOptions(opts...),
 	)
 	deviceServiceDetailsHandler := connect.NewUnaryHandler(
 		DeviceServiceDetailsProcedure,
 		svc.Details,
-		connect.WithSchema(deviceServiceDetailsMethodDescriptor),
+		connect.WithSchema(deviceServiceMethods.ByName("Details")),
 		connect.WithHandlerOptions(opts...),
 	)
 	deviceServiceRunHandler := connect.NewBidiStreamHandler(
 		DeviceServiceRunProcedure,
 		svc.Run,
-		connect.WithSchema(deviceServiceRunMethodDescriptor),
+		connect.WithSchema(deviceServiceMethods.ByName("Run")),
 		connect.WithHandlerOptions(opts...),
 	)
 	return "/dutctl.v1.DeviceService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -218,11 +209,12 @@ type RelayServiceClient interface {
 // http://api.acme.com or https://acme.com/grpc).
 func NewRelayServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) RelayServiceClient {
 	baseURL = strings.TrimRight(baseURL, "/")
+	relayServiceMethods := v1.File_dutctl_v1_dutctl_proto.Services().ByName("RelayService").Methods()
 	return &relayServiceClient{
 		register: connect.NewClient[v1.RegisterRequest, v1.RegisterResponse](
 			httpClient,
 			baseURL+RelayServiceRegisterProcedure,
-			connect.WithSchema(relayServiceRegisterMethodDescriptor),
+			connect.WithSchema(relayServiceMethods.ByName("Register")),
 			connect.WithClientOptions(opts...),
 		),
 	}
@@ -249,10 +241,11 @@ type RelayServiceHandler interface {
 // By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
 // and JSON codecs. They also support gzip compression.
 func NewRelayServiceHandler(svc RelayServiceHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	relayServiceMethods := v1.File_dutctl_v1_dutctl_proto.Services().ByName("RelayService").Methods()
 	relayServiceRegisterHandler := connect.NewUnaryHandler(
 		RelayServiceRegisterProcedure,
 		svc.Register,
-		connect.WithSchema(relayServiceRegisterMethodDescriptor),
+		connect.WithSchema(relayServiceMethods.ByName("Register")),
 		connect.WithHandlerOptions(opts...),
 	)
 	return "/dutctl.v1.RelayService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

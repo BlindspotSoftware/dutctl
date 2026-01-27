@@ -278,8 +278,8 @@ func (f *File) downloadFile(sesh module.Session) error {
 	}
 	defer srcFile.Close()
 
-	// Send file to client
-	err = sesh.SendFile(f.destPath, srcFile)
+	// Send file to client with size information
+	err = sesh.SendFile(f.destPath, fileInfo.Size(), srcFile)
 	if err != nil {
 		return fmt.Errorf("failed to send file to client: %w", err)
 	}
