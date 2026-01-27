@@ -46,11 +46,13 @@ func sendDownloadError(stream Stream, s *session, transferID string, downloadMet
 	sendErr := safeSend(stream, res)
 	if sendErr != nil {
 		log.Printf("handleDownloadFileTransfer: error sending error response: %v", sendErr)
+
 		return false
 	}
 
 	s.removeDownload(transferID)
 	delete(downloadMetadataSent, transferID)
+
 	return true
 }
 
@@ -78,59 +80,63 @@ func sendDownloadMetadata(stream Stream, s *session, transferID string, download
 	sendErr := safeSend(stream, res)
 	if sendErr != nil {
 		log.Printf("handleDownloadFileTransfer: error sending metadata: %v", sendErr)
+
 		return false
 	}
 
 	downloadMetadataSent[transferID] = true
+
+	return true
+}
+
+// sendDownloadChunk sends a file chunk to the client and marks final chunks.
+func sendDownloadChunk(stream Stream, s *session, transferID string, chunk *pb.FileChunk, isFinal bool) bool {
+	if chunk == nil || len(chunk.GetChunkData()) == 0 {
+		return false
+	}
+
+	res := &pb.RunResponse{
+		Msg: &pb.RunResponse_FileChunk{FileChunk: chunk},
+	}
+
+	sendErr := safeSend(stream, res)
+	if sendErr != nil {
+		log.Printf("handleDownloadFileTransfer: error sending chunk: %v", sendErr)
+
+		return false
+	}
+
+	if isFinal {
+		s.markDownloadAwaitingAck(transferID)
+	}
+
 	return true
 }
 
 // handleDownloadFileTransfer processes a single download transfer for sending to the client.
-//
-//nolint:funlen
-func handleDownloadFileTransfer(stream Stream, s *session, transferID string, downloadMetadataSent map[string]bool) (bool, error) {
+func handleDownloadFileTransfer(stream Stream, s *session, transferID string, downloadMetadataSent map[string]bool) bool {
 	// Skip if waiting for client acknowledgment
 	download := s.getDownload(transferID)
 	if download != nil && download.awaitingFinalAck {
-		return false, nil
+		return false
 	}
 
 	// Send metadata first
 	if !downloadMetadataSent[transferID] {
-		if sendDownloadMetadata(stream, s, transferID, downloadMetadataSent) {
-			return true, nil
-		}
-		return false, nil
+		return sendDownloadMetadata(stream, s, transferID, downloadMetadataSent)
 	}
 
 	// Get next chunk
 	chunk, isFinal, err := s.getNextChunk(transferID)
 	if err != nil {
-		if sendDownloadError(stream, s, transferID, downloadMetadataSent, err) {
-			return true, nil
-		}
-		return false, nil
+		return sendDownloadError(stream, s, transferID, downloadMetadataSent, err)
 	}
 
-	if chunk != nil && len(chunk.GetChunkData()) > 0 {
-		res := &pb.RunResponse{
-			Msg: &pb.RunResponse_FileChunk{FileChunk: chunk},
-		}
-
-		sendErr := safeSend(stream, res)
-		if sendErr != nil {
-			log.Printf("handleDownloadFileTransfer: error sending chunk: %v", sendErr)
-			// Stream is closed, return cleanly
-			return false, nil
-		}
-
-		// Mark final chunk as awaiting client acknowledgment
-		if isFinal {
-			s.markDownloadAwaitingAck(transferID)
-		}
+	if sendDownloadChunk(stream, s, transferID, chunk, isFinal) {
+		return false
 	}
 
-	return false, nil
+	return false
 }
 
 // toClientWorker sends messages from the module session to the client.
@@ -167,6 +173,7 @@ func toClientWorker(ctx context.Context, stream Stream, s *session) error {
 			err := safeSend(stream, res)
 			if err != nil {
 				log.Printf("toClientWorker: error sending print: %v", err)
+
 				return err
 			}
 
@@ -187,6 +194,7 @@ func toClientWorker(ctx context.Context, stream Stream, s *session) error {
 			err := safeSend(stream, res)
 			if err != nil {
 				log.Printf("toClientWorker: error sending stdout: %v", err)
+
 				return err
 			}
 
@@ -207,6 +215,7 @@ func toClientWorker(ctx context.Context, stream Stream, s *session) error {
 			err := safeSend(stream, res)
 			if err != nil {
 				log.Printf("toClientWorker: error sending stderr: %v", err)
+
 				return err
 			}
 
@@ -268,12 +277,7 @@ func toClientWorker(ctx context.Context, stream Stream, s *session) error {
 				}
 			}
 
-			_, err := handleDownloadFileTransfer(stream, s, transferID, downloadMetadataSent)
-			if err != nil {
-				log.Printf("toClientWorker: error in download file transfer: %v", err)
-				// Stream is likely closed, return cleanly without panic
-				return nil
-			}
+			_ = handleDownloadFileTransfer(stream, s, transferID, downloadMetadataSent)
 		}
 	}
 }
@@ -439,7 +443,6 @@ func fromClientWorker(ctx context.Context, stream Stream, s *session) error {
 
 					s.removeUpload(transferID)
 				}
-
 			case *pb.RunRequest_FileTransferRequest:
 				ftReq := msg.FileTransferRequest
 				if ftReq == nil {
@@ -451,7 +454,6 @@ func fromClientWorker(ctx context.Context, stream Stream, s *session) error {
 				// Check if this is a known transfer (module called RequestFile)
 				upload := s.getUpload(transferID)
 				if upload == nil {
-
 					// Send rejection
 					res := &pb.RunResponse{
 						Msg: &pb.RunResponse_FileTransferResponse{
