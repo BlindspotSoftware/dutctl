@@ -4,9 +4,12 @@
 package dut
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"testing"
+
+	"github.com/BlindspotSoftware/dutctl/pkg/module"
 )
 
 func TestNames(t *testing.T) {
@@ -105,6 +108,9 @@ func TestFindCmd(t *testing.T) {
 						},
 					},
 				},
+				"cmd4": {
+					Modules: []Module{},
+				},
 			},
 		},
 	}
@@ -128,7 +134,7 @@ func TestFindCmd(t *testing.T) {
 		{
 			name:    "device found, command not found",
 			device:  "device1",
-			command: "cmd4",
+			command: "nonexistent",
 			wantDev: devs["device1"],
 			wantCmd: Command{},
 			err:     ErrCommandNotFound,
@@ -142,12 +148,12 @@ func TestFindCmd(t *testing.T) {
 			err:     ErrDeviceNotFound,
 		},
 		{
-			name:    "invalid command with no modules",
+			name:    "invalid command with no main module",
 			device:  "device1",
 			command: "cmd2",
 			wantDev: devs["device1"],
 			wantCmd: devs["device1"].Cmds["cmd2"],
-			err:     ErrInvalidCommand,
+			err:     ErrInvalidMainCount,
 		},
 		{
 			name:    "invalid command with multiple main modules",
@@ -155,7 +161,15 @@ func TestFindCmd(t *testing.T) {
 			command: "cmd3",
 			wantDev: devs["device1"],
 			wantCmd: devs["device1"].Cmds["cmd3"],
-			err:     ErrInvalidCommand,
+			err:     ErrInvalidMainCount,
+		},
+		{
+			name:    "invalid command with no modules",
+			device:  "device1",
+			command: "cmd4",
+			wantDev: devs["device1"],
+			wantCmd: devs["device1"].Cmds["cmd4"],
+			err:     ErrNoModules,
 		},
 	}
 
@@ -164,6 +178,137 @@ func TestFindCmd(t *testing.T) {
 			resultDev, resultCmd, err := devs.FindCmd(tt.device, tt.command)
 			if !reflect.DeepEqual(resultDev, tt.wantDev) || !reflect.DeepEqual(resultCmd, tt.wantCmd) || !errors.Is(err, tt.err) {
 				t.Errorf("expected %v, %v, %v; got %v, %v, %v", tt.wantDev, tt.wantCmd, tt.err, resultDev, resultCmd, err)
+			}
+		})
+	}
+}
+
+func TestModuleArgs(t *testing.T) {
+	tests := []struct {
+		name        string
+		cmd         Command
+		runtimeArgs []string
+		want        [][]string
+	}{
+		{
+			name: "single main module gets runtime args",
+			cmd: Command{Modules: []Module{
+				{Config: ModuleConfig{Main: true}},
+			}},
+			runtimeArgs: []string{"a", "b"},
+			want:        [][]string{{"a", "b"}},
+		},
+		{
+			name: "non-main gets static args",
+			cmd: Command{Modules: []Module{
+				{Config: ModuleConfig{Args: []string{"x"}}},
+			}},
+			runtimeArgs: []string{"a"},
+			want:        [][]string{{"x"}},
+		},
+		{
+			name: "mixed main and non-main",
+			cmd: Command{Modules: []Module{
+				{Config: ModuleConfig{Main: true}},
+				{Config: ModuleConfig{Args: []string{"static1", "static2"}}},
+			}},
+			runtimeArgs: []string{"run1"},
+			want:        [][]string{{"run1"}, {"static1", "static2"}},
+		},
+		{
+			name:        "empty modules",
+			cmd:         Command{},
+			runtimeArgs: []string{"a"},
+			want:        [][]string{},
+		},
+		{
+			name: "non-main with nil args",
+			cmd: Command{Modules: []Module{
+				{Config: ModuleConfig{}},
+			}},
+			runtimeArgs: []string{"a"},
+			want:        [][]string{nil},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.cmd.ModuleArgs(tt.runtimeArgs)
+			if !reflect.DeepEqual(result, tt.want) {
+				t.Errorf("expected %v, got %v", tt.want, result)
+			}
+		})
+	}
+}
+
+// helpModule is a minimal test double implementing module.Module for HelpText tests.
+type helpModule struct {
+	text string
+}
+
+func (m *helpModule) Help() string                                                  { return m.text }
+func (m *helpModule) Init() error                                                   { return nil }
+func (m *helpModule) Deinit() error                                                 { return nil }
+func (m *helpModule) Run(_ context.Context, _ module.Session, _ ...string) error    { return nil }
+
+func TestHelpText(t *testing.T) {
+	tests := []struct {
+		name      string
+		cmd       Command
+		wantText  string
+		wantFound bool
+	}{
+		{
+			name:      "no modules",
+			cmd:       Command{},
+			wantFound: false,
+		},
+		{
+			name: "main module exists",
+			cmd: Command{Modules: []Module{
+				{
+					Module: &helpModule{text: "usage: flash <image>"},
+					Config: ModuleConfig{Main: true},
+				},
+			}},
+			wantText:  "usage: flash <image>",
+			wantFound: true,
+		},
+		{
+			name: "no main module",
+			cmd: Command{Modules: []Module{
+				{
+					Module: &helpModule{text: "helper"},
+					Config: ModuleConfig{},
+				},
+			}},
+			wantFound: false,
+		},
+		{
+			name: "main among multiple modules",
+			cmd: Command{Modules: []Module{
+				{
+					Module: &helpModule{text: "helper"},
+					Config: ModuleConfig{},
+				},
+				{
+					Module: &helpModule{text: "main help"},
+					Config: ModuleConfig{Main: true},
+				},
+			}},
+			wantText:  "main help",
+			wantFound: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			text, found := tt.cmd.HelpText()
+			if found != tt.wantFound {
+				t.Errorf("found: expected %v, got %v", tt.wantFound, found)
+			}
+			if text != tt.wantText {
+				t.Errorf("text: expected %q, got %q", tt.wantText, text)
 			}
 		})
 	}
