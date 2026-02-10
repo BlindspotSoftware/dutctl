@@ -74,8 +74,6 @@ func (a *rpcService) Commands(
 }
 
 // Details is the handler for the Details RPC.
-//
-//nolint:funlen
 func (a *rpcService) Details(
 	_ context.Context,
 	req *connect.Request[pb.DetailsRequest],
@@ -112,19 +110,8 @@ func (a *rpcService) Details(
 		return nil, e
 	}
 
-	var (
-		helpStr   string
-		foundMain bool
-	)
-
-	for _, module := range cmd.Modules {
-		if module.Config.Main {
-			foundMain = true
-			helpStr = module.Help()
-		}
-	}
-
-	if !foundMain {
+	helpStr, ok := cmd.HelpText()
+	if !ok {
 		e := connect.NewError(
 			connect.CodeInternal,
 			fmt.Errorf("no main module found for command %q at device %q", wantCmd, wantDev),

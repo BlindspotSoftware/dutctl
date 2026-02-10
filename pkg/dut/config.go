@@ -236,7 +236,7 @@ func (c *Command) UnmarshalYAML(node *yaml.Node) error {
 		// Implicitly sets the only module as main
 		c.Modules[0].Config.Main = true
 	default:
-		if c.countMain() != 1 {
+		if c.CountMain() != 1 {
 			return &ConfigError{Line: node.Line, Err: ErrMultipleMainModules}
 		}
 	}
@@ -249,18 +249,6 @@ func (c *Command) UnmarshalYAML(node *yaml.Node) error {
 	}
 
 	return nil
-}
-
-func (c *Command) countMain() int {
-	count := 0
-
-	for _, mod := range c.Modules {
-		if mod.Config.Main {
-			count++
-		}
-	}
-
-	return count
 }
 
 // UnmarshalYAML unmarshals a Module from a YAML node and adds custom validation.
