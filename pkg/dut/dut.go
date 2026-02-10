@@ -17,9 +17,10 @@ import (
 )
 
 var (
-	ErrDeviceNotFound  = errors.New("no such device")
-	ErrCommandNotFound = errors.New("no such command")
-	ErrInvalidCommand  = errors.New("command not implemented - no modules or no main module set")
+	ErrDeviceNotFound   = errors.New("no such device")
+	ErrCommandNotFound  = errors.New("no such command")
+	ErrNoModules        = errors.New("command has no modules")
+	ErrInvalidMainCount = errors.New("command must have exactly one main module")
 )
 
 // Devlist is a list of devices-under-test.
@@ -59,8 +60,8 @@ func (devs Devlist) CmdNames(device string) ([]string, error) {
 
 // FindCmd returns the device and command for a given device and command name.
 // If the device is not found, it returns ErrDeviceNotFound, if the command is not found,
-// it returns ErrCommandNotFound. If the requested command has no modules, or no main module,
-// it returns ErrInvalidCommand.
+// it returns ErrCommandNotFound. If the requested command has no modules, it returns ErrNoModules.
+// If the requested command does not have exactly one main module, it returns ErrInvalidMainCount.
 func (devs Devlist) FindCmd(device, command string) (Device, Command, error) {
 	dev, ok := devs[device]
 	if !ok {
@@ -72,8 +73,12 @@ func (devs Devlist) FindCmd(device, command string) (Device, Command, error) {
 		return dev, Command{}, ErrCommandNotFound
 	}
 
-	if len(cmd.Modules) == 0 || cmd.countMain() != 1 {
-		return dev, cmd, ErrInvalidCommand
+	if len(cmd.Modules) == 0 {
+		return dev, cmd, ErrNoModules
+	}
+
+	if cmd.countMain() != 1 {
+		return dev, cmd, ErrInvalidMainCount
 	}
 
 	return dev, cmd, nil
@@ -140,6 +145,36 @@ func (c *Command) countMain() int {
 	}
 
 	return count
+}
+
+// ModuleArgs builds the argument list for each module in the command.
+// The main module receives runtimeArgs; non-main modules receive their
+// statically configured Args. The returned slice has the same length
+// and ordering as c.Modules.
+func (c *Command) ModuleArgs(runtimeArgs []string) [][]string {
+	result := make([][]string, len(c.Modules))
+
+	for i, mod := range c.Modules {
+		if mod.Config.Main {
+			result[i] = runtimeArgs
+		} else {
+			result[i] = mod.Config.Args
+		}
+	}
+
+	return result
+}
+
+// HelpText returns the help string of the main module.
+// Returns an empty string and false if no main module exists.
+func (c *Command) HelpText() (string, bool) {
+	for _, mod := range c.Modules {
+		if mod.Config.Main {
+			return mod.Help(), true
+		}
+	}
+
+	return "", false
 }
 
 // Module is a wrapper for any module implementation.
