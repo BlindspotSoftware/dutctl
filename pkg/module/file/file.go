@@ -271,15 +271,16 @@ func (f *File) downloadFile(sesh module.Session) error {
 		return fmt.Errorf("failed to open source file %q: %w", f.sourcePath, err)
 	}
 
-	// Open source file
+	// Open source file.
+	// Note: the session takes ownership of the file via SendFile and closes it
+	// when the transfer completes, so we must NOT defer Close here.
 	srcFile, err := os.Open(f.sourcePath)
 	if err != nil {
 		return fmt.Errorf("failed to open source file %q: %w", f.sourcePath, err)
 	}
-	defer srcFile.Close()
 
-	// Send file to client
-	err = sesh.SendFile(f.destPath, srcFile)
+	// Send file to client with size information
+	err = sesh.SendFile(f.destPath, fileInfo.Size(), srcFile)
 	if err != nil {
 		return fmt.Errorf("failed to send file to client: %w", err)
 	}
