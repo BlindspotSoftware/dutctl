@@ -17,9 +17,11 @@ import (
 )
 
 var (
-	ErrDeviceNotFound  = errors.New("no such device")
-	ErrCommandNotFound = errors.New("no such command")
-	ErrInvalidCommand  = errors.New("command not implemented - no modules or no main module set")
+	ErrDeviceNotFound             = errors.New("no such device")
+	ErrCommandNotFound            = errors.New("no such command")
+	ErrNoModules                  = errors.New("command has no modules")
+	ErrNoInteractiveModuleForArgs = errors.New("command has no interactive module but runtime arguments were provided")
+	ErrMultipleInteractiveModules = errors.New("command has multiple interactive modules")
 )
 
 // Devlist is a list of devices-under-test.
@@ -59,8 +61,8 @@ func (devs Devlist) CmdNames(device string) ([]string, error) {
 
 // FindCmd returns the device and command for a given device and command name.
 // If the device is not found, it returns ErrDeviceNotFound, if the command is not found,
-// it returns ErrCommandNotFound. If the requested command has no modules, or no main module,
-// it returns ErrInvalidCommand.
+// it returns ErrCommandNotFound. If the requested command has no modules, it returns ErrNoModules.
+// If the requested command has multiple interactive modules, it returns ErrMultipleInteractiveModules.
 func (devs Devlist) FindCmd(device, command string) (Device, Command, error) {
 	dev, ok := devs[device]
 	if !ok {
@@ -72,8 +74,12 @@ func (devs Devlist) FindCmd(device, command string) (Device, Command, error) {
 		return dev, Command{}, ErrCommandNotFound
 	}
 
-	if len(cmd.Modules) == 0 || cmd.countMain() != 1 {
-		return dev, cmd, ErrInvalidCommand
+	if len(cmd.Modules) == 0 {
+		return dev, cmd, ErrNoModules
+	}
+
+	if cmd.CountInteractive() > 1 {
+		return dev, cmd, ErrMultipleInteractiveModules
 	}
 
 	return dev, cmd, nil
@@ -90,7 +96,14 @@ type Device struct {
 // modules and are executed in the order they are defined.
 type Command struct {
 	Desc    string
+	Args    []ArgDecl
 	Modules []Module `yaml:"uses"`
+}
+
+// ArgDecl declares a command argument with its name and description.
+type ArgDecl struct {
+	Name string `yaml:"name"`
+	Desc string `yaml:"desc"`
 }
 
 // commandAlias is used when parsing YAML to avoid recursion.
@@ -107,39 +120,105 @@ func (c *Command) UnmarshalYAML(node *yaml.Node) error {
 
 	*c = Command(cmd)
 
-	// Check presence of main module
-	switch len(c.Modules) {
-	case 0:
+	// Check presence of interactive module
+	if len(c.Modules) == 0 {
 		return errors.New("command must have at least one module")
-	case 1:
-		// Implicitly sets the only module as main
-		c.Modules[0].Config.Main = true
-	default:
-		if c.countMain() != 1 {
-			return errors.New("command must have exactly one main module")
+	}
+
+	if c.CountInteractive() > 1 {
+		return errors.New("command must have at most one interactive module")
+	}
+
+	// Validate mutual exclusion: cannot have both interactive module AND command args
+	if c.CountInteractive() > 0 && len(c.Args) > 0 {
+		return errors.New("command cannot have both interactive module and args declaration")
+	}
+
+	// Check for presence of args in non-interactive modules only
+	for _, mod := range c.Modules {
+		if mod.Config.Interactive && len(mod.Config.Args) > 0 {
+			return errors.New("interactive module should not have args set. They are passed as command line arguments via the dutctl client")
 		}
 	}
 
-	// Check for presence of args in non-main modules only
-	for _, mod := range c.Modules {
-		if mod.Config.Main && len(mod.Config.Args) > 0 {
-			return errors.New("main module should not have args set. They are passed as command line arguments via the dutctl client")
-		}
+	// Validate template references in module args
+	err = c.validateTemplateReferences()
+	if err != nil {
+		return err
 	}
 
 	return nil
 }
 
-func (c *Command) countMain() int {
+// CountInteractive returns the number of modules marked as interactive in the command.
+func (c *Command) CountInteractive() int {
 	count := 0
 
 	for _, mod := range c.Modules {
-		if mod.Config.Main {
+		if mod.Config.Interactive {
 			count++
 		}
 	}
 
 	return count
+}
+
+// ModuleArgs builds the argument list for each module in the command.
+// Interactive modules receive runtimeArgs directly. Non-interactive modules
+// receive their statically configured Args with template references substituted
+// using runtimeArgs. The returned slice has the same length and ordering as c.Modules.
+func (c *Command) ModuleArgs(runtimeArgs []string) ([][]string, error) {
+	if len(runtimeArgs) > 0 && c.CountInteractive() == 0 {
+		return nil, ErrNoInteractiveModuleForArgs
+	}
+
+	result := make([][]string, len(c.Modules))
+
+	for idx, mod := range c.Modules {
+		if mod.Config.Interactive {
+			result[idx] = runtimeArgs
+		} else {
+			// Apply argument substitution for non-interactive modules
+			substituted, err := c.SubstituteArgs(mod.Config.Args, runtimeArgs)
+			if err != nil {
+				return nil, err
+			}
+
+			result[idx] = substituted
+		}
+	}
+
+	return result, nil
+}
+
+// HelpText returns the help string of the interactive module.
+// If no interactive module exists, returns an overview of all modules and false.
+func (c *Command) HelpText() string {
+	for _, mod := range c.Modules {
+		if mod.Config.Interactive {
+			return mod.Help()
+		}
+	}
+
+	// If no interactive module, provide overview of all modules
+
+	moduleNames := make([]string, 0, len(c.Modules))
+	for _, module := range c.Modules {
+		moduleNames = append(moduleNames, module.Config.Name)
+	}
+
+	helpStr := fmt.Sprintf("Command with %d module(s): %s",
+		len(c.Modules), strings.Join(moduleNames, ", "))
+
+	// Append command args documentation if declared
+	if len(c.Args) > 0 {
+		helpStr += "\n\nArguments:\n"
+		for _, arg := range c.Args {
+			helpStr += fmt.Sprintf("  %s: %s\n", arg.Name, arg.Desc)
+		}
+	}
+
+	return helpStr
 }
 
 // Module is a wrapper for any module implementation.
@@ -150,10 +229,10 @@ type Module struct {
 }
 
 type ModuleConfig struct {
-	Name    string `yaml:"module"`
-	Main    bool
-	Args    []string
-	Options map[string]any `yaml:"with"`
+	Name        string `yaml:"module"`
+	Interactive bool
+	Args        []string
+	Options     map[string]any `yaml:"with"`
 }
 
 // UnmarshalYAML unmarshals a Module from a YAML node and adds custom validation.
