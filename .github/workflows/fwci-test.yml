@@ -1,0 +1,88 @@
+---
+name: fwci-test
+
+# This is just a working-draft of CI workflow
+# Once the PR is ready for merge, all of this should part of the build workflow, since it shares
+#   a lot of functionality.
+# Essentially, we should have a workflow with build job and test jot, and on top another release job.
+# Gorelease is used only as build-tool, not handling actual releases.
+# Also the changelog has to be sorted out.
+
+on:
+  pull_request: {}
+  merge_group: {}
+  push:
+    branches: ["main"]
+    tags: ["v*"]
+
+env:
+  APPLY_FIXES: none
+  APPLY_FIXES_EVENT: pull_request
+  APPLY_FIXES_MODE: commit
+  DISABLE_TELEMETRY: 1
+concurrency:
+  group: ${{ github.ref }}-${{ github.workflow }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Git credentials for private GitHub repositories and checkout fwci git submodule
+        run: |
+          echo "https://fujitsu-openbmc:${{ secrets.DUTCTL_FWCI_TESTING }}@github.com" >> $HOME/.git-credentials
+          git config --global credential.helper store
+          git submodule update --init --recursive --checkout --depth 1
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: stable
+
+      - name: Install Taskfile
+        uses: arduino/setup-task@v2
+
+      - name: Create a dummy SPI flash binary
+        run: |
+          task --taskfile .firmwareci/Taskfile.yml misc:dummy-binary-for-flashing
+
+      - name: Build packages with goreleaser (without actually making release)
+        run: |
+          go install github.com/goreleaser/goreleaser/v2@latest
+          goreleaser release --draft --snapshot --clean
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v5
+        with:
+          path: bin/
+          retention-days: 30 days
+
+      - name: Get names of binaries
+        id: filenames
+        run: |
+          echo "dutctl_path=$(ls ./bin/dutctl_linux_amd64_*/dutctl)" >> "${GITHUB_OUTPUT}"
+          echo "dutctl_pkg_path=$(ls ./bin/dutctl_*_arm64.deb)" >> "${GITHUB_OUTPUT}"
+
+      - name: Debug
+        run: |
+          echo "dutctl_path:   ${{ steps.filenames.outputs.dutctl_path }}"
+          echo "dutctl_pkg_path: ${{ steps.filenames.outputs.dutctl_pkg_path }}"
+
+      - name: Upload to FirmwareCI
+        uses: docker://firmwareci/action:v5.1
+        with:
+          TOKEN: "${{ secrets.FWCI_TOKEN }}"
+          # EMAIL: ${{ secrets.FWCI_EMAIL }}
+          # PASSWORD: ${{ secrets.FWCI_PASSWORD }}
+          WORKFLOW_ID: "${{ secrets.FWCI_WORKFLOW_ID }}"
+          COMMIT_HASH: ${{ github.event.pull_request.head.sha || github.sha }}
+          BINARIES: DUTCTL=${{ steps.filenames.outputs.dutctl_path }};REMOTE_PKG=${{ steps.filenames.outputs.dutctl_pkg_path }};CONFIG=./test/test-dutagent-cfg.yaml;DUMMY_SPI_FLASH_ROM=./.firmwareci/dummy_binary.rom;TASKFILE=.firmwareci/Taskfile.yml
+          GITHUB_INSTALLATION_ID: 45795153

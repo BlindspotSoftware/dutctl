@@ -1,0 +1,15 @@
+[Unit]
+Description=dutagent to run on devices under test
+Documentation=https://github.com/BlindspotSoftware/dutctl
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Environment=EM100_HOME=/root/.em100
+# TODO: I think that the 'Environment' needs to be changed or removed
+Restart=always
+RestartSec=3s
+ExecStart=/usr/bin/dutagent -c /etc/dutctl.yaml
+
+[Install]
+WantedBy=multi-user.target

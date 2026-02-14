@@ -1,0 +1,3 @@
+[submodule ".firmwareci"]
+	path = .firmwareci
+	url = https://github.com/9elements/dutctl-fwci-testing.git
