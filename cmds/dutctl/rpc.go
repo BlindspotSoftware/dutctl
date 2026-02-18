@@ -95,8 +95,8 @@ func (app *application) detailsRPC(device, command, keyword string) error {
 // setRawInput puts the terminal into raw input mode: disables local echo and
 // canonical (line-buffered) mode so each keystroke is available immediately.
 // It returns a restore function, or nil if the fd is not a terminal.
-func setRawInput(fd int) func() {
-	termios, err := unix.IoctlGetTermios(fd, unix.TCGETS)
+func setRawInput(fileDescriptor int) func() {
+	termios, err := unix.IoctlGetTermios(fileDescriptor, unix.TCGETS)
 	if err != nil {
 		return nil
 	}
@@ -108,12 +108,13 @@ func setRawInput(fd int) func() {
 	termios.Cc[unix.VMIN] = 1
 	termios.Cc[unix.VTIME] = 0
 
-	if err := unix.IoctlSetTermios(fd, unix.TCSETS, termios); err != nil {
+	err = unix.IoctlSetTermios(fileDescriptor, unix.TCSETS, termios)
+	if err != nil {
 		return nil
 	}
 
 	return func() {
-		_ = unix.IoctlSetTermios(fd, unix.TCSETS, &old)
+		_ = unix.IoctlSetTermios(fileDescriptor, unix.TCSETS, &old)
 	}
 }
 
@@ -264,7 +265,9 @@ func (app *application) runRPC(device, command string, cmdArgs []string) error {
 	go func() {
 		defer cancel()
 
-		buf := make([]byte, 256)
+		const stdinBufSize = 256
+
+		buf := make([]byte, stdinBufSize)
 
 		for {
 			select {
@@ -275,7 +278,7 @@ func (app *application) runRPC(device, command string, cmdArgs []string) error {
 			default:
 			}
 
-			n, err := app.stdin.Read(buf)
+			nRead, err := app.stdin.Read(buf)
 			if err != nil {
 				if !errors.Is(err, io.EOF) {
 					errChan <- fmt.Errorf("reading stdin: %w", err)
@@ -288,7 +291,7 @@ func (app *application) runRPC(device, command string, cmdArgs []string) error {
 				Msg: &pb.RunRequest_Console{
 					Console: &pb.Console{
 						Data: &pb.Console_Stdin{
-							Stdin: buf[:n],
+							Stdin: buf[:nRead],
 						},
 					},
 				},

@@ -57,7 +57,7 @@ Input from the client is forwarded to the serial port, and output from the seria
 If a regex is provided, the module will wait for the regex to match on the serial output,
 then exit with success. If no expect string is provided, the module will read from the serial port
 until it is terminated by a signal (e.g. Ctrl-C).
-The  expect string supports regular expressions according to [1].
+The expect string supports regular expressions according to [1].
 The optional -t flag specifies the maximum time to wait for the regex to match.
 Quote the expect string if it contains spaces or special characters. E.g.: "(?i)hello\s+world!? dutctl"
 
@@ -100,7 +100,7 @@ func (s *Serial) Deinit() error {
 	return nil
 }
 
-//nolint:cyclop,funlen,gocognit
+//nolint:cyclop,funlen,gocognit,gocyclo,maintidx
 func (s *Serial) Run(ctx context.Context, session module.Session, args ...string) error {
 	log.Println("serial module: Run called")
 
@@ -141,11 +141,13 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 	// Strip ANSI CSI sequences from stdin, since the remote system may send terminal
 	// queries (e.g. DSR) that cause the local terminal to inject responses (e.g. CPR)
 	// into stdin, which would corrupt the serial input.
+	const stdinBufSize = 256
+
 	go func() {
-		buf := make([]byte, 256)
+		buf := make([]byte, stdinBufSize)
 
 		for {
-			n, err := stdin.Read(buf)
+			nRead, err := stdin.Read(buf)
 			if err != nil {
 				select {
 				case <-done:
@@ -162,7 +164,7 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 				return
 			}
 
-			data := stripCSI(buf[:n])
+			data := stripCSI(buf[:nRead])
 
 			if len(data) == 0 {
 				continue
@@ -174,12 +176,13 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 			default:
 			}
 
-			if _, err := port.Write(data); err != nil {
+			_, writeErr := port.Write(data)
+			if writeErr != nil {
 				select {
 				case <-done:
 					return // port closed on Run() exit — not an error.
 				default:
-					log.Printf("serial module: error writing to serial port: %v", err)
+					log.Printf("serial module: error writing to serial port: %v", writeErr)
 				}
 
 				return
@@ -192,9 +195,9 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 	readBuffer := make([]byte, bufferSize)
 	lineBuffer := &bytes.Buffer{}
 
-	// mu protects lineBuffer which is accessed from the main loop
+	// mutex protects lineBuffer which is accessed from the main loop
 	// and the flush timer goroutine.
-	var mu sync.Mutex
+	var mutex sync.Mutex
 
 	flushBuffer := func() {
 		if lineBuffer.Len() == 0 {
@@ -202,7 +205,7 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 		}
 
 		line := lineBuffer.String()
-		stdout.Write([]byte(line)) //nolint:errcheck
+		_, _ = stdout.Write([]byte(line)) // ChanWriter.Write always returns nil
 
 		if s.expect != nil && s.expect.MatchString(line) {
 			log.Printf("serial module: pattern matched in flush")
@@ -233,12 +236,12 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 
 			return nil
 		case <-ctx.Done():
-			mu.Lock()
+			mutex.Lock()
 
 			// Flush any remaining data before closing.
 			flushBuffer()
 
-			mu.Unlock()
+			mutex.Unlock()
 
 			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 				fmt.Fprintln(stdout, "\n--- Timeout reached, no match found ---")
@@ -272,7 +275,7 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 				continue
 			}
 
-			mu.Lock()
+			mutex.Lock()
 
 			// Stop pending flush timer since we have new data.
 			if flushTimer != nil {
@@ -280,18 +283,23 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 			}
 
 			// Process the data read character by character
-			for i := range len(outData) {
-				b := outData[i]
+			for _, b := range outData {
 				lineBuffer.WriteByte(b)
 
 				// If we reach a newline or a buffer limit, process the line
 				if b == '\n' || lineBuffer.Len() >= 1024 {
 					line := lineBuffer.String()
-					stdout.Write([]byte(line)) //nolint:errcheck
+
+					_, writeErr := stdout.Write([]byte(line))
+					if writeErr != nil {
+						mutex.Unlock()
+
+						return fmt.Errorf("error writing to stdout: %w", writeErr)
+					}
 
 					// Check for regex match if we have one
 					if s.expect != nil && s.expect.MatchString(line) {
-						mu.Unlock()
+						mutex.Unlock()
 
 						fmt.Fprintln(stdout, "\n--- Pattern matched, connection closed ---")
 
@@ -306,13 +314,13 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 			// schedule a flush so prompts like "login: " appear promptly.
 			if lineBuffer.Len() > 0 {
 				flushTimer = time.AfterFunc(flushTimeout, func() {
-					mu.Lock()
+					mutex.Lock()
 					flushBuffer()
-					mu.Unlock()
+					mutex.Unlock()
 				})
 			}
 
-			mu.Unlock()
+			mutex.Unlock()
 		}
 	}
 }
@@ -363,17 +371,22 @@ func (s *Serial) openPort() (*serial.Port, error) {
 	return port, nil
 }
 
+// csiPrefixLen is the length of the CSI prefix "ESC[".
+const csiPrefixLen = 2
+
 // filterOutputCSI removes CSI sequences from serial output data, except for
 // SGR (Select Graphic Rendition, final byte 'm') which handles colors and styles.
 // This prevents cursor positioning, screen clearing, and terminal query sequences
 // from affecting the client terminal, while preserving colored output.
+//
+//nolint:cyclop,varnamelen
 func filterOutputCSI(data []byte) []byte {
 	result := make([]byte, 0, len(data))
 
 	for i := 0; i < len(data); i++ {
 		if data[i] == 0x1b && i+1 < len(data) && data[i+1] == '[' {
 			// Find the extent of this CSI sequence.
-			j := i + 2
+			j := i + csiPrefixLen
 
 			for j < len(data) && data[j] >= 0x30 && data[j] <= 0x3f {
 				j++ // parameter bytes
@@ -410,6 +423,8 @@ func filterOutputCSI(data []byte) []byte {
 // intermediate bytes (0x20-0x2f), and a final byte (0x40-0x7e).
 // This filters out terminal responses (like cursor position reports) that the local
 // terminal injects into stdin when the remote system sends queries.
+//
+//nolint:varnamelen
 func stripCSI(data []byte) []byte {
 	result := make([]byte, 0, len(data))
 
@@ -418,12 +433,13 @@ func stripCSI(data []byte) []byte {
 			// Skip ESC[
 			i += 2
 
-			// Skip parameter and intermediate bytes, stop at final byte.
-			for i < len(data) && data[i] < 0x40 {
+			// Skip parameter bytes (0x30-0x3f) and intermediate bytes (0x20-0x2f).
+			for i < len(data) && data[i] >= 0x20 && data[i] < 0x40 {
 				i++
 			}
-			// i now points at the final byte (0x40-0x7e); skip it too.
 
+			// i now points at the final byte (0x40-0x7e); the outer loop's
+			// i++ will advance past it on the next iteration.
 			continue
 		}
 
