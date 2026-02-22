@@ -37,8 +37,9 @@ type Serial struct {
 	Port string // Port is the path to the serial device on the dutagent.
 	Baud int    // Baud is the baud rate of the serial device. Is unset, DefaultBaudRate is used.
 
-	expect  *regexp.Regexp // expect is a pattern to match against the serial output.
-	timeout time.Duration  // timeout is the maximum time to wait for the expect pattern to match.
+	expect       *regexp.Regexp // expect is a pattern to match against the serial output.
+	timeout      time.Duration  // timeout is the maximum time to wait for the expect pattern to match.
+	csiRemainder []byte         // csiRemainder holds an incomplete CSI sequence carried over across buffer reads.
 }
 
 // Ensure implementing the Module interface.
@@ -115,7 +116,7 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 	}
 	defer port.Close()
 
-	stdin, stdout, _ := session.Console()
+	stdin, stdout, _ := session.Console() // stderr intentionally unused: serial output goes to stdout only
 
 	log.Printf("serial module: connected to %s at %d baud", s.Port, s.Baud)
 	fmt.Fprintf(stdout, "--- Connected to %s at %d baud ---\n", s.Port, s.Baud)
@@ -133,59 +134,78 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 	done := make(chan struct{})
 	defer close(done)
 
-	// matchCh receives a value when a pattern is matched inside the flush
-	// timer goroutine, which cannot return from Run() directly.
+	// matchCh signals the main select when a pattern match is detected inside the
+	// flush timer goroutine, which cannot return from Run() directly.
 	matchCh := make(chan struct{}, 1)
 
 	// Forward client stdin to serial port.
-	// Strip ANSI CSI sequences from stdin, since the remote system may send terminal
-	// queries (e.g. DSR) that cause the local terminal to inject responses (e.g. CPR)
-	// into stdin, which would corrupt the serial input.
+	// DSR suppression (preventing CPR injection) is handled on the output side by
+	// filterOutputCSI, which strips non-SGR CSI sequences — including DSR (ESC[6n) —
+	// from serial output before it reaches the client terminal. The terminal never sees
+	// a DSR query and therefore never injects CPR responses into stdin.
 	const stdinBufSize = 256
 
-	go func() {
+	type readResult struct {
+		data []byte
+		err  error
+	}
+
+	readResultCh := make(chan readResult, 1)
+
+	go func() { // inner goroutine — exits when fromClientWorker closes stdinCh on session teardown.
 		buf := make([]byte, stdinBufSize)
 
 		for {
-			nRead, err := stdin.Read(buf)
+			n, err := stdin.Read(buf)
+			cp := make([]byte, n)
+			copy(cp, buf[:n])
+			readResultCh <- readResult{data: cp, err: err}
+
 			if err != nil {
-				select {
-				case <-done:
-					return // Run() exited — suppress spurious error log.
-				default:
-				}
-
-				if ctx.Err() != nil {
-					return
-				}
-
-				log.Printf("serial module: error reading from stdin: %v", err)
-
 				return
 			}
+		}
+	}()
 
-			data := stripCSI(buf[:nRead])
-
-			if len(data) == 0 {
-				continue
-			}
-
+	go func() { // outer goroutine — exits promptly when done is closed.
+		for {
 			select {
 			case <-done:
 				return
-			default:
-			}
+			case res := <-readResultCh:
+				if res.err != nil {
+					select {
+					case <-done:
+						return // Run() exited — suppress spurious error log.
+					default:
+					}
 
-			_, writeErr := port.Write(data)
-			if writeErr != nil {
-				select {
-				case <-done:
-					return // port closed on Run() exit — not an error.
-				default:
-					log.Printf("serial module: error writing to serial port: %v", writeErr)
+					if ctx.Err() != nil {
+						return
+					}
+
+					log.Printf("serial module: error reading from stdin: %v", res.err)
+
+					return
 				}
 
-				return
+				select {
+				case <-done:
+					return
+				default:
+				}
+
+				_, writeErr := port.Write(res.data)
+				if writeErr != nil {
+					select {
+					case <-done:
+						return // port closed on Run() exit — not an error.
+					default:
+						log.Printf("serial module: error writing to serial port: %v", writeErr)
+					}
+
+					return
+				}
 			}
 		}
 	}()
@@ -199,32 +219,18 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 	// and the flush timer goroutine.
 	var mutex sync.Mutex
 
-	flushBuffer := func() {
-		if lineBuffer.Len() == 0 {
-			return
-		}
-
-		line := lineBuffer.String()
-		_, _ = stdout.Write([]byte(line)) // ChanWriter.Write always returns nil
-
-		if s.expect != nil && s.expect.MatchString(line) {
-			log.Printf("serial module: pattern matched in flush")
-
-			select {
-			case matchCh <- struct{}{}:
-			default: // already signalled
-			}
-		}
-
-		lineBuffer.Reset()
-	}
-
-	var flushTimer *time.Timer
+	// flushGen is a generation counter that invalidates stale timer callbacks.
+	// Every access (increment in the main loop, read in callbacks, increment in
+	// the shutdown defer) is performed while holding mutex, so no separate
+	// synchronisation is needed.
+	var flushGen uint64
 
 	defer func() {
-		if flushTimer != nil {
-			flushTimer.Stop()
-		}
+		mutex.Lock()
+
+		flushGen++ // Invalidate any pending timer callbacks.
+
+		mutex.Unlock()
 	}()
 
 	const flushTimeout = 100 * time.Millisecond
@@ -236,13 +242,6 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 
 			return nil
 		case <-ctx.Done():
-			mutex.Lock()
-
-			// Flush any remaining data before closing.
-			flushBuffer()
-
-			mutex.Unlock()
-
 			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 				fmt.Fprintln(stdout, "\n--- Timeout reached, no match found ---")
 
@@ -269,18 +268,20 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 
 			// Filter CSI sequences from serial output that could cause
 			// cursor positioning artifacts. Color/style sequences (SGR)
-			// are preserved.
-			outData := filterOutputCSI(readBuffer[:sbytes])
+			// are preserved. Prepend any partial CSI sequence left over
+			// from the previous read to handle sequences split across buffers.
+			chunk := readBuffer[:sbytes]
+			if len(s.csiRemainder) > 0 {
+				chunk = append(s.csiRemainder, chunk...)
+				s.csiRemainder = nil
+			}
+
+			outData := filterOutputCSI(chunk, &s.csiRemainder)
 			if len(outData) == 0 {
 				continue
 			}
 
 			mutex.Lock()
-
-			// Stop pending flush timer since we have new data.
-			if flushTimer != nil {
-				flushTimer.Stop()
-			}
 
 			// Process the data read character by character
 			for _, b := range outData {
@@ -312,11 +313,49 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 
 			// If there's data remaining in the line buffer (no newline yet),
 			// schedule a flush so prompts like "login: " appear promptly.
+			// Each timer captures its generation; stale callbacks are no-ops.
 			if lineBuffer.Len() > 0 {
-				flushTimer = time.AfterFunc(flushTimeout, func() {
+				flushGen++
+				thisGen := flushGen
+
+				time.AfterFunc(flushTimeout, func() {
+					// Phase 1: drain the buffer under the lock (fast, no I/O).
 					mutex.Lock()
-					flushBuffer()
+
+					if flushGen != thisGen || lineBuffer.Len() == 0 {
+						mutex.Unlock()
+
+						return
+					}
+
+					line := lineBuffer.String()
+					lineBuffer.Reset()
+
+					matched := s.expect != nil && s.expect.MatchString(line)
+
 					mutex.Unlock()
+
+					// Phase 2: write to stdout outside the lock.
+					// ChanWriter.Write blocks on an unbuffered channel send; holding
+					// the mutex during that send could deadlock the main loop.
+					// Skip the write if Run() has already returned to avoid a stuck
+					// goroutine when toClientWorker is no longer receiving.
+					select {
+					case <-done:
+						return
+					default:
+					}
+
+					_, _ = stdout.Write([]byte(line))
+
+					if matched {
+						log.Printf("serial module: pattern matched in flush")
+
+						select {
+						case matchCh <- struct{}{}:
+						default: // already signalled
+						}
+					}
 				})
 			}
 
@@ -371,6 +410,9 @@ func (s *Serial) openPort() (*serial.Port, error) {
 	return port, nil
 }
 
+// escByte is the ASCII escape character that starts ANSI/VT escape sequences.
+const escByte = 0x1b
+
 // csiPrefixLen is the length of the CSI prefix "ESC[".
 const csiPrefixLen = 2
 
@@ -379,71 +421,66 @@ const csiPrefixLen = 2
 // This prevents cursor positioning, screen clearing, and terminal query sequences
 // from affecting the client terminal, while preserving colored output.
 //
-//nolint:cyclop,varnamelen
-func filterOutputCSI(data []byte) []byte {
-	result := make([]byte, 0, len(data))
-
-	for i := 0; i < len(data); i++ {
-		if data[i] == 0x1b && i+1 < len(data) && data[i+1] == '[' {
-			// Find the extent of this CSI sequence.
-			j := i + csiPrefixLen
-
-			for j < len(data) && data[j] >= 0x30 && data[j] <= 0x3f {
-				j++ // parameter bytes
-			}
-
-			for j < len(data) && data[j] >= 0x20 && data[j] <= 0x2f {
-				j++ // intermediate bytes
-			}
-
-			if j >= len(data) {
-				// Incomplete sequence at end of buffer — drop it.
-				break
-			}
-
-			if data[j] == 'm' {
-				// SGR (colors/styles) — keep it.
-				result = append(result, data[i:j+1]...)
-			}
-
-			// All other CSI sequences are dropped.
-			i = j
-
-			continue
-		}
-
-		result = append(result, data[i])
-	}
-
-	return result
-}
-
-// stripCSI removes ANSI CSI (Control Sequence Introducer) sequences from data.
-// CSI sequences start with ESC[ (0x1b 0x5b), followed by parameter bytes (0x30-0x3f),
-// intermediate bytes (0x20-0x2f), and a final byte (0x40-0x7e).
-// This filters out terminal responses (like cursor position reports) that the local
-// terminal injects into stdin when the remote system sends queries.
+// Incomplete CSI sequences at the end of data are stored in remainder so they
+// can be prepended to the next buffer read and reconstituted correctly.
 //
-//nolint:varnamelen
-func stripCSI(data []byte) []byte {
+//nolint:cyclop,varnamelen
+func filterOutputCSI(data []byte, remainder *[]byte) []byte {
 	result := make([]byte, 0, len(data))
+	*remainder = nil
 
 	for i := 0; i < len(data); i++ {
-		if data[i] == 0x1b && i+1 < len(data) && data[i+1] == '[' {
-			// Skip ESC[
-			i += 2
+		if data[i] != escByte {
+			result = append(result, data[i])
 
-			// Skip parameter bytes (0x30-0x3f) and intermediate bytes (0x20-0x2f).
-			for i < len(data) && data[i] >= 0x20 && data[i] < 0x40 {
-				i++
-			}
-
-			// i now points at the final byte (0x40-0x7e); the outer loop's
-			// i++ will advance past it on the next iteration.
 			continue
 		}
 
-		result = append(result, data[i])
+		// ESC at end of buffer: might be the start of a CSI sequence split across reads.
+		if i+1 >= len(data) {
+			*remainder = []byte{escByte}
+
+			break
+		}
+
+		if data[i+1] != '[' {
+			// ESC not followed by '[' — not a CSI sequence, emit as-is.
+			result = append(result, data[i])
+
+			continue
+		}
+
+		// CSI sequence: ESC [
+		// Find the extent of this CSI sequence.
+		j := i + csiPrefixLen
+
+		for j < len(data) && data[j] >= 0x30 && data[j] <= 0x3f {
+			j++ // parameter bytes
+		}
+
+		for j < len(data) && data[j] >= 0x20 && data[j] <= 0x2f {
+			j++ // intermediate bytes
+		}
+
+		if j >= len(data) {
+			// Incomplete sequence at end of buffer — carry it over to the next read.
+			*remainder = make([]byte, len(data)-i)
+			copy(*remainder, data[i:])
+
+			break
+		}
+
+		if data[j] == 'm' {
+			// SGR (colors/styles) — keep it.
+			result = append(result, data[i:j+1]...)
+		}
+
+		// All other CSI sequences are dropped, including malformed ones where
+		// data[j] is not a valid final byte (0x40–0x7E). The byte at data[j]
+		// is consumed by setting i = j; the outer loop's i++ then advances past
+		// it. Silently dropping malformed sequences is safer than emitting
+		// partial escape bytes which could corrupt the terminal display.
+		i = j
 	}
 
 	return result
