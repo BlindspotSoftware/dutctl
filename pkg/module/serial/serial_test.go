@@ -367,3 +367,202 @@ func TestSerialHelp(t *testing.T) {
 		})
 	}
 }
+
+// TestUnescape verifies that unescape correctly converts C-style escape sequences.
+//
+//nolint:funlen
+func TestUnescape(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  []byte
+	}{
+		{
+			name:  "empty string",
+			input: "",
+			want:  []byte{},
+		},
+		{
+			name:  "plain text unchanged",
+			input: "hello",
+			want:  []byte("hello"),
+		},
+		{
+			name:  "newline escape",
+			input: `\n`,
+			want:  []byte{'\n'},
+		},
+		{
+			name:  "carriage return escape",
+			input: `\r`,
+			want:  []byte{'\r'},
+		},
+		{
+			name:  "tab escape",
+			input: `\t`,
+			want:  []byte{'\t'},
+		},
+		{
+			name:  "backslash escape",
+			input: `\\`,
+			want:  []byte{'\\'},
+		},
+		{
+			name:  "hex escape lowercase",
+			input: `\x41`,
+			want:  []byte{'A'},
+		},
+		{
+			name:  "hex escape uppercase",
+			input: `\x4F`,
+			want:  []byte{'O'},
+		},
+		{
+			name:  "hex escape zero byte",
+			input: `\x00`,
+			want:  []byte{0x00},
+		},
+		{
+			name:  "multiple hex escapes",
+			input: `\x0d\x0a`,
+			want:  []byte{'\r', '\n'},
+		},
+		{
+			name:  "mixed text and escapes",
+			input: `user\r\n`,
+			want:  []byte{'u', 's', 'e', 'r', '\r', '\n'},
+		},
+		{
+			name:  "unknown escape emitted as-is",
+			input: `\q`,
+			want:  []byte{'\\', 'q'},
+		},
+		{
+			name:  "lone backslash at end emitted as-is",
+			input: `abc\`,
+			want:  []byte{'a', 'b', 'c', '\\'},
+		},
+		{
+			name:  "incomplete hex escape emitted as-is",
+			input: `\x`,
+			want:  []byte{'\\', 'x'},
+		},
+		{
+			// \x requires exactly two hex digits; with only one the \x is
+			// emitted as-is and the remaining character follows normally.
+			name:  "hex escape with one digit only emitted as-is",
+			input: `\x4`,
+			want:  []byte{'\\', 'x', '4'},
+		},
+		{
+			// Non-hex chars after \x: the \x is emitted as-is and the
+			// non-hex characters are emitted as regular bytes.
+			name:  "hex escape with non-hex chars emitted as-is",
+			input: `\xGG`,
+			want:  []byte{'\\', 'x', 'G', 'G'},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := unescape(tt.input)
+
+			if string(got) != string(tt.want) {
+				t.Errorf("unescape(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestEvalArgsPairs covers the expect-send pair parsing mode of evalArgs.
+func TestEvalArgsPairs(t *testing.T) {
+	tests := []struct {
+		name       string
+		args       []string
+		wantPairs  int    // expected number of pairs
+		wantPat0   string // pattern of first pair (empty = skip check)
+		wantResp0  string // response of first pair (empty = skip check)
+		wantPat1   string // pattern of second pair (empty = skip check)
+		wantResp1  string // response of second pair (empty = skip check)
+		wantErr    bool
+	}{
+		{
+			name:      "one pair",
+			args:      []string{"login:", "user\\n"},
+			wantPairs: 1,
+			wantPat0:  "login:",
+			wantResp0: "user\n",
+		},
+		{
+			name:      "two pairs",
+			args:      []string{"login:", "user\\n", "Password:", "secret\\n"},
+			wantPairs: 2,
+			wantPat0:  "login:",
+			wantResp0: "user\n",
+			wantPat1:  "Password:",
+			wantResp1: "secret\n",
+		},
+		{
+			name:      "pair with hex escape in response",
+			args:      []string{"ready", "\\x0d"},
+			wantPairs: 1,
+			wantPat0:  "ready",
+			wantResp0: "\r",
+		},
+		{
+			name:    "odd number of args returns error",
+			args:    []string{"login:", "user", "extra"},
+			wantErr: true,
+		},
+		{
+			name:    "invalid regex in pair returns error",
+			args:    []string{"[invalid", "response"},
+			wantErr: true,
+		},
+		{
+			name:    "invalid regex in second pair returns error",
+			args:    []string{"login:", "user\\n", "[bad", "pass"},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &Serial{}
+
+			err := s.evalArgs(tt.args)
+
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("evalArgs() error = %v, wantErr %v", err, tt.wantErr)
+			}
+
+			if tt.wantErr {
+				return
+			}
+
+			if len(s.pairs) != tt.wantPairs {
+				t.Fatalf("len(pairs) = %d, want %d", len(s.pairs), tt.wantPairs)
+			}
+
+			if s.expect != nil {
+				t.Errorf("expect should be nil in pairs mode, got %v", s.expect)
+			}
+
+			if tt.wantPat0 != "" && s.pairs[0].pattern.String() != tt.wantPat0 {
+				t.Errorf("pairs[0].pattern = %q, want %q", s.pairs[0].pattern.String(), tt.wantPat0)
+			}
+
+			if tt.wantResp0 != "" && string(s.pairs[0].response) != tt.wantResp0 {
+				t.Errorf("pairs[0].response = %q, want %q", s.pairs[0].response, tt.wantResp0)
+			}
+
+			if tt.wantPat1 != "" && len(s.pairs) > 1 && s.pairs[1].pattern.String() != tt.wantPat1 {
+				t.Errorf("pairs[1].pattern = %q, want %q", s.pairs[1].pattern.String(), tt.wantPat1)
+			}
+
+			if tt.wantResp1 != "" && len(s.pairs) > 1 && string(s.pairs[1].response) != tt.wantResp1 {
+				t.Errorf("pairs[1].response = %q, want %q", s.pairs[1].response, tt.wantResp1)
+			}
+		})
+	}
+}

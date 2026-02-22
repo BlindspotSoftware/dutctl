@@ -32,14 +32,22 @@ func init() {
 // DefaultBaudRate is the default baud rate for the serial connection.
 const DefaultBaudRate = 115200
 
+// expectSendPair holds a compiled regex pattern and the bytes to send when it matches.
+// A nil or empty response means the module exits on match without sending anything.
+type expectSendPair struct {
+	pattern  *regexp.Regexp
+	response []byte
+}
+
 // Serial is a module that provides an interactive serial connection to a DUT.
 type Serial struct {
 	Port string // Port is the path to the serial device on the dutagent.
-	Baud int    // Baud is the baud rate of the serial device. Is unset, DefaultBaudRate is used.
+	Baud int    // Baud is the baud rate of the serial device. If unset, DefaultBaudRate is used.
 
-	expect       *regexp.Regexp // expect is a pattern to match against the serial output.
-	timeout      time.Duration  // timeout is the maximum time to wait for the expect pattern to match.
-	csiRemainder []byte         // csiRemainder holds an incomplete CSI sequence carried over across buffer reads.
+	expect       *regexp.Regexp   // expect is a pattern to match against the serial output (single-expect mode).
+	pairs        []expectSendPair // pairs are the expect-send pairs (expect-send mode).
+	timeout      time.Duration    // timeout is the maximum time to wait for the expect pattern to match.
+	csiRemainder []byte           // csiRemainder holds an incomplete CSI sequence carried over across buffer reads.
 }
 
 // Ensure implementing the Module interface.
@@ -49,18 +57,25 @@ const abstract = `Serial connection to the DUT
 `
 const usage = `
 ARGUMENTS:
-	[-t <duration>] [<expect>]
+	[-t <duration>] [<expect> [<response> <expect> <response> ...]]
 
 `
 const description = `
 The serial module provides an interactive connection to the DUT's serial port.
 Input from the client is forwarded to the serial port, and output from the serial port is displayed.
-If a regex is provided, the module will wait for the regex to match on the serial output,
-then exit with success. If no expect string is provided, the module will read from the serial port
-until it is terminated by a signal (e.g. Ctrl-C).
+
+Modes of operation:
+  - Interactive (no arguments): read and write until terminated by a signal (e.g. Ctrl-C).
+  - Expect (1 argument): wait for the regex to match on the serial output, then exit.
+  - Expect-send (even number of arguments >= 2): pass pattern/response pairs.
+    For each pair, the module waits for the pattern to match and then sends the
+    response to the serial port. Pairs are processed in order; the module exits
+    after the last pair matches.
+
 The expect string supports regular expressions according to [1].
-The optional -t flag specifies the maximum time to wait for the regex to match.
-Quote the expect string if it contains spaces or special characters. E.g.: "(?i)hello\s+world!? dutctl"
+The optional -t flag specifies the maximum time to wait.
+Quote strings containing spaces or special characters. E.g.: "(?i)hello\s+world"
+Response strings support C-style escape sequences: \n, \r, \t, \\, \xHH.
 
 [1] https://golang.org/s/re2syntax.
 `
@@ -130,13 +145,60 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 		defer cancel()
 	}
 
-	// done is closed when Run() exits to signal the stdin goroutine to stop.
+	// done is closed when Run() exits to signal goroutines to stop.
 	done := make(chan struct{})
 	defer close(done)
 
 	// matchCh signals the main select when a pattern match is detected inside the
 	// flush timer goroutine, which cannot return from Run() directly.
 	matchCh := make(chan struct{}, 1)
+
+	// portMu serializes all writes to the serial port across goroutines (stdin
+	// forwarding, auto-responses). This prevents interleaved writes when user
+	// input and an auto-response arrive concurrently.
+	var portMu sync.Mutex
+
+	writeToPort := func(data []byte) error {
+		portMu.Lock()
+		defer portMu.Unlock()
+
+		_, writeErr := port.Write(data)
+		if writeErr != nil {
+			log.Printf("serial module: error writing to serial port: %v", writeErr)
+		}
+
+		return writeErr
+	}
+
+	// currentPair is the index of the next expect-send pair to match.
+	// Accessed under mutex (below) because it is also read in timer callbacks.
+	currentPair := 0
+
+	// checkLineMatch reports whether line satisfies the current expect condition.
+	// Must be called while holding mutex.
+	// Returns (response to send to the port, exit) where exit signals Run() to return.
+	checkLineMatch := func(line string) (response []byte, exit bool) {
+		if s.expect != nil {
+			if s.expect.MatchString(line) {
+				return nil, true
+			}
+
+			return nil, false
+		}
+
+		if currentPair >= len(s.pairs) {
+			return nil, false
+		}
+
+		if !s.pairs[currentPair].pattern.MatchString(line) {
+			return nil, false
+		}
+
+		response = s.pairs[currentPair].response
+		currentPair++
+
+		return response, currentPair >= len(s.pairs)
+	}
 
 	// Forward client stdin to serial port.
 	// DSR suppression (preventing CPR injection) is handled on the output side by
@@ -195,13 +257,11 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 				default:
 				}
 
-				_, writeErr := port.Write(res.data)
-				if writeErr != nil {
+				if writeToPort(res.data) != nil {
 					select {
 					case <-done:
 						return // port closed on Run() exit — not an error.
 					default:
-						log.Printf("serial module: error writing to serial port: %v", writeErr)
 					}
 
 					return
@@ -215,8 +275,8 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 	readBuffer := make([]byte, bufferSize)
 	lineBuffer := &bytes.Buffer{}
 
-	// mutex protects lineBuffer which is accessed from the main loop
-	// and the flush timer goroutine.
+	// mutex protects lineBuffer and currentPair which are accessed from the main
+	// loop and the flush timer goroutine.
 	var mutex sync.Mutex
 
 	// flushGen is a generation counter that invalidates stale timer callbacks.
@@ -245,7 +305,11 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 				fmt.Fprintln(stdout, "\n--- Timeout reached, no match found ---")
 
-				return fmt.Errorf("timeout of %s reached, pattern %q not found", s.timeout, s.expect)
+				if s.expect != nil {
+					return fmt.Errorf("timeout of %s reached, pattern %q not found", s.timeout, s.expect)
+				}
+
+				return fmt.Errorf("timeout of %s reached, expect-send sequence not completed", s.timeout)
 			}
 
 			fmt.Fprintln(stdout, "\n--- Connection closed ---")
@@ -287,27 +351,41 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 			for _, b := range outData {
 				lineBuffer.WriteByte(b)
 
-				// If we reach a newline or a buffer limit, process the line
-				if b == '\n' || lineBuffer.Len() >= 1024 {
-					line := lineBuffer.String()
+				if b != '\n' && lineBuffer.Len() < 1024 {
+					continue
+				}
 
-					_, writeErr := stdout.Write([]byte(line))
-					if writeErr != nil {
-						mutex.Unlock()
+				line := lineBuffer.String()
+				lineBuffer.Reset()
 
-						return fmt.Errorf("error writing to stdout: %w", writeErr)
+				_, writeErr := stdout.Write([]byte(line))
+				if writeErr != nil {
+					mutex.Unlock()
+
+					return fmt.Errorf("error writing to stdout: %w", writeErr)
+				}
+
+				response, exit := checkLineMatch(line)
+
+				if exit {
+					mutex.Unlock()
+
+					if len(response) > 0 {
+						_ = writeToPort(response)
 					}
 
-					// Check for regex match if we have one
-					if s.expect != nil && s.expect.MatchString(line) {
-						mutex.Unlock()
+					fmt.Fprintln(stdout, "\n--- Pattern matched, connection closed ---")
 
-						fmt.Fprintln(stdout, "\n--- Pattern matched, connection closed ---")
+					return nil
+				}
 
-						return nil // Success - pattern found
-					}
+				if len(response) > 0 {
+					// Intermediate pair matched: send response and continue waiting.
+					mutex.Unlock()
 
-					lineBuffer.Reset()
+					_ = writeToPort(response)
+
+					mutex.Lock()
 				}
 			}
 
@@ -331,7 +409,7 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 					line := lineBuffer.String()
 					lineBuffer.Reset()
 
-					matched := s.expect != nil && s.expect.MatchString(line)
+					response, exit := checkLineMatch(line)
 
 					mutex.Unlock()
 
@@ -348,7 +426,11 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 
 					_, _ = stdout.Write([]byte(line))
 
-					if matched {
+					if len(response) > 0 {
+						_ = writeToPort(response)
+					}
+
+					if exit {
 						log.Printf("serial module: pattern matched in flush")
 
 						select {
@@ -364,6 +446,7 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 	}
 }
 
+//nolint:cyclop
 func (s *Serial) evalArgs(args []string) error {
 	fs := flag.NewFlagSet("serial", flag.ContinueOnError)
 	fs.SetOutput(io.Discard) // Suppress default error output
@@ -374,19 +457,41 @@ func (s *Serial) evalArgs(args []string) error {
 		return fmt.Errorf("failed to parse arguments: %w", err)
 	}
 
-	// Get the expect string if provided (args after flags)
-	var expectPattern string
-	if fs.NArg() > 0 {
-		expectPattern = fs.Arg(0)
-		log.Printf("serial module: Will wait for pattern: %q", expectPattern)
-	}
+	positional := fs.Args()
 
-	if expectPattern != "" {
-		var err error
+	switch len(positional) {
+	case 0:
+		// Interactive mode: no expect pattern, no pairs.
+	case 1:
+		// Single-expect mode (backward compatible).
+		log.Printf("serial module: Will wait for pattern: %q", positional[0])
 
-		s.expect, err = regexp.Compile(expectPattern)
-		if err != nil {
-			return fmt.Errorf("invalid regular expression: %w", err)
+		re, compileErr := regexp.Compile(positional[0])
+		if compileErr != nil {
+			return fmt.Errorf("invalid regular expression: %w", compileErr)
+		}
+
+		s.expect = re
+	default:
+		// Expect-send pairs mode.
+		if len(positional)%2 != 0 {
+			return fmt.Errorf("expect-send requires an even number of arguments, got %d", len(positional))
+		}
+
+		s.pairs = make([]expectSendPair, 0, len(positional)/2)
+
+		for i := 0; i < len(positional); i += 2 {
+			re, compileErr := regexp.Compile(positional[i])
+			if compileErr != nil {
+				return fmt.Errorf("invalid regular expression %q: %w", positional[i], compileErr)
+			}
+
+			log.Printf("serial module: Pair %d: pattern=%q response=%q", i/2+1, positional[i], positional[i+1])
+
+			s.pairs = append(s.pairs, expectSendPair{
+				pattern:  re,
+				response: unescape(positional[i+1]),
+			})
 		}
 	}
 
@@ -484,4 +589,65 @@ func filterOutputCSI(data []byte, remainder *[]byte) []byte {
 	}
 
 	return result
+}
+
+// unescape converts C-style escape sequences in s to their byte equivalents.
+// Supported sequences: \n (newline), \r (carriage return), \t (tab),
+// \\ (backslash), \xHH (hex byte). Unrecognised sequences are emitted as-is.
+func unescape(s string) []byte {
+	out := make([]byte, 0, len(s))
+
+	for i := 0; i < len(s); i++ {
+		if s[i] != '\\' || i+1 >= len(s) {
+			out = append(out, s[i])
+
+			continue
+		}
+
+		i++
+
+		switch s[i] {
+		case 'n':
+			out = append(out, '\n')
+		case 'r':
+			out = append(out, '\r')
+		case 't':
+			out = append(out, '\t')
+		case '\\':
+			out = append(out, '\\')
+		case 'x':
+			if i+2 < len(s) {
+				hi, hiOK := fromHex(s[i+1])
+				lo, loOK := fromHex(s[i+2])
+
+				if hiOK && loOK {
+					out = append(out, hi<<4|lo)
+					i += 2
+
+					continue
+				}
+			}
+
+			out = append(out, '\\', 'x')
+		default:
+			out = append(out, '\\', s[i])
+		}
+	}
+
+	return out
+}
+
+// fromHex converts a single ASCII hex digit to its nibble value.
+// Returns (value, true) on success or (0, false) if digit is not a hex character.
+func fromHex(digit byte) (byte, bool) {
+	switch {
+	case digit >= '0' && digit <= '9':
+		return digit - '0', true
+	case digit >= 'a' && digit <= 'f':
+		return digit - 'a' + 10, true
+	case digit >= 'A' && digit <= 'F':
+		return digit - 'A' + 10, true
+	default:
+		return 0, false
+	}
 }
