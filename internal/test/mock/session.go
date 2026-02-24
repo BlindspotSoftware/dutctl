@@ -23,6 +23,7 @@ type Session struct {
 	RequestFileCalled     bool
 	RequestedFileName     string
 	RequestedFileResponse io.Reader
+	RequestFileErr        error
 	SendFileCalled        bool
 	SentFileName          string
 	SentFileContent       []byte
@@ -67,6 +68,10 @@ func (m *Session) Console() (stdin io.Reader, stdout, stderr io.Writer) {
 func (m *Session) RequestFile(name string) (io.Reader, error) {
 	m.RequestFileCalled = true
 	m.RequestedFileName = name
+
+	if m.RequestFileErr != nil {
+		return nil, m.RequestFileErr
+	}
 
 	if m.RequestedFileResponse == nil {
 		panic("mock.Session: RequestedFileResponse not set")

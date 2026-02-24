@@ -1,0 +1,16 @@
+---
+version: 0
+devices:
+  xyz:
+    desc: "A mainboard that uses a Dediprog EM100Pro-G2 flash emulator during firmware development"
+    cmds:
+      flash-emulate:
+        desc: |
+          Basic demo of the FlashEmulate module.
+        uses:
+          - module: flash-emulate
+            main: true
+            with:
+              chip: "N25Q256A13"
+              # tool: "/usr/local/bin/em100"  # optional, defaults to em100
+              # device: "0"                    # optional, for multiple emulators

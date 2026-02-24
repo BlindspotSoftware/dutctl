@@ -93,6 +93,7 @@ DUT agent on it. Below you can find the currently supported modules with example
 | [IPMI Power Control](./pkg/module/ipmi/README.md)                  | :white_check_mark:       |
 | [Power Distribution Unit (Intellinet)](./pkg/module/pdu/README.md) | :white_check_mark:       |
 | Power Distribution Unit (Delock)                                   | :hourglass_flowing_sand: |
+| [SPI Flash Emulator](./pkg/module/flash-emulate/README.md)         | :white_check_mark:       |
 | [SPI Flasher](./pkg/module/flash/README.md)                        | :white_check_mark:       |
 | [Serial Console](./pkg/module/serial/README.md)                    | :white_check_mark:       |
 | [Shell Execution](./pkg/module/shell/README.md)                    | :white_check_mark:       |
