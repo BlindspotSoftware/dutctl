@@ -45,7 +45,7 @@ func (b *Broker) init() {
 // for module execution and a channel signaling worker termination or errors.
 // Multiple calls are idempotent; subsequent calls return the already initialized session and channel.
 //
-//nolint:ireturn // returning interface module.Session is intentional for abstraction boundary
+
 func (b *Broker) Start(ctx context.Context, s Stream) (module.Session, <-chan error) {
 	b.once.Do(func() {
 		b.init()

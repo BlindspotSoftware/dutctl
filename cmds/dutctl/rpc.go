@@ -5,7 +5,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -17,6 +16,7 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/BlindspotSoftware/dutctl/internal/output"
+	"golang.org/x/sys/unix"
 
 	pb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1"
 )
@@ -92,9 +92,44 @@ func (app *application) detailsRPC(device, command, keyword string) error {
 	return nil
 }
 
+// setRawInput puts the terminal into raw input mode: disables local echo and
+// canonical (line-buffered) mode so each keystroke is available immediately.
+// It returns a restore function, or nil if the fd is not a terminal.
+func setRawInput(fileDescriptor int) func() {
+	termios, err := unix.IoctlGetTermios(fileDescriptor, unix.TCGETS)
+	if err != nil {
+		return nil
+	}
+
+	old := *termios
+
+	termios.Iflag &^= unix.ICRNL
+	termios.Lflag &^= unix.ECHO | unix.ICANON
+	termios.Cc[unix.VMIN] = 1
+	termios.Cc[unix.VTIME] = 0
+
+	err = unix.IoctlSetTermios(fileDescriptor, unix.TCSETS, termios)
+	if err != nil {
+		return nil
+	}
+
+	return func() {
+		_ = unix.IoctlSetTermios(fileDescriptor, unix.TCSETS, &old)
+	}
+}
+
 //nolint:funlen,cyclop,gocognit
 func (app *application) runRPC(device, command string, cmdArgs []string) error {
 	const numWorkers = 2 // The send and receive worker goroutines
+
+	// Set raw input mode: disable local echo and canonical mode so each
+	// keystroke is sent immediately. Interactive modules like serial rely
+	// on the remote side to echo input.
+	if f, ok := app.stdin.(*os.File); ok {
+		if restore := setRawInput(int(f.Fd())); restore != nil {
+			defer restore()
+		}
+	}
 
 	runCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -230,7 +265,9 @@ func (app *application) runRPC(device, command string, cmdArgs []string) error {
 	go func() {
 		defer cancel()
 
-		reader := bufio.NewReader(app.stdin)
+		const stdinBufSize = 256
+
+		buf := make([]byte, stdinBufSize)
 
 		for {
 			select {
@@ -241,7 +278,7 @@ func (app *application) runRPC(device, command string, cmdArgs []string) error {
 			default:
 			}
 
-			text, err := reader.ReadString('\n')
+			nRead, err := app.stdin.Read(buf)
 			if err != nil {
 				if !errors.Is(err, io.EOF) {
 					errChan <- fmt.Errorf("reading stdin: %w", err)
@@ -254,7 +291,7 @@ func (app *application) runRPC(device, command string, cmdArgs []string) error {
 				Msg: &pb.RunRequest_Console{
 					Console: &pb.Console{
 						Data: &pb.Console_Stdin{
-							Stdin: []byte(text),
+							Stdin: buf[:nRead],
 						},
 					},
 				},
