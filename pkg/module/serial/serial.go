@@ -32,6 +32,11 @@ func init() {
 // DefaultBaudRate is the default baud rate for the serial connection.
 const DefaultBaudRate = 115200
 
+// pairsDrain is the time the module continues reading serial output after
+// sending the last response in expect-send mode, so the output of the
+// triggered command is visible before the connection closes.
+const pairsDrain = 1 * time.Second
+
 // expectSendPair holds a compiled regex pattern and the bytes to send when it matches.
 // A nil or empty response means the module exits on match without sending anything.
 type expectSendPair struct {
@@ -69,8 +74,9 @@ Modes of operation:
   - Expect (1 argument): wait for the regex to match on the serial output, then exit.
   - Expect-send (even number of arguments >= 2): pass pattern/response pairs.
     For each pair, the module waits for the pattern to match and then sends the
-    response to the serial port. Pairs are processed in order; the module exits
-    after the last pair matches.
+    response to the serial port. Pairs are processed in order; after the last
+    pair matches the module reads serial output for 1 more second so the output
+    of the triggered command is visible, then exits.
 
 The expect string supports regular expressions according to [1].
 The optional -t flag specifies the maximum time to wait.
@@ -174,10 +180,19 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 	// Accessed under mutex (below) because it is also read in timer callbacks.
 	currentPair := 0
 
+	// draining is set to true after the last pair (or single expect) fires.
+	// While draining, the module keeps reading serial output for s.drain before
+	// exiting. Accessed under mutex.
+	draining := false
+
 	// checkLineMatch reports whether line satisfies the current expect condition.
 	// Must be called while holding mutex.
 	// Returns (response to send to the port, exit) where exit signals Run() to return.
 	checkLineMatch := func(line string) (response []byte, exit bool) {
+		if draining {
+			return nil, false
+		}
+
 		if s.expect != nil {
 			if s.expect.MatchString(line) {
 				return nil, true
@@ -198,6 +213,17 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 		currentPair++
 
 		return response, currentPair >= len(s.pairs)
+	}
+
+	// scheduleDrain signals matchCh after pairsDrain, causing Run() to exit.
+	// Only used in expect-send mode; single-expect exits immediately on match.
+	scheduleDrain := func() {
+		time.AfterFunc(pairsDrain, func() {
+			select {
+			case matchCh <- struct{}{}:
+			default: // already signalled
+			}
+		})
 	}
 
 	// Forward client stdin to serial port.
@@ -275,8 +301,8 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 	readBuffer := make([]byte, bufferSize)
 	lineBuffer := &bytes.Buffer{}
 
-	// mutex protects lineBuffer and currentPair which are accessed from the main
-	// loop and the flush timer goroutine.
+	// mutex protects lineBuffer, currentPair, and draining which are accessed from
+	// the main loop and the flush timer goroutine.
 	var mutex sync.Mutex
 
 	// flushGen is a generation counter that invalidates stale timer callbacks.
@@ -345,6 +371,11 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 				continue
 			}
 
+			// startedDrain is set when the last match fires inside the inner loop.
+			// It signals that the inner loop was exited early (via break) and the
+			// mutex is no longer held when the inner loop finishes.
+			startedDrain := false
+
 			mutex.Lock()
 
 			// Process the data read character by character
@@ -368,15 +399,30 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 				response, exit := checkLineMatch(line)
 
 				if exit {
+					if len(s.pairs) == 0 {
+						// Single-expect mode: exit immediately without drain.
+						mutex.Unlock()
+
+						if len(response) > 0 {
+							_ = writeToPort(response)
+						}
+
+						fmt.Fprintln(stdout, "\n--- Pattern matched, connection closed ---")
+
+						return nil
+					}
+
+					// Pairs mode: keep reading for pairsDrain so the output
+					// of the triggered command is visible before closing.
+					draining = true
+					startedDrain = true
 					mutex.Unlock()
 
 					if len(response) > 0 {
 						_ = writeToPort(response)
 					}
 
-					fmt.Fprintln(stdout, "\n--- Pattern matched, connection closed ---")
-
-					return nil
+					break // mutex NOT held past this point; handled below
 				}
 
 				if len(response) > 0 {
@@ -387,6 +433,14 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 
 					mutex.Lock()
 				}
+			}
+
+			if startedDrain {
+				// Last match fired inside the inner loop. Mutex is not held.
+				// Schedule the drain exit and continue reading serial output.
+				scheduleDrain()
+
+				continue
 			}
 
 			// If there's data remaining in the line buffer (no newline yet),
@@ -411,6 +465,10 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 
 					response, exit := checkLineMatch(line)
 
+					if exit {
+						draining = true
+					}
+
 					mutex.Unlock()
 
 					// Phase 2: write to stdout outside the lock.
@@ -431,11 +489,18 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 					}
 
 					if exit {
-						log.Printf("serial module: pattern matched in flush")
+						if len(s.pairs) == 0 {
+							// Single-expect mode: signal exit immediately.
+							log.Printf("serial module: pattern matched in flush")
 
-						select {
-						case matchCh <- struct{}{}:
-						default: // already signalled
+							select {
+							case matchCh <- struct{}{}:
+							default: // already signalled
+							}
+						} else {
+							// Pairs mode: drain before exiting.
+							log.Printf("serial module: pattern matched in flush, draining for %s", pairsDrain)
+							scheduleDrain()
 						}
 					}
 				})
