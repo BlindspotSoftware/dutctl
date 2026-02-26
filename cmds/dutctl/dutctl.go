@@ -7,25 +7,23 @@
 package main
 
 import (
-	"crypto/tls"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"log"
-	"net"
-	"net/http"
 	"os"
 
 	"connectrpc.com/connect"
 	"github.com/BlindspotSoftware/dutctl/internal/buildinfo"
 	"github.com/BlindspotSoftware/dutctl/internal/output"
+	"github.com/BlindspotSoftware/dutctl/pkg/rpc"
 	"github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1/dutctlv1connect"
-	"golang.org/x/net/http2"
 )
 
 const usageAbstract = `dutctl - The client application of the DUT Control system.
 `
+
 const usageSynopsis = `
 SYNOPSIS:
 	dutctl [options] list
@@ -35,6 +33,7 @@ SYNOPSIS:
 	dutctl version
 
 `
+
 const usageDescription = `
 If a device and a command are provided, dutctl will execute the command on the device.
 The optional args are passed to the command.
@@ -78,6 +77,7 @@ func newApp(stdin io.Reader, stdout, stderr io.Writer, exitFunc func(int), args 
 	fs.StringVar(&app.outputFormat, "f", "", outputFormatInfo)
 	fs.BoolVar(&app.verbose, "v", false, verboseInfo)
 	fs.BoolVar(&app.noColor, "no-color", false, noColorInfo)
+	fs.BoolVar(&app.insecure, "insecure", false, "Disable TLS (use plain HTTP)")
 
 	//nolint:errcheck // flag.Parse always returns no error because of flag.ExitOnError
 	fs.Parse(args[1:])
@@ -106,6 +106,7 @@ type application struct {
 	outputFormat      string
 	verbose           bool
 	noColor           bool
+	insecure          bool
 	args              []string
 	printFlagDefaults func()
 
@@ -114,31 +115,13 @@ type application struct {
 }
 
 func (app *application) setupRPCClient() {
-	client := dutctlv1connect.NewDeviceServiceClient(
-		// Instead of http.DefaultClient, use the HTTP/2 protocol without TLS
-		newInsecureClient(),
-		fmt.Sprintf("http://%s", app.serverAddr),
+	client, scheme := rpc.NewClient(app.insecure)
+
+	app.rpcClient = dutctlv1connect.NewDeviceServiceClient(
+		client,
+		fmt.Sprintf("%s://%s", scheme, app.serverAddr),
 		connect.WithGRPC(),
 	)
-
-	app.rpcClient = client
-}
-
-func newInsecureClient() *http.Client {
-	return &http.Client{
-		Transport: &http2.Transport{
-			AllowHTTP: true,
-			DialTLS: func(network, addr string, _ *tls.Config) (net.Conn, error) {
-				// If you're also using this client for non-h2c traffic, you may want
-				// to delegate to tls.Dial if the network isn't TCP or the addr isn't
-				// in an allowlist.
-
-				//nolint:noctx
-				return net.Dial(network, addr)
-			},
-			// Don't forget timeouts!
-		},
-	}
 }
 
 var errInvalidCmdline = fmt.Errorf("invalid command line")
