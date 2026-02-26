@@ -6,12 +6,12 @@ devices:
     cmds:
       ssh:
         desc: |
-          "Basic demo of the SSH module: Use SSH as the main module to connect
+          "Basic demo of the SSH module: Use SSH as the forwardArgs module to connect
           to the DUT. The SSH module is used to connect from the dutagent to the DUT
           and execute commands that are passed to the module from the dutctl client.
         uses:
           - module: ssh
-            main: true
+            forwardArgs: true
             with:
               host: enigma
               user: oscar

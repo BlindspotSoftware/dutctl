@@ -20,6 +20,6 @@ cmds:
         desc: "This simple command reports information about the dutagent system via the agent-status module."
         uses:
           - module: agent-status
-            main: true
+            forwardArgs: true
 ```
 See [here](../../../contrib/dutagent-cfg-example.yaml) for a complete dutagent configuration example.

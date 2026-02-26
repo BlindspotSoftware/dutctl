@@ -18,7 +18,7 @@ devices:
             args:
               - "echo 'Greetings from the shell module!\n\n' > /tmp/shell-test.txt"
           - module: shell
-            main: true
+            forwardArgs: true
           - module: shell
             with:
               path: sh

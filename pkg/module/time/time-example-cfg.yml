@@ -8,7 +8,7 @@ devices:
         desc: "Report status twice"
         uses:
           - module: agent-status
-            main: true
+            forwardArgs: true
           - module: time-wait
             with:
               duration: 2s
@@ -17,4 +17,3 @@ devices:
         desc: "Do nothing and finish after the provided amount of time"
         uses:
           - module: time-wait
-            main: true
