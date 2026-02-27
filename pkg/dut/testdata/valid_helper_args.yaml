@@ -1,0 +1,11 @@
+device1:
+  desc: "Device 1"
+  cmds:
+    status:
+      desc: "Main module plus helper with args"
+      uses:
+        - module: dummy-repeat
+          main: true
+        - module: dummy-status
+          args:
+            - "verbose"

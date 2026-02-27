@@ -1,0 +1,6 @@
+device1:
+  desc: "Device 1"
+  cmds:
+    status:
+      desc: "uses is a string, not a list"
+      uses: "not-a-list"

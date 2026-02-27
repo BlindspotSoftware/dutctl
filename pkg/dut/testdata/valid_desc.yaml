@@ -1,0 +1,7 @@
+device1:
+  desc: "My Test Device"
+  cmds:
+    flash:
+      desc: "Flash the firmware"
+      uses:
+        - module: dummy-status

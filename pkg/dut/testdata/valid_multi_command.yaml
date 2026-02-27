@@ -1,0 +1,11 @@
+device1:
+  desc: "Device 1"
+  cmds:
+    status:
+      desc: "Report status"
+      uses:
+        - module: dummy-status
+    repeat:
+      desc: "Repeat input"
+      uses:
+        - module: dummy-repeat
