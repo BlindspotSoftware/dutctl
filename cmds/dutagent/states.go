@@ -114,6 +114,14 @@ func executeModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State
 	args.brokerErrCh = brokerErrCh
 	args.session = moduleSession
 
+	// Resolve module arguments before spawning the goroutine.
+	moduleArgs, err := args.cmd.ModuleArgs(args.cmdMsg.GetArgs())
+	if err != nil {
+		modCtxCancel()
+
+		return args, nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+
 	// Run the modules in a goroutine.
 	// Termination of the module execution is signaled by closing the moduleErrCh channel.
 	go func() {
@@ -129,14 +137,7 @@ func executeModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State
 
 			log.Printf("Running module %d of %d: %q", idx+1, cnt, module.Config.Name)
 
-			var moduleArgs []string
-			if module.Config.Main {
-				moduleArgs = args.cmdMsg.GetArgs()
-			} else {
-				moduleArgs = module.Config.Args
-			}
-
-			err := module.Run(rpcCtx, moduleSession, moduleArgs...)
+			err := module.Run(rpcCtx, moduleSession, moduleArgs[idx]...)
 			if err != nil {
 				args.moduleErrCh <- err
 
