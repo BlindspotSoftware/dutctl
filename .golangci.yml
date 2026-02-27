@@ -163,6 +163,7 @@ linters:
       max-distance: 6
       ignore-names:
         - err
+        - fn
         - wg
         - s
         - ch
