@@ -1,0 +1,10 @@
+device1:
+  desc: "Device 1"
+  cmds:
+    all:
+      desc: "All dummy modules"
+      uses:
+        - module: dummy-status
+          main: true
+        - module: dummy-repeat
+        - module: dummy-ft

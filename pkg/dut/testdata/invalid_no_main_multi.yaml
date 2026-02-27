@@ -1,0 +1,8 @@
+device1:
+  desc: "Device 1"
+  cmds:
+    status:
+      desc: "two modules, neither main"
+      uses:
+        - module: dummy-repeat
+        - module: dummy-repeat

@@ -1,0 +1,5 @@
+device1:
+  desc: "Device 1"
+  cmds:
+    status:
+      desc: "no uses key"

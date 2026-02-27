@@ -1,0 +1,7 @@
+device1:
+  desc: "Device 1"
+  cmds:
+    status:
+      desc: "unknown module name"
+      uses:
+        - module: nonexistent

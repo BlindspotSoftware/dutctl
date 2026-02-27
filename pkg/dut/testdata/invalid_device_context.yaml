@@ -1,0 +1,6 @@
+myboard:
+  desc: "My Board"
+  cmds:
+    flash:
+      desc: "broken command"
+      uses: []

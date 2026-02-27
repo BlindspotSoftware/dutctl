@@ -1,0 +1,13 @@
+device1:
+  desc: "Device 1"
+  cmds:
+    status:
+      desc: "valid command"
+      uses:
+        - module: dummy-status
+device2:
+  desc: "Device 2"
+  cmds:
+    broken:
+      desc: "broken command"
+      uses: []

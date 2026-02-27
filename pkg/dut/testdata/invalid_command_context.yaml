@@ -1,0 +1,6 @@
+device1:
+  desc: "Device 1"
+  cmds:
+    flash:
+      desc: "broken command"
+      uses: []
