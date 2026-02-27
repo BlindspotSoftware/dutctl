@@ -23,6 +23,8 @@ var (
 )
 
 // Devlist is a list of devices-under-test.
+//
+//nolint:recvcheck // pointer receiver required to initialize the map; other methods use value receivers intentionally
 type Devlist map[string]Device
 
 // Names returns the names of all devices in the list.
@@ -36,6 +38,28 @@ func (devs Devlist) Names() []string {
 	slices.Sort(names)
 
 	return names
+}
+
+// UnmarshalYAML unmarshals a Devlist from a YAML node. It decodes each device
+// individually so that errors can be annotated with the device name.
+func (devs *Devlist) UnmarshalYAML(node *yaml.Node) error {
+	*devs = make(Devlist)
+
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		keyNode := node.Content[i]
+		valueNode := node.Content[i+1]
+
+		var dev Device
+
+		err := valueNode.Decode(&dev)
+		if err != nil {
+			return fmt.Errorf("device %q: %w", keyNode.Value, err)
+		}
+
+		(*devs)[keyNode.Value] = dev
+	}
+
+	return nil
 }
 
 // CmdNames returns the names of all commands available for a device or
@@ -85,6 +109,56 @@ type Device struct {
 	Cmds map[string]Command
 }
 
+// deviceAlias is used when parsing YAML to avoid recursion.
+type deviceAlias struct {
+	Desc string
+}
+
+// UnmarshalYAML unmarshals a Device from a YAML node. It decodes each command
+// individually so that errors can be annotated with the command name.
+func (d *Device) UnmarshalYAML(node *yaml.Node) error {
+	var alias deviceAlias
+
+	err := node.Decode(&alias)
+	if err != nil {
+		return err
+	}
+
+	d.Desc = alias.Desc
+	d.Cmds = make(map[string]Command)
+
+	// Find the "cmds" value node in the device mapping.
+	var cmdsNode *yaml.Node
+
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		if node.Content[i].Value == "cmds" {
+			cmdsNode = node.Content[i+1]
+
+			break
+		}
+	}
+
+	if cmdsNode == nil {
+		return nil // no commands defined
+	}
+
+	for i := 0; i+1 < len(cmdsNode.Content); i += 2 {
+		keyNode := cmdsNode.Content[i]
+		valueNode := cmdsNode.Content[i+1]
+
+		var cmd Command
+
+		err := valueNode.Decode(&cmd)
+		if err != nil {
+			return fmt.Errorf("command %q: %w", keyNode.Value, err)
+		}
+
+		d.Cmds[keyNode.Value] = cmd
+	}
+
+	return nil
+}
+
 // Command represents a task that can be executed on a device-under-test (DUT).
 // This task is composed of one or multiple steps. The steps are implemented by
 // modules and are executed in the order they are defined.
@@ -110,20 +184,21 @@ func (c *Command) UnmarshalYAML(node *yaml.Node) error {
 	// Check presence of main module
 	switch len(c.Modules) {
 	case 0:
-		return errors.New("command must have at least one module")
+		return fmt.Errorf("yaml: line %d: command must have at least one module", node.Line)
 	case 1:
 		// Implicitly sets the only module as main
 		c.Modules[0].Config.Main = true
 	default:
 		if c.countMain() != 1 {
-			return errors.New("command must have exactly one main module")
+			return fmt.Errorf("yaml: line %d: command must have exactly one main module", node.Line)
 		}
 	}
 
 	// Check for presence of args in non-main modules only
 	for _, mod := range c.Modules {
 		if mod.Config.Main && len(mod.Config.Args) > 0 {
-			return errors.New("main module should not have args set. They are passed as command line arguments via the dutctl client")
+			return fmt.Errorf("yaml: line %d: main module should not have args set."+
+				" They are passed as command line arguments via the dutctl client", node.Line)
 		}
 	}
 
