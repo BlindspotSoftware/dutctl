@@ -43,6 +43,9 @@ type Module interface {
 	// Deinit is called when the module is unloaded by dutagent or an internal error occurs.
 	// It is used to clean up any resources that were allocated during the Init phase and
 	// shall guarantee a graceful shutdown of the service.
+	//
+	// Implementations must be safe to call even if Init was never called or failed partway.
+	// Init may fail after partially allocating resources that still need cleanup.
 	Deinit() error
 	// Run is the entry point and executes the module with the given arguments.
 	Run(ctx context.Context, s Session, args ...string) error

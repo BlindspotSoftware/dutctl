@@ -11,6 +11,25 @@ import (
 	"github.com/BlindspotSoftware/dutctl/pkg/dut"
 )
 
+// catchPanic calls fn and recovers from any panic, returning it as an error.
+// This intentionally does NOT re-panic. A module panic is recorded as an error
+// so the Init/Deinit loop can continue with the remaining modules.
+func catchPanic(fn func() error) error {
+	var err error
+
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				err = fmt.Errorf("panic: %v", r)
+			}
+		}()
+
+		err = fn()
+	}()
+
+	return err
+}
+
 // ModuleInitError is a container for errors that occur during module
 // initialization.
 type ModuleInitError struct {
@@ -45,7 +64,7 @@ func Init(devices dut.Devlist) error {
 	for devname, device := range devices {
 		for cmdname, cmd := range device.Cmds {
 			for _, module := range cmd.Modules {
-				err := module.Init()
+				err := catchPanic(module.Init)
 				if err != nil {
 					ierr.Errs = append(ierr.Errs, ModuleInitErrorDetails{
 						Dev: devname,
@@ -81,7 +100,7 @@ func Deinit(devices dut.Devlist) error {
 	for devname, device := range devices {
 		for cmdname, cmd := range device.Cmds {
 			for _, module := range cmd.Modules {
-				err := module.Deinit()
+				err := catchPanic(module.Deinit)
 				if err != nil {
 					derr.Errs = append(derr.Errs, ModuleInitErrorDetails{
 						Dev: devname,
