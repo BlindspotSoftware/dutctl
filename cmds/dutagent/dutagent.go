@@ -75,7 +75,8 @@ type agent struct {
 	server      string
 
 	// state
-	config config
+	config             config
+	modulesInitialized bool
 }
 
 // config holds the dutagent configuration that is parsed from YAML data.
@@ -95,9 +96,8 @@ const (
 // Afterwards agt.exit is called. If clean-up fails, agt.exit is called with code 1,
 // otherwise with provided exitCode.
 func (agt *agent) cleanup(code exitCode) {
-	devlist := agt.config.Devices
-	if devlist != nil {
-		err := dutagent.Deinit(devlist)
+	if agt.modulesInitialized {
+		err := dutagent.Deinit(agt.config.Devices)
 		if err != nil {
 			printInitErr(err)
 			log.Print("System might be in an UNKNOWN STATE !!!")
@@ -136,6 +136,8 @@ func (agt *agent) loadConfig() error {
 }
 
 func (agt *agent) initModules() error {
+	agt.modulesInitialized = true
+
 	return dutagent.Init(agt.config.Devices)
 }
 
