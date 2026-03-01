@@ -68,7 +68,8 @@ type Session interface {
 	// The file is identified by its name and is made available to the module via the returned io.Reader.
 	RequestFile(name string) (io.Reader, error)
 	// SendFile sends a file to the client.
-	SendFile(name string, r io.Reader) error
+	// The size parameter specifies the total file size in bytes, which helps the client track progress.
+	SendFile(name string, size int64, r io.Reader) error
 }
 
 // Record holds the information required to register a module.
