@@ -110,20 +110,21 @@ func (c *Command) UnmarshalYAML(node *yaml.Node) error {
 	// Check presence of main module
 	switch len(c.Modules) {
 	case 0:
-		return errors.New("command must have at least one module")
+		return fmt.Errorf("yaml: line %d: command must have at least one module", node.Line)
 	case 1:
 		// Implicitly sets the only module as main
 		c.Modules[0].Config.Main = true
 	default:
 		if c.countMain() != 1 {
-			return errors.New("command must have exactly one main module")
+			return fmt.Errorf("yaml: line %d: command must have exactly one main module", node.Line)
 		}
 	}
 
 	// Check for presence of args in non-main modules only
 	for _, mod := range c.Modules {
 		if mod.Config.Main && len(mod.Config.Args) > 0 {
-			return errors.New("main module should not have args set. They are passed as command line arguments via the dutctl client")
+			return fmt.Errorf("yaml: line %d: main module should not have args set."+
+				" They are passed as command line arguments via the dutctl client", node.Line)
 		}
 	}
 
