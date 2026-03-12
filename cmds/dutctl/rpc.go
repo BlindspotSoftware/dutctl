@@ -100,6 +100,7 @@ func (app *application) runRPC(device, command string, cmdArgs []string) error {
 	defer cancel()
 
 	errChan := make(chan error, numWorkers)
+	recvDone := make(chan struct{})
 
 	stream := app.rpcClient.Run(runCtx)
 	req := &pb.RunRequest{
@@ -127,6 +128,7 @@ func (app *application) runRPC(device, command string, cmdArgs []string) error {
 
 	// Receive routine
 	go func() {
+		defer close(recvDone)
 		defer cancel()
 
 		for {
@@ -226,10 +228,9 @@ func (app *application) runRPC(device, command string, cmdArgs []string) error {
 		}
 	}()
 
-	// Send routine
+	// Send routine — stdin EOF must not cancel the context; only the receive
+	// routine drives termination so that all server responses are processed.
 	go func() {
-		defer cancel()
-
 		reader := bufio.NewReader(app.stdin)
 
 		for {
@@ -267,9 +268,10 @@ func (app *application) runRPC(device, command string, cmdArgs []string) error {
 		}
 	}()
 
-	// Wait for completion or error
+	// Wait for the receive routine to finish (stream closed or cancelled) or for
+	// any worker to report an error.
 	select {
-	case <-runCtx.Done():
+	case <-recvDone:
 		return nil
 	case err := <-errChan:
 		return err
