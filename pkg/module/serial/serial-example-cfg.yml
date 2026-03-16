@@ -6,10 +6,10 @@ devices:
       serial:
         desc: |
           Basic demo of the Serial module: After the DUT is powered on, use Serial
-          as the main module to wait for magic strings in the DUT's boot log.
+          as the forwardArgs module to wait for magic strings in the DUT's boot log.
         uses:
           - module: serial
-            main: true
+            forwardArgs: true
             with:
               port: /tmp/ttyS0
               baudrate: 115200

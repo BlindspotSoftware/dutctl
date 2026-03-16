@@ -7,7 +7,7 @@ devices:
         desc: "Turn the power ON via PDU"
         uses:
           - module: pdu
-            main: true
+            forwardArgs: true
             with:
               host: http://192.168.1.100
               user: admin

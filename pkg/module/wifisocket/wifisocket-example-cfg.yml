@@ -7,7 +7,7 @@ devices:
         desc: "Control the power via WiFi socket"
         uses:
           - module: wifisocket
-            main: true
+            forwardArgs: true
             with:
               host: http://192.168.1.60
               user: "user"

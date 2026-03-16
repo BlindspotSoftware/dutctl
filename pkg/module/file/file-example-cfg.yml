@@ -10,7 +10,7 @@ devices:
         desc: "Upload file to device"
         uses:
           - module: file
-            main: true
+            forwardArgs: true
             with:
               operation: "upload"
         # Usage:
@@ -25,7 +25,7 @@ devices:
         desc: "Upload and install a script"
         uses:
           - module: file
-            main: true
+            forwardArgs: true
             with:
               operation: "upload"
               destination: "/opt/scripts/install.sh"
@@ -39,7 +39,7 @@ devices:
         desc: "Download logs from device"
         uses:
           - module: file
-            main: true
+            forwardArgs: true
             with:
               operation: "download"
               source: "/var/log.txt"
@@ -52,7 +52,7 @@ devices:
         desc: "Upload configuration file with fixed paths"
         uses:
           - module: file
-            main: true
+            forwardArgs: true
             with:
               operation: "upload"
               source: "./configs/device.conf"

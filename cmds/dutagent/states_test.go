@@ -93,15 +93,15 @@ func TestFindDUTCmd(t *testing.T) {
 	validCmd := pb.Command{Device: "dev1", Command: "echo"}
 
 	// Helper to build a dut.Devlist with optional command configuration.
-	makeDevlist := func(includeCmd bool, cmdModules int, mainCount int) dut.Devlist {
+	makeDevlist := func(includeCmd bool, cmdModules int, forwardArgsCount int) dut.Devlist {
 		devs := make(dut.Devlist)
 		if includeCmd {
 			modules := make([]dut.Module, 0, cmdModules)
 			for i := 0; i < cmdModules; i++ {
 				m := dut.Module{}
 				m.Config.Name = fmt.Sprintf("mod%d", i)
-				if i < mainCount { // mark first mainCount modules as main (can create invalid config)
-					m.Config.Main = true
+				if i < forwardArgsCount { // mark first forwardArgsCount modules as forwardArgs	 (can create invalid config)
+					m.Config.ForwardArgs = true
 				}
 				modules = append(modules, m)
 			}
@@ -152,7 +152,7 @@ func TestFindDUTCmd(t *testing.T) {
 			wantErrCode: connect.CodeInternal,
 		},
 		{
-			name:        "invalid_command_multiple_mains",
+			name:        "invalid_command_multiple_forwardArgs",
 			cmdMsg:      &validCmd,
 			devs:        makeDevlist(true, 2, 2),
 			wantErrCode: connect.CodeInternal,
@@ -215,12 +215,12 @@ func (m *dummyModule) Run(_ context.Context, _ module.Session, args ...string) e
 
 func TestExecuteModules(t *testing.T) {
 	type expect struct {
-		wantErrCode connect.Code // error returned by executeModules state itself
-		wantNext    fsm.State[runCmdArgs]
-		mainArgs    []string // expected args passed to main module
-		nonMainArgs []string // expected args passed to non-main module (if present)
-		mainRuns    int
-		nonMainRuns int
+		wantErrCode        connect.Code // error returned by executeModules state itself
+		wantNext           fsm.State[runCmdArgs]
+		forwardArgsArgs    []string // expected args passed to forwardArgs module
+		nonForwardArgsArgs []string // expected args passed to non-forwardArgs module (if present)
+		forwardArgsRuns    int
+		nonForwardArgsRuns int
 	}
 
 	tests := []struct {
@@ -231,36 +231,36 @@ func TestExecuteModules(t *testing.T) {
 		expect    expect
 	}{
 		{
-			name: "success_single_main_module",
+			name: "success_single_forwardArgs_module",
 			modules: func() []dut.Module {
 				m := &dummyModule{}
 				wrap := dut.Module{}
-				wrap.Config.Name = "mainMod"
-				wrap.Config.Main = true
+				wrap.Config.Name = "forwardArgsMod"
+				wrap.Config.ForwardArgs = true
 				wrap.Module = m
 				return []dut.Module{wrap}
 			}(),
 			cmdMsg: &pb.Command{Device: "devX", Command: "cmdY", Args: []string{"a", "b"}},
-			expect: expect{wantNext: waitModules, mainArgs: []string{"a", "b"}, mainRuns: 1},
+			expect: expect{wantNext: waitModules, forwardArgsArgs: []string{"a", "b"}, forwardArgsRuns: 1},
 		},
 		{
-			name: "success_two_modules_main_and_helper",
+			name: "success_two_modules_forwardArgs_and_helper",
 			modules: func() []dut.Module {
-				main := &dummyModule{}
+				forwardArgs := &dummyModule{}
 				helper := &dummyModule{}
 				w1 := dut.Module{}
-				w1.Config.Name = "mainMod"
-				w1.Config.Main = true
-				w1.Module = main
+				w1.Config.Name = "forwardArgsMod"
+				w1.Config.ForwardArgs = true
+				w1.Module = forwardArgs
 				w2 := dut.Module{}
 				w2.Config.Name = "helperMod"
-				w2.Config.Main = false
+				w2.Config.ForwardArgs = false
 				w2.Config.Args = []string{"conf1"}
 				w2.Module = helper
 				return []dut.Module{w1, w2}
 			}(),
 			cmdMsg: &pb.Command{Device: "devX", Command: "cmdY", Args: []string{"x", "y"}},
-			expect: expect{wantNext: waitModules, mainArgs: []string{"x", "y"}, nonMainArgs: []string{"conf1"}, mainRuns: 1, nonMainRuns: 1},
+			expect: expect{wantNext: waitModules, forwardArgsArgs: []string{"x", "y"}, nonForwardArgsArgs: []string{"conf1"}, forwardArgsRuns: 1, nonForwardArgsRuns: 1},
 		},
 		{
 			name: "module_error_stops_execution",
@@ -268,31 +268,31 @@ func TestExecuteModules(t *testing.T) {
 				bad := &dummyModule{err: errors.New("boom")}
 				wrap := dut.Module{}
 				wrap.Config.Name = "badMain"
-				wrap.Config.Main = true
+				wrap.Config.ForwardArgs = true
 				wrap.Module = bad
 				return []dut.Module{wrap}
 			}(),
 			cmdMsg: &pb.Command{Device: "devX", Command: "cmdY"},
-			expect: expect{wantNext: waitModules, mainRuns: 1},
+			expect: expect{wantNext: waitModules, forwardArgsRuns: 1},
 		},
 		{
 			name: "second_module_error_stops_execution",
 			modules: func() []dut.Module {
-				main := &dummyModule{} // succeeds
+				forwardArgs := &dummyModule{} // succeeds
 				failing := &dummyModule{err: errors.New("helper failed")}
 				w1 := dut.Module{}
-				w1.Config.Name = "mainMod"
-				w1.Config.Main = true
-				w1.Module = main
+				w1.Config.Name = "forwardArgsMod"
+				w1.Config.ForwardArgs = true
+				w1.Module = forwardArgs
 				w2 := dut.Module{}
 				w2.Config.Name = "helperMod"
-				w2.Config.Main = false
+				w2.Config.ForwardArgs = false
 				w2.Config.Args = []string{"harg"}
 				w2.Module = failing
 				return []dut.Module{w1, w2}
 			}(),
 			cmdMsg: &pb.Command{Device: "devX", Command: "cmdY", Args: []string{"m1", "m2"}},
-			expect: expect{wantNext: waitModules, mainArgs: []string{"m1", "m2"}, nonMainArgs: []string{"harg"}, mainRuns: 1, nonMainRuns: 1},
+			expect: expect{wantNext: waitModules, forwardArgsArgs: []string{"m1", "m2"}, nonForwardArgsArgs: []string{"harg"}, forwardArgsRuns: 1, nonForwardArgsRuns: 1},
 		},
 		{
 			name:      "pre_canceled_context_no_module_run",
@@ -300,23 +300,23 @@ func TestExecuteModules(t *testing.T) {
 			modules: func() []dut.Module {
 				m := &dummyModule{}
 				wrap := dut.Module{}
-				wrap.Config.Name = "mainMod"
-				wrap.Config.Main = true
+				wrap.Config.Name = "forwardArgsMod"
+				wrap.Config.ForwardArgs = true
 				wrap.Module = m
 				return []dut.Module{wrap}
 			}(),
 			cmdMsg: &pb.Command{Device: "devX", Command: "cmdY"},
-			expect: expect{wantNext: waitModules, mainRuns: 0},
+			expect: expect{wantNext: waitModules, forwardArgsRuns: 0},
 		},
 	}
 
 	for _, tt := range tests {
 		tt := tt
 		// Extract underlying dummy modules for later inspection
-		var mainDummy, helperDummy *dummyModule
+		var forwardArgsDummy, helperDummy *dummyModule
 		if len(tt.modules) > 0 {
 			if dm, ok := tt.modules[0].Module.(*dummyModule); ok {
-				mainDummy = dm
+				forwardArgsDummy = dm
 			}
 		}
 		if len(tt.modules) > 1 {
@@ -386,21 +386,21 @@ func TestExecuteModules(t *testing.T) {
 			}
 
 			// Validate module runs if we have dummy modules
-			if mainDummy != nil && mainDummy.runCalls != tt.expect.mainRuns {
-				t.Fatalf("main module runCalls mismatch: want %d got %d", tt.expect.mainRuns, mainDummy.runCalls)
+			if forwardArgsDummy != nil && forwardArgsDummy.runCalls != tt.expect.forwardArgsRuns {
+				t.Fatalf("forwardArgs module runCalls mismatch: want %d got %d", tt.expect.forwardArgsRuns, forwardArgsDummy.runCalls)
 			}
-			if helperDummy != nil && helperDummy.runCalls != tt.expect.nonMainRuns {
-				t.Fatalf("non-main module runCalls mismatch: want %d got %d", tt.expect.nonMainRuns, helperDummy.runCalls)
+			if helperDummy != nil && helperDummy.runCalls != tt.expect.nonForwardArgsRuns {
+				t.Fatalf("non-forwardArgs module runCalls mismatch: want %d got %d", tt.expect.nonForwardArgsRuns, helperDummy.runCalls)
 			}
 
-			if len(tt.expect.mainArgs) > 0 && mainDummy != nil {
-				if fmt.Sprint(mainDummy.runArgs) != fmt.Sprint(tt.expect.mainArgs) {
-					t.Fatalf("main module args mismatch: want %v got %v", tt.expect.mainArgs, mainDummy.runArgs)
+			if len(tt.expect.forwardArgsArgs) > 0 && forwardArgsDummy != nil {
+				if fmt.Sprint(forwardArgsDummy.runArgs) != fmt.Sprint(tt.expect.forwardArgsArgs) {
+					t.Fatalf("forwardArgs module args mismatch: want %v got %v", tt.expect.forwardArgsArgs, forwardArgsDummy.runArgs)
 				}
 			}
-			if len(tt.expect.nonMainArgs) > 0 && helperDummy != nil {
-				if fmt.Sprint(helperDummy.runArgs) != fmt.Sprint(tt.expect.nonMainArgs) {
-					t.Fatalf("non-main module args mismatch: want %v got %v", tt.expect.nonMainArgs, helperDummy.runArgs)
+			if len(tt.expect.nonForwardArgsArgs) > 0 && helperDummy != nil {
+				if fmt.Sprint(helperDummy.runArgs) != fmt.Sprint(tt.expect.nonForwardArgsArgs) {
+					t.Fatalf("non-forwardArgs module args mismatch: want %v got %v", tt.expect.nonForwardArgsArgs, helperDummy.runArgs)
 				}
 			}
 

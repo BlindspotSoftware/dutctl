@@ -9,7 +9,7 @@ devices:
           Basic demo of the Flash module.
         uses:
           - module: flash
-            main: true
+            forwardArgs: true
             with:
               tool: "/usr/sbin/flashprog"
               programmer: "dediprog"
