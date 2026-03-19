@@ -1,0 +1,15 @@
+[Unit]
+Description=dutagent to run on SBC attached to a devices under test
+Documentation=https://github.com/BlindspotSoftware/dutctl
+Wants=network-online.target
+After=network-online.target
+StartLimitInterval=15
+StartLimitBurst=3
+
+[Service]
+Restart=always
+RestartSec=3s
+ExecStart=/usr/bin/dutagent -a 0.0.0.0:2024 -c /etc/dutctl.yaml
+
+[Install]
+WantedBy=multi-user.target
