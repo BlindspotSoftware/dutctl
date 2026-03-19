@@ -22,3 +22,11 @@ devices:
             with:
               port: "/home/oscar/ttyS2"
               baudrate: 115200
+      flash:
+        desc: "Host SPI flash chip"
+        uses:
+          - module: flash
+            main: true
+            with:
+              tool: "/usr/sbin/flashprog"
+              programmer: "dediprog"
