@@ -1,0 +1,14 @@
+## Can be changed depending on the FWCI tester device used
+{%- set RPI_HOSTNAME = "fwci-fti-tester" %}
+{%- set RPI_FQDN = RPI_HOSTNAME ~ ".sec.9e.network" %}
+## Do not change values below, unless you know what you are doing
+{%- set PKG_NAME = "dutctl" %}
+{%- set DUTCTL_CONFIG_FILE = "/etc/dutctl.yaml" %}
+{%- set SYSTEMD_FILE = "dutagent.service" %}
+{%- set DUTAGENT_PORT = "2024" %}
+{%- set DUTCTL_ARGS = '"-s", "' ~ RPI_HOSTNAME ~ ':' ~ DUTAGENT_PORT ~ '"' %}
+{%- set DUTCTL_ARGS_STR = '-s ' ~ RPI_HOSTNAME ~ ':' ~ DUTAGENT_PORT %}
+## Values below should not change
+{%- set GPIO_PIN_TEST_OLIMEX = "21" %}
+{%- set FAKE_SERIAL_INPUT = "/home/oscar/ttyS1" %}
+{%- set FAKE_SERIAL_OUTPUT = "/home/oscar/ttyS2" %}
