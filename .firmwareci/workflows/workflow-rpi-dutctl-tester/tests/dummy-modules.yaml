@@ -1,0 +1,230 @@
+---
+name: Test dummy modules
+description: Test that all dummy modules work
+
+defaults:
+  transport_oscar: &transport_oscar
+    proto: ssh
+    options:
+      host: "[[attributes.Host]]"
+      user: oscar
+      identity_file: "/root/.ssh/fwci"
+      # TODO: The ssh keys (identity_file) are hard-coded in the FWCI docker at the moment
+
+  transport_root: &transport_root
+    proto: ssh
+    options:
+      host: "[[attributes.Host]]"
+      user: root
+      identity_file: "/root/.ssh/fwci"
+      # TODO: The ssh keys (identity_file) are hard-coded in the FWCI docker at the moment
+
+
+pre-stage:
+  # Fix permissions
+  - cmd: cmd
+    name: chmod dutctl
+    transport:
+      proto: local
+    parameters:
+      executable: chmod
+      args: ["755", "[[input.DUTCTL]]"]
+
+  # ========================
+  #  Copy files over to RPI
+  # ========================
+  - cmd: copy
+    name: Copy over dutctl debian package
+    transport: *transport_root
+    parameters:
+      source: "[[input.REMOTE_PKG]]"
+      destination: "dutctl.deb"
+
+  - cmd: cmd
+    name: Install dutctl package
+    transport: *transport_root
+    parameters:
+      executable: dpkg
+      args: ["-i", "dutctl.deb"]
+
+  - cmd: copy
+    name: Copy over test config file
+    transport: *transport_root
+    parameters:
+      source: "[[input.CONFIG]]"
+      destination: /etc/dutctl.yaml
+
+  - cmd: cmd
+    name: chmod config file
+    transport: *transport_root
+    parameters:
+      executable: chmod
+      args: ["644", /etc/dutctl.yaml]
+
+  # ==============
+  #  Start server
+  # ==============
+  - cmd: cmd
+    name: Reload systemctl daemon
+    transport: *transport_root
+    parameters:
+      executable: systemctl
+      args: ["daemon-reload"]
+
+  - cmd: cmd
+    name: Start systemd service
+    transport: *transport_root
+    parameters:
+      executable: systemctl
+      args: ["start", dutagent.service]
+
+  - cmd: shell
+    name: Status systemd service
+    transport: *transport_root
+    parameters:
+      command: "systemctl status --no-pager dutagent.service"
+      expect:
+        - regex: "Active: active \\(running\\)"
+
+  # ==========================
+  #  Test dutctl help command
+  # ==========================
+  - cmd: cmd
+    name: dutctl help
+    transport:
+      proto: local
+    parameters:
+      executable: "[[input.DUTCTL]]"
+      args: ["--help"]
+
+
+# "contrib/dutagent-cfg-example.yaml"
+
+stages:
+  - name: Test Device 1
+    steps:
+      - cmd: cmd
+        name: Test status
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: ["-s", "fwci-dutctl-tester:2024", "device1", "status"]
+          expect:
+            - regex: "Hello from dummy status module\nCalled with 0 arguments"
+        options:
+          timeout: 1s
+
+      - cmd: cmd
+        name: Test status with argument
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: ["-s", "fwci-dutctl-tester:2024", "device1", "status", "hello"]
+          expect:
+            - regex: "Hello from dummy status module\nCalled with 1 arguments\nArg 0: hello"
+        options:
+          timeout: 1s
+
+  - name: Test Device 2
+    steps:
+      - cmd: cmd
+        name: Test status
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: ["-s", "fwci-dutctl-tester:2024", "device2", "status"]
+          expect:
+            - regex: "Hello from dummy status module\nCalled with 2 arguments"
+        options:
+          timeout: 1s
+
+      - cmd: shell
+        name: Test repeat
+        transport:
+          proto: local
+        parameters:
+          command: "echo -e 'hello\nhello world\n' | [[input.DUTCTL]] -s fwci-dutctl-tester:2024 device2 repeat"
+          expect:
+            - regex: "Hello from dummy repeat module!\nEnter one word per line."
+        options:
+          timeout: 1s
+
+  - name: Test Device 3
+    steps:
+      - cmd: cmd
+        name: Test status
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: ["-s", "fwci-dutctl-tester:2024", "device3", "status"]
+          expect:
+            - regex: "Hello from dummy status module\nCalled with 0 arguments"
+        options:
+          timeout: 1s
+
+      - cmd: shell
+        name: Create test file
+        transport:
+          proto: local
+        parameters:
+          command: "echo 'hello' > test.txt"
+
+      - cmd: cmd
+        name: Test file transfer
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: ["-s", "fwci-dutctl-tester:2024", "device3", "file-transfer", "test.txt", "test2.txt"]
+          expect:
+            - regex: "Hello from dummy file transfer module"
+        options:
+          timeout: 1s
+
+      - cmd: cmd
+        name: Read test file
+        transport:
+          proto: local
+        parameters:
+          executable: "cat"
+          args: ["test2.txt"]
+          expect:
+            - regex: "processed by dummy.FT module"
+
+post-stage:
+  # ===========================================
+  #  Delete the files copied over for the test
+  # ===========================================
+  - cmd: shell
+    name: Stop remotelab-server systemd service
+    transport: *transport_root
+    parameters:
+      command: "systemctl stop dutagent.service || true"
+
+  - cmd: shell
+    name: Uninstall the package
+    transport: *transport_root
+    parameters:
+      command: "apt remove --assume-yes dutctl || true"
+
+  - cmd: shell
+    name: Delete testing configuration file
+    transport: *transport_root
+    parameters:
+      command: "rm /etc/dutctl.yaml || true"
+
+  - cmd: shell
+    name: Delete package
+    transport: *transport_root
+    parameters:
+      command: "rm dutctl.deb || true"
+
+  - cmd: shell
+    name: Shutdown fake serial
+    transport: *transport_oscar
+    parameters:
+      command: "pkill socat || true"

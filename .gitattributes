@@ -1,0 +1,2 @@
+.firmwareci/duts/dut-rpi-dutctl-tester/*.yaml	linguist-generated=true
+.firmwareci/workflows/workflow-rpi-dutctl-tester/**/*.yaml	linguist-generated=true
