@@ -1,0 +1,39 @@
+---
+version: 0
+devices:
+  self:
+    desc: |
+      This device represents no DUT but the dutagent itself to demonstrate the dummy modules.
+      The dummy modules showcase different module capabilities such as printing, console interaction
+      and file transfer.
+    cmds:
+      status:
+        desc: "Report status information via the dummy-status module"
+        uses:
+          - module: dummy-status
+            main: true
+            args:
+              - foo
+              - bar
+      repeat:
+        desc: "Interactively repeat user input via the dummy-repeat module"
+        uses:
+          - module: dummy-repeat
+            main: true
+      file-transfer:
+        desc: "Transfer a file, process it, and send it back via the dummy-ft module"
+        uses:
+          - module: dummy-ft
+            main: true
+      combined:
+        desc: |
+          Demonstrates chaining multiple dummy modules: prints status, transfers a file,
+          and prints status again.
+        uses:
+          - module: dummy-status
+            args:
+              - foo
+              - bar
+          - module: dummy-ft
+            main: true
+          - module: dummy-status
