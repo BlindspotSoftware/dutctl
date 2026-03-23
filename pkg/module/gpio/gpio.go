@@ -139,6 +139,10 @@ func (b *Button) Init() error {
 func (b *Button) Deinit() error {
 	log.Println("gpio.Button module: Deinit called")
 
+	if b.gpio == nil {
+		return nil
+	}
+
 	return b.Low(b.Pin)
 }
 
@@ -257,6 +261,10 @@ func (s *Switch) Init() error {
 
 func (s *Switch) Deinit() error {
 	log.Println("gpio.Switch module: Deinit called")
+
+	if s.gpio == nil {
+		return nil
+	}
 
 	return s.Low(s.Pin)
 }
