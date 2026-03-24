@@ -93,3 +93,52 @@ jobs:
           COMMIT_HASH: ${{ github.event.pull_request.head.sha || github.sha }}
           BINARIES: DUTCTL=${{ steps.filenames.outputs.dutctl_path }};REMOTE_PKG=${{ steps.filenames.outputs.dutctl_pkg_path }};CONFIG=${{ matrix.configfile }}
           GITHUB_INSTALLATION_ID: 45795153
+
+
+  # Get a list of all configuration files in JSON format
+  get-matrix:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: get-matrix
+        id: get-matrix
+        run: |
+          # Disable SC2046: Quote this to prevent word splitting
+          # I can't quote this, just look at it
+          # shellcheck disable=SC2046
+          echo matrix=$( find ./pkg/module/ ./test/ ./cmds/exp/contrib/ -regex '.*\.ya?ml' -type f -print0 | jq -Rs 'split("\u0000")[:-1]' ) >> "${GITHUB_OUTPUT}"
+      - name: Check
+        run: |
+          jq . <<< '${{ steps.get-matrix.outputs.matrix }}'
+    outputs:
+      matrix: ${{ steps.get-matrix.outputs.matrix }}
+
+
+  # Validate all configuration files with dutagent
+  validate-config:
+    runs-on: ubuntu-latest
+    needs:
+      - get-matrix
+      - build-with-goreleaser
+    strategy:
+      fail-fast: false
+      matrix:
+        configfile: ${{ fromJson(needs.get-matrix.outputs.matrix) }}
+        include:
+          - configfile: './contrib/dutagent-cfg-example.yaml'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - uses: actions/download-artifact@v8
+        with:
+          name: binaries
+          path: bin/
+      - name: Get names of binary
+        id: filenames
+        run: |
+          echo "dutagent_path=$(ls ./bin/dutagent_linux_amd64_*/dutagent)" >> "${GITHUB_OUTPUT}"
+      - name: Run validation
+        run: |
+          chmod +x ${{ steps.filenames.outputs.dutagent_path }}
+          ${{ steps.filenames.outputs.dutagent_path }} -check-config -c "${{ matrix.configfile }}"
