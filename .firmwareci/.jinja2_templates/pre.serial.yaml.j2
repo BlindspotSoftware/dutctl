@@ -1,0 +1,12 @@
+  - cmd: cmd
+    name: Start fake serial
+    transport: *transport_oscar
+    parameters:
+      executable: bash
+      args:
+        [
+          "-c",
+          "socat -x pty,rawer,icanon=0,nonblock,link={{ defaults.FAKE_SERIAL_INPUT }} pty,rawer,icanon=0,nonblock,link={{ defaults.FAKE_SERIAL_OUTPUT }} & disown",
+        ]
+    options:
+      timeout: 1s

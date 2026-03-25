@@ -1,7 +1,30 @@
 ---
 version: "3"
+# Taskfile specific to FWCI
+
+vars:
+  RPI_HOSTNAME: "fwci-fti-tester.sec.9e.network:2024"
 
 tasks:
+  test:read-out-serial:
+    desc: For running inside FWCI - read out serial with dutctl
+    cmds:
+      - timeout 5s bash -c "/tmp/dutctl -s '{{.RPI_HOSTNAME}}' fwci-dutctl-tester serial" || true
+
+  misc:dummy-binary-for-flashing:
+    desc: Create a dummy binary file to be flashed to SPI flash chip
+    vars:
+      SPI_SIZE_BYTES: "8M"
+      DUMMY_BINARY: "dummy_binary.rom"
+      FF_BYTES: "8"
+      DUMMY_FF: ".dummy_ff.rom"
+    cmds:
+      - dd if=/dev/zero of={{.DUMMY_BINARY}} ibs={{.SPI_SIZE_BYTES}} count=1
+      - dd if=/dev/zero ibs=1 count={{.FF_BYTES}} | LC_ALL=C tr "\000" "\377" >{{.DUMMY_FF}}
+      - dd if={{.DUMMY_FF}} of={{.DUMMY_BINARY}} conv=notrunc
+    status:
+      - test -f dummy_binary.rom
+
   jinja2:templates:
     desc: Run jinja2 on template files
     cmds:
