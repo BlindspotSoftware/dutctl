@@ -226,10 +226,17 @@ func (app *application) runRPC(device, command string, cmdArgs []string) error {
 		}
 	}()
 
-	// Send routine
+	// Send routine — reads lines from stdin and forwards them to the server.
+	//
+	// Unlike the receive routine this goroutine intentionally does NOT defer
+	// cancel(). When stdin reaches EOF (e.g. /dev/null in non-interactive
+	// runs) this goroutine returns immediately. If it cancelled the context
+	// on exit, the receive routine would be torn down before it could read
+	// and print the server's response.
+	//
+	// Only the receive routine drives context cancellation so that all
+	// server output is processed before the RPC terminates.
 	go func() {
-		defer cancel()
-
 		reader := bufio.NewReader(app.stdin)
 
 		for {
