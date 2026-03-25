@@ -1,5 +1,7 @@
 ---
 version: '3'
+vars:
+  GOLANG_CODE_PATH: 'cmd'
 
 includes:
   fwci:
@@ -11,6 +13,34 @@ tasks:
   #==========================
   # Compilation and building
   #==========================
+
+  build:
+    desc: Build all binaries
+    cmds:
+      - task: build:dutctl
+      - task: build:remotelab-server
+
+  build:dutctl:
+    desc: Build dutctl CLI binary
+    cmds:
+      - go build -o bin/dutctl ./cmd/dutctl/
+    env:
+      CGO_ENABLED: 0
+    sources:
+      - ./cmd/dutctl/**/*.go
+    generates:
+      - ./bin/dutctl
+
+  build:remotelab-server:
+    desc: Build remotelab-server binary
+    cmds:
+      - go build -o bin/remotelab-server ./cmd/remotelab-server/
+    env:
+      CGO_ENABLED: 0
+    sources:
+      - ./cmd/remotelab-server/**/*.go
+    generates:
+      - ./bin/remotelab-server
 
   goreleaser:build:
     desc: Use goreleaser to build the project
@@ -38,6 +68,24 @@ tasks:
       - scripts/*
     env:
       GITHUB_TOKEN: 'dummy'
+
+  #========================
+  # Formatting and linting
+  #========================
+
+  format:
+    desc: Run gofumt (fork of gofmt, stricter)
+    cmds:
+      - gofumpt -w '{{.GOLANG_CODE_PATH}}'
+      - gofumpt -w 'pkg'
+
+  lint:
+    desc: Run the linters
+    cmds:
+      - revive ./...
+      - go vet ./...
+      - staticcheck -fail "" ./...
+      - golangci-lint run --issues-exit-code 0 ./...
 
   #=========
   # Testing
@@ -68,4 +116,111 @@ tasks:
         sh: ls ./bin/dutctl_*_arm64.deb
       CONFIG: ./contrib/dutagent-cfg-example.yaml
     cmds:
-      - fwci job --workflow="test-dutctl" "DUTCTL={{.DUTCTL_PATH}}" "REMOTE_PKG={{.DUTCTL_PKG_PATH}}" "CONFIG={{.CONFIG}}"
+      - fwci job --workflow="test-dutctl" "DUTCTL={{.DUTCTL_PATH}}" "REMOTE_PKG={{.DUTCTL_PKG_PATH}}" "CONFIG={{.CONFIG}}" "DUMMY_SPI_FLASH_ROM=.firmwareci/dummy_binary.rom" "TASKFILE=.firmwareci/Taskfile.yml"
+    #sources:
+    #  - ./.firmwareci/**/*.yaml
+    #  - ./.firmwareci/**/Taskfile.yml
+    #  - ./Taskfile.yml
+    #  - ./bin/*.deb
+    #  - ./bin/dutctl_linux_amd64_v1/dutctl
+
+  test:
+    desc: Run tests
+    env:
+      LC_ALL: C
+    vars:
+      TEST_OPTIONS: '{{default "" .TEST_OPTIONS}}'
+      SOURCE_FILES: '{{default "./..." .SOURCE_FILES}}'
+      TEST_PATTERN: '{{default "." .TEST_PATTERN}}'
+    cmds:
+      - go test $(go list ./... | grep -v /integration/) {{.TEST_OPTIONS}} -failfast -race -coverpkg=./... -covermode=atomic -coverprofile=coverage.txt {{.SOURCE_FILES}} -run {{.TEST_PATTERN}} -timeout=5m
+
+  test:integration:
+    desc: Setup environment and run integration tests
+    dir: integration
+    cmds:
+      # Setup integration environment
+      - ./integration.sh
+      # Spin up docker
+      - docker-compose up -d remotelab-server
+      - docker-compose up dutctl
+      # Shutdown
+      - docker-compose down
+
+  #================
+  # Manual testing
+  #================
+
+  test:manual-prep:
+    desc: Prepare the RPI manually
+    deps:
+      - goreleaser:release-test
+    vars:
+      DUTCTL:
+        sh: ls ./bin/dutctl_linux_amd64_*/dutctl
+      REMOTE_PKG:
+        sh: ls ./bin/dutctl_*_arm64.deb
+      #CONFIG: ./test/test-dutagent-cfg.yaml
+      CONFIG: ./contrib/dutagent-cfg-example.yaml
+      DUMMY_SPI_FLASH_ROM: ./.firmwareci/dummy_binary.rom
+      TASKFILE: .firmwareci/Taskfile.yml
+      RPI: fwci-fti-tester.sec.9e.network
+
+      DUTCTL_CONFIG_FILE: /etc/dutctl.yaml
+    cmds:
+      - echo "{{.DUTCTL}}"
+      - echo "{{.REMOTE_PKG}}"
+      # Copy over and install the DEB package
+      - scp "{{.REMOTE_PKG}}" root@{{.RPI}}:/dutctl.deb
+      - ssh root@{{.RPI}} dpkg -i /dutctl.deb
+      # Copy over the testing config
+      - scp "{{.CONFIG}}" root@{{.RPI}}:{{.DUTCTL_CONFIG_FILE}}
+      - ssh root@{{.RPI}} chmod 644 {{.DUTCTL_CONFIG_FILE}}
+      # Start fake serial
+      - ssh root@{{.RPI}} bash -c "socat -x pty,rawer,icanon=0,nonblock,link=/home/oscar/ttyS1 pty,rawer,icanon=0,nonblock,link=/home/oscar/ttyS2 & disown"
+      # Systemd
+      - ssh root@{{.RPI}} systemctl daemon-reload
+      - ssh root@{{.RPI}} systemctl start dutagent.service
+
+  test:manual-unprep:
+    desc: UN-Prepare the RPI manually
+    vars:
+      DUTCTL:
+        sh: ls ./bin/dutctl_linux_amd64_*/dutctl
+      REMOTE_PKG:
+        sh: ls ./bin/dutctl_*_arm64.deb
+      CONFIG: ./test/test-dutagent-cfg.yaml
+      DUMMY_SPI_FLASH_ROM: ./.firmwareci/dummy_binary.rom
+      TASKFILE: .firmwareci/Taskfile.yml
+      RPI: fwci-fti-tester.sec.9e.network
+
+      DUTCTL_CONFIG_FILE: /etc/dutctl.yaml
+    cmds:
+      # Debug
+      - echo "{{.DUTCTL}}"
+      - echo "{{.REMOTE_PKG}}"
+      # Cleanup - use 'defer' so that all commands get executed, even if some fail
+      - defer: ssh root@{{.RPI}} systemctl stop dutagent.service
+      - defer: ssh root@{{.RPI}} apt remove --assume-yes dutctl
+      - defer: ssh root@{{.RPI}} rm /etc/dutctl.yaml
+      - defer: ssh root@{{.RPI}} rm /dutctl.deb
+      - defer: ssh root@{{.RPI}} pkill socat
+
+  test:reload-config:
+    desc: Upload new dutctl config and restart the service
+    vars:
+      DUTCTL:
+        sh: ls ./bin/dutctl_linux_amd64_*/dutctl
+      REMOTE_PKG:
+        sh: ls ./bin/dutctl_*_arm64.deb
+      CONFIG: ./test/test-dutagent-cfg.yaml
+      DUMMY_SPI_FLASH_ROM: ./.firmwareci/dummy_binary.rom
+      TASKFILE: .firmwareci/Taskfile.yml
+      RPI: fwci-fti-tester.sec.9e.network
+
+      DUTCTL_CONFIG_FILE: /etc/dutctl.yaml
+    cmds:
+      - scp "{{.CONFIG}}" root@{{.RPI}}:{{.DUTCTL_CONFIG_FILE}}
+      - ssh root@{{.RPI}} chmod 644 {{.DUTCTL_CONFIG_FILE}}
+      - ssh root@{{.RPI}} systemctl daemon-reload
+      - ssh root@{{.RPI}} systemctl restart dutagent.service
