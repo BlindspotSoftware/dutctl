@@ -9,3 +9,4 @@
 /cmds/exp/dutserver/dutserver
 /keys/
 /bin/
+/.firmwareci/*dummy_*.rom

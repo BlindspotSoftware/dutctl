@@ -1,0 +1,24 @@
+---
+version: 0
+devices:
+  fwci-dutctl-tester:
+    desc: "A fwci dutctl tester"
+    cmds:
+      power:
+        desc: "Power switch"
+        uses:
+          - module: gpio-switch
+            main: true
+            with:
+              pin: 26
+              initial: off
+              # GPIO pin 26, physical pin 37
+              # https://pinout.xyz/pinout/pin26_gpio7/
+      serial:
+        desc: "Host serial"
+        uses:
+          - module: serial
+            main: true
+            with:
+              port: "/home/oscar/ttyS2"
+              baudrate: 115200

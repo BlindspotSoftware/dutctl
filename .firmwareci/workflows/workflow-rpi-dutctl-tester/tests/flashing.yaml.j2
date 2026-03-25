@@ -1,0 +1,33 @@
+---
+name: Test flashing
+description: flash with dpcmd
+
+defaults:
+  {%- import ".jinja2_templates/defaults.j2" as defaults %}
+  {%- macro someop() %}{% include ".jinja2_templates/defaults.yaml" with context %}{% endmacro %}
+  {{ someop()|indent(2) }}
+
+{% include ".jinja2_templates/pre.yaml.j2" %}
+
+stages:
+  - name: Test flashing with dpcmd
+    steps:
+      {%- set actions = ["write", "verify"] %}
+      {%- for action in actions %}
+      - cmd: cmd
+        name: dutctl flash {{action}}
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args:
+            [
+              "-s",
+              "{{ defaults.RPI_HOSTNAME }}",
+              "flash",
+              "{{ action }}",
+              "[[input.DUMMY_SPI_FLASH_ROM]]",
+            ]
+      {%- endfor %}
+
+{% include ".jinja2_templates/post.yaml.j2" -%}
