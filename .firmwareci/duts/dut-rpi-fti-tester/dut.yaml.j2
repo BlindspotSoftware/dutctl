@@ -1,0 +1,7 @@
+---
+# Device-under-Test Configuration for RaspberryPi acting as FTI tester
+{%- import ".jinja2_templates/defaults.j2" as defaults %}
+name: {{ defaults.RPI_HOSTNAME }}
+label: {{ defaults.RPI_HOSTNAME }}
+attributes:
+  Host: "{{ defaults.RPI_FQDN }}"

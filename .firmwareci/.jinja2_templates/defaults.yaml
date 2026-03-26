@@ -1,0 +1,15 @@
+transport_oscar: &transport_oscar
+  proto: ssh
+  options:
+    host: "[[attributes.Host]]"
+    user: oscar
+    identity_file: "/root/.ssh/fwci"
+    # TODO: The ssh keys (identity_file) are hard-coded in the FWCI docker at the moment
+
+transport_root: &transport_root
+  proto: ssh
+  options:
+    host: "[[attributes.Host]]"
+    user: root
+    identity_file: "/root/.ssh/fwci"
+    # TODO: The ssh keys (identity_file) are hard-coded in the FWCI docker at the moment
