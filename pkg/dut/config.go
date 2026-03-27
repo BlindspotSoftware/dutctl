@@ -84,13 +84,15 @@ func (d *Devlist) UnmarshalYAML(node *yaml.Node) error {
 
 	*d = make(Devlist, len(node.Content)/2) //nolint:mnd // MappingNode stores key/value as alternating pairs
 
-	for i := 0; i < len(node.Content); i += 2 {
-		devName := node.Content[i].Value
+	for idx := 0; idx < len(node.Content); idx += 2 {
+		devName := node.Content[idx].Value
 
 		var dev Device
 
 		// Decode triggers Device.UnmarshalYAML on the value node.
-		err := node.Content[i+1].Decode(&dev)
+		// Note: yaml.v3 skips UnmarshalYAML for !!null nodes, so a
+		// null device value silently produces a zero Device.
+		err := node.Content[idx+1].Decode(&dev)
 		if err != nil {
 			// If the error is already a ConfigError (from a deeper level),
 			// annotate it with the device name. Otherwise wrap it.
@@ -104,11 +106,23 @@ func (d *Devlist) UnmarshalYAML(node *yaml.Node) error {
 			return &ConfigError{Device: devName, Err: err}
 		}
 
+		// Catch null device values where Device.UnmarshalYAML was skipped.
+		if len(dev.Cmds) == 0 {
+			return &ConfigError{Device: devName, Err: ErrNoCommands}
+		}
+
 		(*d)[devName] = dev
 	}
 
 	return nil
 }
+
+// deviceAlias is a type alias for Device used to avoid infinite recursion
+// during YAML unmarshalling. When Device.UnmarshalYAML calls node.Decode,
+// decoding into a Device would call UnmarshalYAML again. Decoding into
+// deviceAlias instead uses the default decoder since deviceAlias has no
+// UnmarshalYAML method.
+type deviceAlias Device
 
 // UnmarshalYAML unmarshals a Device from a YAML node, wrapping command
 // errors with the command name where they occurred.
@@ -116,30 +130,37 @@ func (d *Devlist) UnmarshalYAML(node *yaml.Node) error {
 // The Device mapping is walked field-by-field so that the "cmds" sub-mapping
 // can be iterated manually (same technique as Devlist.UnmarshalYAML).
 // This allows annotating errors with the command name that caused them.
-func (dev *Device) UnmarshalYAML(node *yaml.Node) error {
+func (d *Device) UnmarshalYAML(node *yaml.Node) error {
 	if node.Kind != yaml.MappingNode {
-		return node.Decode(dev)
-	}
+		var dev deviceAlias
 
-	// Walk the Device fields manually.
-	for i := 0; i < len(node.Content); i += 2 {
-		key := node.Content[i].Value
-		val := node.Content[i+1]
+		err := node.Decode(&dev)
+		if err != nil {
+			return err
+		}
 
-		switch key {
-		case "desc":
-			dev.Desc = val.Value
-		case "cmds":
-			cmds, err := decodeCmds(val)
-			if err != nil {
-				return err
+		*d = Device(dev)
+	} else {
+		// Walk the Device fields manually.
+		for i := 0; i < len(node.Content); i += 2 {
+			key := node.Content[i].Value
+			val := node.Content[i+1]
+
+			switch key {
+			case "desc":
+				d.Desc = val.Value
+			case "cmds":
+				cmds, err := decodeCmds(val)
+				if err != nil {
+					return err
+				}
+
+				d.Cmds = cmds
 			}
-
-			dev.Cmds = cmds
 		}
 	}
 
-	if len(dev.Cmds) == 0 {
+	if len(d.Cmds) == 0 {
 		return &ConfigError{Err: ErrNoCommands}
 	}
 

@@ -1,0 +1,10 @@
+---
+version: 0
+devices:
+  device1:
+    desc: "Device 1"
+    cmds:
+      status:
+        desc: "Report status"
+        uses:
+          - module: dummy-status
