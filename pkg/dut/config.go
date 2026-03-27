@@ -49,9 +49,10 @@ func (e *ConfigError) Unwrap() error {
 
 var (
 	ErrNoModules           = errors.New("command must have at least one module")
-	ErrMultipleMainModules = errors.New("command must have exactly one main module")
-	ErrMainModuleWithArgs  = errors.New("main module must not have args set")
-	ErrModuleNotFound      = errors.New("module not found")
+	ErrMultipleMainModules  = errors.New("command must have at most one main module")
+	ErrMainModuleWithArgs   = errors.New("main module must not have args set")
+	ErrMainWithCommandArgs  = errors.New("command cannot have both main module and args declaration")
+	ErrModuleNotFound       = errors.New("module not found")
 	ErrEmptyDevices        = errors.New("devices must not be empty")
 	ErrNoCommands          = errors.New("device must have at least one command")
 )
@@ -229,16 +230,17 @@ func (c *Command) UnmarshalYAML(node *yaml.Node) error {
 	*c = Command(cmd)
 
 	// Check presence of main module
-	switch len(c.Modules) {
-	case 0:
+	if len(c.Modules) == 0 {
 		return &ConfigError{Line: node.Line, Err: ErrNoModules}
-	case 1:
-		// Implicitly sets the only module as main
-		c.Modules[0].Config.Main = true
-	default:
-		if c.countMain() != 1 {
-			return &ConfigError{Line: node.Line, Err: ErrMultipleMainModules}
-		}
+	}
+
+	if c.CountMain() > 1 {
+		return &ConfigError{Line: node.Line, Err: ErrMultipleMainModules}
+	}
+
+	// Validate mutual exclusion: cannot have both main module AND command args
+	if c.CountMain() > 0 && len(c.Args) > 0 {
+		return &ConfigError{Line: node.Line, Err: ErrMainWithCommandArgs}
 	}
 
 	// Check for presence of args in non-main modules only
@@ -248,19 +250,13 @@ func (c *Command) UnmarshalYAML(node *yaml.Node) error {
 		}
 	}
 
-	return nil
-}
-
-func (c *Command) countMain() int {
-	count := 0
-
-	for _, mod := range c.Modules {
-		if mod.Config.Main {
-			count++
-		}
+	// Validate template references in module args
+	err = c.validateTemplateReferences()
+	if err != nil {
+		return &ConfigError{Line: node.Line, Err: err}
 	}
 
-	return count
+	return nil
 }
 
 // UnmarshalYAML unmarshals a Module from a YAML node and adds custom validation.

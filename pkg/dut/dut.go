@@ -7,15 +7,17 @@ package dut
 
 import (
 	"errors"
+	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/BlindspotSoftware/dutctl/pkg/module"
 )
 
 var (
-	ErrDeviceNotFound  = errors.New("no such device")
-	ErrCommandNotFound = errors.New("no such command")
-	ErrInvalidCommand  = errors.New("command not implemented - no modules or no main module set")
+	ErrDeviceNotFound      = errors.New("no such device")
+	ErrCommandNotFound     = errors.New("no such command")
+	ErrNoMainForArgs       = errors.New("arguments provided but command has no main module to receive them")
 )
 
 // Devlist is a list of devices-under-test.
@@ -55,8 +57,8 @@ func (devs *Devlist) CmdNames(device string) ([]string, error) {
 
 // FindCmd returns the device and command for a given device and command name.
 // If the device is not found, it returns ErrDeviceNotFound, if the command is not found,
-// it returns ErrCommandNotFound. If the requested command has no modules, or no main module,
-// it returns ErrInvalidCommand.
+// it returns ErrCommandNotFound. If the requested command has no modules, it returns ErrNoModules.
+// If the requested command has multiple main modules, it returns ErrMultipleMainModules.
 func (devs *Devlist) FindCmd(device, command string) (Device, Command, error) {
 	dev, ok := (*devs)[device]
 	if !ok {
@@ -68,8 +70,12 @@ func (devs *Devlist) FindCmd(device, command string) (Device, Command, error) {
 		return dev, Command{}, ErrCommandNotFound
 	}
 
-	if len(cmd.Modules) == 0 || cmd.countMain() != 1 {
-		return dev, cmd, ErrInvalidCommand
+	if len(cmd.Modules) == 0 {
+		return dev, cmd, ErrNoModules
+	}
+
+	if cmd.CountMain() > 1 {
+		return dev, cmd, ErrMultipleMainModules
 	}
 
 	return dev, cmd, nil
@@ -86,7 +92,85 @@ type Device struct {
 // modules and are executed in the order they are defined.
 type Command struct {
 	Desc    string
+	Args    []ArgDecl
 	Modules []Module `yaml:"uses"`
+}
+
+// ArgDecl declares a command argument with its name and description.
+type ArgDecl struct {
+	Name string `yaml:"name"`
+	Desc string `yaml:"desc"`
+}
+
+// CountMain returns the number of modules marked as main in the command.
+func (c *Command) CountMain() int {
+	count := 0
+
+	for _, mod := range c.Modules {
+		if mod.Config.Main {
+			count++
+		}
+	}
+
+	return count
+}
+
+// ModuleArgs builds the argument list for each module in the command.
+// Main modules receive runtimeArgs directly. Non-main modules
+// receive their statically configured Args with template references substituted
+// using runtimeArgs. The returned slice has the same length and ordering as c.Modules.
+func (c *Command) ModuleArgs(runtimeArgs []string) ([][]string, error) {
+	if len(runtimeArgs) > 0 && c.CountMain() == 0 {
+		return nil, ErrNoMainForArgs
+	}
+
+	result := make([][]string, len(c.Modules))
+
+	for idx, mod := range c.Modules {
+		if mod.Config.Main {
+			result[idx] = runtimeArgs
+		} else {
+			// Apply argument substitution for non-interactive modules
+			substituted, err := c.SubstituteArgs(mod.Config.Args, runtimeArgs)
+			if err != nil {
+				return nil, err
+			}
+
+			result[idx] = substituted
+		}
+	}
+
+	return result, nil
+}
+
+// HelpText returns the help string of the main module.
+// If no main module exists, returns an overview of all modules.
+func (c *Command) HelpText() string {
+	for _, mod := range c.Modules {
+		if mod.Config.Main {
+			return mod.Help()
+		}
+	}
+
+	// If no main module, provide overview of all modules
+
+	moduleNames := make([]string, 0, len(c.Modules))
+	for _, module := range c.Modules {
+		moduleNames = append(moduleNames, module.Config.Name)
+	}
+
+	helpStr := fmt.Sprintf("Command with %d module(s): %s",
+		len(c.Modules), strings.Join(moduleNames, ", "))
+
+	// Append command args documentation if declared
+	if len(c.Args) > 0 {
+		helpStr += "\n\nArguments:\n"
+		for _, arg := range c.Args {
+			helpStr += fmt.Sprintf("  %s: %s\n", arg.Name, arg.Desc)
+		}
+	}
+
+	return helpStr
 }
 
 // Module is a wrapper for any module implementation.
