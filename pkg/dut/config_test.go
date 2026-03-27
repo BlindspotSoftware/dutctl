@@ -17,6 +17,10 @@ import (
 	_ "github.com/BlindspotSoftware/dutctl/pkg/module/dummy"
 )
 
+// NOTE: Tests that unmarshal through the full dutagent config struct
+// (version + devices wrapper) are subject to the dutagend command domain and
+// should be covered there.
+
 func loadTestdata(t *testing.T, name string) []byte {
 	t.Helper()
 
@@ -150,6 +154,14 @@ func TestInvalidConfig(t *testing.T) {
 			wantDevice:   "device2",
 			wantCommand:  "broken",
 			wantLine:     12,
+		},
+
+		// Null device value
+		{
+			name:         "null_device",
+			file:         "invalid_null_device.yaml",
+			wantSentinel: ErrNoCommands,
+			wantDevice:   "device1",
 		},
 	}
 
