@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	connectrpc.com/connect v1.20.0
-	github.com/bougou/go-ipmi v0.7.8
+	github.com/bougou/go-ipmi v0.8.2
 	github.com/go-playground/validator/v10 v10.30.2
 	github.com/google/go-cmp v0.7.0
 	github.com/stianeikeland/go-rpio/v4 v4.6.0
@@ -33,5 +33,6 @@ require (
 	github.com/rogpeppe/go-internal v1.6.1 // indirect
 	golang.org/x/net v0.55.0 // indirect
 	golang.org/x/sys v0.46.0 // indirect
+	golang.org/x/term v0.44.0 // indirect
 	golang.org/x/text v0.38.0 // indirect
 )
