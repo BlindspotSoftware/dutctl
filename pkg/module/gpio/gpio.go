@@ -256,6 +256,8 @@ func (s *Switch) Init() error {
 		return s.on()
 	}
 
+	s.state = off
+
 	return s.off()
 }
 
