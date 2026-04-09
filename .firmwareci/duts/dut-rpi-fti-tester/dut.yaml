@@ -1,0 +1,6 @@
+---
+# Device-under-Test Configuration for RaspberryPi acting as FTI tester
+name: fwci-fti-tester
+label: fwci-fti-tester
+attributes:
+  Host: "fwci-fti-tester.sec.9e.network"
