@@ -192,15 +192,13 @@ func (s *Serial) evalArgs(args []string) error {
 		return fmt.Errorf("failed to parse arguments: %w", err)
 	}
 
-	// Get the expect string if provided (args after flags)
-	var expectPattern string
-	if fs.NArg() > 0 {
-		expectPattern = fs.Arg(0)
-		log.Printf("serial module: Will wait for pattern: %q", expectPattern)
-	}
+	// Reset expect so a previous pattern does not carry over into the next run.
+	s.expect = nil
 
-	if expectPattern != "" {
-		var err error
+	// Get the expect string if provided (args after flags)
+	if fs.NArg() > 0 {
+		expectPattern := fs.Arg(0)
+		log.Printf("serial module: Will wait for pattern: %q", expectPattern)
 
 		s.expect, err = regexp.Compile(expectPattern)
 		if err != nil {
