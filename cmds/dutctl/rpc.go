@@ -14,6 +14,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"time"
 
 	"connectrpc.com/connect"
 	"github.com/BlindspotSoftware/dutctl/internal/output"
@@ -31,8 +32,8 @@ func (app *application) listRPC() error {
 	}
 
 	app.formatter.WriteContent(output.Content{
-		Type: output.TypeDeviceList,
-		Data: res.Msg.GetDevices(),
+		Type: output.TypeLockInfo,
+		Data: protoToDeviceLocks(res.Msg.GetLockInfo()),
 		Metadata: map[string]string{
 			"server": app.serverAddr,
 			"msg":    "List Response",
@@ -108,6 +109,7 @@ func (app *application) runRPC(device, command string, cmdArgs []string) error {
 				Device:  device,
 				Command: command,
 				Args:    cmdArgs,
+				Owner:   app.owner,
 			},
 		},
 	}
@@ -281,4 +283,101 @@ func (app *application) runRPC(device, command string, cmdArgs []string) error {
 	case err := <-errChan:
 		return err
 	}
+}
+
+func (app *application) lockRPC(device string, duration time.Duration) error {
+	if duration < time.Second {
+		return fmt.Errorf("lock duration must be at least 1 second, got %v", duration)
+	}
+
+	ctx := context.Background()
+	req := connect.NewRequest(&pb.LockRequest{
+		Device:          device,
+		Owner:           app.owner,
+		DurationSeconds: int64(duration.Round(time.Second).Seconds()),
+	})
+
+	res, err := app.rpcClient.Lock(ctx, req)
+	if err != nil {
+		return err
+	}
+
+	msg := res.Msg
+	app.formatter.WriteContent(output.Content{
+		Type: output.TypeLockStatus,
+		Data: output.DeviceLock{
+			Device:    msg.GetDevice(),
+			Locked:    true,
+			Owner:     msg.GetOwner(),
+			LockedAt:  msg.GetLockedAt(),
+			ExpiresAt: msg.GetExpiresAt(),
+		},
+		Metadata: map[string]string{
+			"server": app.serverAddr,
+			"device": device,
+		},
+	})
+
+	return nil
+}
+
+func (app *application) unlockRPC(device string) error {
+	ctx := context.Background()
+	req := connect.NewRequest(&pb.UnlockRequest{
+		Device: device,
+		Owner:  app.owner,
+	})
+
+	_, err := app.rpcClient.Unlock(ctx, req)
+	if err != nil {
+		return err
+	}
+
+	app.formatter.WriteContent(output.Content{
+		Type: output.TypeLockStatus,
+		Data: output.DeviceLock{Device: device, Locked: false},
+		Metadata: map[string]string{
+			"server": app.serverAddr,
+			"device": device,
+		},
+	})
+
+	return nil
+}
+
+func (app *application) lockStatusRPC(device string) error {
+	ctx := context.Background()
+	req := connect.NewRequest(&pb.LockStatusRequest{Device: device})
+
+	res, err := app.rpcClient.LockStatus(ctx, req)
+	if err != nil {
+		return err
+	}
+
+	app.formatter.WriteContent(output.Content{
+		Type: output.TypeLockInfo,
+		Data: protoToDeviceLocks(res.Msg.GetLocks()),
+		Metadata: map[string]string{
+			"server": app.serverAddr,
+			"device": device,
+		},
+	})
+
+	return nil
+}
+
+// protoToDeviceLocks converts a slice of proto DeviceLockInfo to output.DeviceLock values.
+func protoToDeviceLocks(locks []*pb.DeviceLockInfo) []output.DeviceLock {
+	result := make([]output.DeviceLock, len(locks))
+	for i, l := range locks {
+		result[i] = output.DeviceLock{
+			Device:    l.GetDevice(),
+			Locked:    l.GetLocked(),
+			Owner:     l.GetOwner(),
+			LockedAt:  l.GetLockedAt(),
+			ExpiresAt: l.GetExpiresAt(),
+		}
+	}
+
+	return result
 }

@@ -16,6 +16,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"time"
 
 	"connectrpc.com/connect"
 	"github.com/BlindspotSoftware/dutctl/internal/buildinfo"
@@ -26,15 +27,20 @@ import (
 
 const usageAbstract = `dutctl - The client application of the DUT Control system.
 `
+
 const usageSynopsis = `
 SYNOPSIS:
 	dutctl [options] list
 	dutctl [options] <device>
+	dutctl [options] <device> lock [duration]
+	dutctl [options] <device> unlock
+	dutctl [options] <device> status
 	dutctl [options] <device> <command> [args...]
 	dutctl [options] <device> <command> help
 	dutctl version
 
 `
+
 const usageDescription = `
 If a device and a command are provided, dutctl will execute the command on the device.
 The optional args are passed to the command.
@@ -52,7 +58,25 @@ const (
 	outputFormatInfo = `Output format, text|json|yaml|oneline, default is text`
 	verboseInfo      = `Verbose output`
 	noColorInfo      = `Disable colored output`
+	ownerInfo        = `User identity for lock operations (default: $USER@$HOSTNAME)`
 )
+
+const defaultLockDuration = 5 * time.Minute
+
+// defaultOwner returns "$USER@$HOSTNAME" as the default owner identity.
+func defaultOwner() string {
+	user := os.Getenv("USER")
+	if user == "" {
+		user = "unknown"
+	}
+
+	host, err := os.Hostname()
+	if err != nil {
+		host = "unknown"
+	}
+
+	return user + "@" + host
+}
 
 func newApp(stdin io.Reader, stdout, stderr io.Writer, exitFunc func(int), args []string) *application {
 	var app application
@@ -78,6 +102,7 @@ func newApp(stdin io.Reader, stdout, stderr io.Writer, exitFunc func(int), args 
 	fs.StringVar(&app.outputFormat, "f", "", outputFormatInfo)
 	fs.BoolVar(&app.verbose, "v", false, verboseInfo)
 	fs.BoolVar(&app.noColor, "no-color", false, noColorInfo)
+	fs.StringVar(&app.owner, "u", defaultOwner(), ownerInfo)
 
 	//nolint:errcheck // flag.Parse always returns no error because of flag.ExitOnError
 	fs.Parse(args[1:])
@@ -106,6 +131,7 @@ type application struct {
 	outputFormat      string
 	verbose           bool
 	noColor           bool
+	owner             string
 	args              []string
 	printFlagDefaults func()
 
@@ -177,13 +203,52 @@ func (app *application) start() {
 	command := app.args[1]
 	cmdArgs := app.args[2:]
 
-	if len(cmdArgs) > 0 && cmdArgs[0] == "help" {
-		err := app.detailsRPC(device, command, "help")
-		app.exit(err)
+	app.runCommand(device, command, cmdArgs)
+}
+
+// runCommand dispatches device commands, including the built-in lock/unlock/status
+// meta-commands and regular module commands.
+func (app *application) runCommand(device, command string, cmdArgs []string) {
+	switch command {
+	case "lock":
+		app.exit(app.runLock(device, cmdArgs))
+
+		return
+	case "unlock":
+		app.exit(app.unlockRPC(device))
+
+		return
+	case "status":
+		app.exit(app.lockStatusRPC(device))
+
+		return
 	}
 
-	err := app.runRPC(device, command, cmdArgs)
-	app.exit(err)
+	if len(cmdArgs) > 0 && cmdArgs[0] == "help" {
+		app.exit(app.detailsRPC(device, command, "help"))
+	}
+
+	app.exit(app.runRPC(device, command, cmdArgs))
+}
+
+// runLock parses an optional duration argument and calls lockRPC.
+func (app *application) runLock(device string, cmdArgs []string) error {
+	duration := defaultLockDuration
+
+	if len(cmdArgs) > 1 {
+		return fmt.Errorf("%w: lock takes at most one argument (duration), got %d", errInvalidCmdline, len(cmdArgs))
+	}
+
+	if len(cmdArgs) == 1 {
+		var parseErr error
+
+		duration, parseErr = time.ParseDuration(cmdArgs[0])
+		if parseErr != nil {
+			return fmt.Errorf("%w: invalid duration %q: %v", errInvalidCmdline, cmdArgs[0], parseErr)
+		}
+	}
+
+	return app.lockRPC(device, duration)
 }
 
 // exit terminates the application. If the provided error is not nil, it is printed to

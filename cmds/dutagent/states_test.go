@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"github.com/BlindspotSoftware/dutctl/internal/dutagent"
 	"github.com/BlindspotSoftware/dutctl/internal/fsm"
 	"github.com/BlindspotSoftware/dutctl/internal/test/fakes"
 	"github.com/BlindspotSoftware/dutctl/pkg/dut"
@@ -187,8 +188,8 @@ func TestFindDUTCmd(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if !stateEqual(next, executeModules) {
-				t.Fatalf("expected next state executeModules, got %p", next)
+			if !stateEqual(next, acquireDeviceLock) {
+				t.Fatalf("expected next state acquireDeviceLock, got %p", next)
 			}
 			if gotArgs.dev.Desc == "" && len(gotArgs.cmd.Modules) == 0 { // simple sanity check device/command captured
 				t.Fatalf("expected device and command to be set")
@@ -215,12 +216,12 @@ func (m *dummyModule) Run(_ context.Context, _ module.Session, args ...string) e
 
 func TestExecuteModules(t *testing.T) {
 	type expect struct {
-		wantErrCode connect.Code // error returned by executeModules state itself
-		wantNext    fsm.State[runCmdArgs]
-		mainArgs    []string // expected args passed to main module
-		nonMainArgs []string // expected args passed to non-main module (if present)
-		mainRuns    int
-		nonMainRuns int
+		wantErrCode        connect.Code // error returned by executeModules state itself
+		wantNext           fsm.State[runCmdArgs]
+		mainArgs           []string // expected args passed to main module
+		nonMainArgs        []string // expected args passed to non-main module (if present)
+		mainRuns           int
+		nonInteractiveRuns int
 	}
 
 	tests := []struct {
@@ -260,7 +261,7 @@ func TestExecuteModules(t *testing.T) {
 				return []dut.Module{w1, w2}
 			}(),
 			cmdMsg: &pb.Command{Device: "devX", Command: "cmdY", Args: []string{"x", "y"}},
-			expect: expect{wantNext: waitModules, mainArgs: []string{"x", "y"}, nonMainArgs: []string{"conf1"}, mainRuns: 1, nonMainRuns: 1},
+			expect: expect{wantNext: waitModules, mainArgs: []string{"x", "y"}, nonMainArgs: []string{"conf1"}, mainRuns: 1, nonInteractiveRuns: 1},
 		},
 		{
 			name: "module_error_stops_execution",
@@ -292,7 +293,7 @@ func TestExecuteModules(t *testing.T) {
 				return []dut.Module{w1, w2}
 			}(),
 			cmdMsg: &pb.Command{Device: "devX", Command: "cmdY", Args: []string{"m1", "m2"}},
-			expect: expect{wantNext: waitModules, mainArgs: []string{"m1", "m2"}, nonMainArgs: []string{"harg"}, mainRuns: 1, nonMainRuns: 1},
+			expect: expect{wantNext: waitModules, mainArgs: []string{"m1", "m2"}, nonMainArgs: []string{"harg"}, mainRuns: 1, nonInteractiveRuns: 1},
 		},
 		{
 			name:      "pre_canceled_context_no_module_run",
@@ -389,8 +390,8 @@ func TestExecuteModules(t *testing.T) {
 			if mainDummy != nil && mainDummy.runCalls != tt.expect.mainRuns {
 				t.Fatalf("main module runCalls mismatch: want %d got %d", tt.expect.mainRuns, mainDummy.runCalls)
 			}
-			if helperDummy != nil && helperDummy.runCalls != tt.expect.nonMainRuns {
-				t.Fatalf("non-main module runCalls mismatch: want %d got %d", tt.expect.nonMainRuns, helperDummy.runCalls)
+			if helperDummy != nil && helperDummy.runCalls != tt.expect.nonInteractiveRuns {
+				t.Fatalf("non-main module runCalls mismatch: want %d got %d", tt.expect.nonInteractiveRuns, helperDummy.runCalls)
 			}
 
 			if len(tt.expect.mainArgs) > 0 && mainDummy != nil {
@@ -550,6 +551,88 @@ func TestWaitModules(t *testing.T) {
 			}
 			if next != nil {
 				t.Fatalf("expected nil next state on error, got %p", next)
+			}
+		})
+	}
+}
+
+func TestAcquireDeviceLock(t *testing.T) {
+	tests := []struct {
+		name           string
+		device         string
+		owner          string
+		setupLocker    func(*dutagent.Locker)
+		wantAutoLocked bool
+		wantNext       fsm.State[runCmdArgs]
+		wantErrCode    connect.Code
+		wantErr        bool
+	}{
+		{
+			name:           "unlocked device — auto-acquires lock",
+			device:         "dev1",
+			owner:          "alice@host",
+			wantAutoLocked: true,
+			wantNext:       executeModules,
+		},
+		{
+			name:  "same owner already locked — reuses lock, autoLocked=false",
+			device: "dev1",
+			owner:  "alice@host",
+			setupLocker: func(l *dutagent.Locker) {
+				_, _ = l.Lock("dev1", "alice@host", time.Minute)
+			},
+			wantAutoLocked: false,
+			wantNext:       executeModules,
+		},
+		{
+			name:  "locked by different owner — CodeFailedPrecondition",
+			device: "dev1",
+			owner:  "alice@host",
+			setupLocker: func(l *dutagent.Locker) {
+				_, _ = l.Lock("dev1", "bob@host", time.Minute)
+			},
+			wantErr:     true,
+			wantErrCode: connect.CodeFailedPrecondition,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			locker := dutagent.NewLocker()
+			if tt.setupLocker != nil {
+				tt.setupLocker(locker)
+			}
+
+			args := runCmdArgs{
+				locker: locker,
+				cmdMsg: &pb.Command{Device: tt.device, Owner: tt.owner},
+			}
+
+			got, next, err := acquireDeviceLock(context.Background(), args)
+
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+
+				cErr, ok := err.(*connect.Error)
+				if !ok || cErr.Code() != tt.wantErrCode {
+					t.Fatalf("expected connect error code %v, got %v (err=%v)", tt.wantErrCode, cErr.Code(), err)
+				}
+
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if got.autoLocked != tt.wantAutoLocked {
+				t.Errorf("autoLocked = %v, want %v", got.autoLocked, tt.wantAutoLocked)
+			}
+
+			if !stateEqual(next, tt.wantNext) {
+				t.Fatalf("expected next state executeModules, got %p", next)
 			}
 		})
 	}
