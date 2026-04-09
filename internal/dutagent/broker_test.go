@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"strings"
 	"testing"
 	"time"
 
@@ -274,5 +275,91 @@ func TestBroker_DualErrors(t *testing.T) {
 	errs := collectErrors(t, errCh, 300*time.Millisecond)
 	if len(errs) < 2 {
 		// WANT both errors; order unspecified.
+	}
+}
+
+// TestSession_PrintNotBlockingOnShutdown verifies that Print, Printf, and Println
+// return promptly when the broker workers have shut down (done is closed).
+func TestSession_PrintNotBlockingOnShutdown(t *testing.T) {
+	b := &Broker{}
+	// recvErrs with a real error triggers fromClientWorker to cancel the context,
+	// which closes done and causes toClientWorker to exit.
+	stream := &testStream{recvErrs: []error{errors.New("recv died")}}
+	sess, errCh := b.Start(context.Background(), stream)
+
+	// Wait for workers to shut down.
+	collectErrors(t, errCh, 300*time.Millisecond)
+
+	// All three Print variants must return without blocking.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		sess.Print("a")
+		sess.Printf("b %s", "c")
+		sess.Println("d")
+	}()
+
+	select {
+	case <-done:
+		// ok
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("Print/Printf/Println blocked after broker shutdown")
+	}
+}
+
+// TestSession_RequestFileErrorOnShutdown verifies that RequestFile returns an error
+// when done is closed while the module is waiting for a file to be handed over.
+func TestSession_RequestFileErrorOnShutdown(t *testing.T) {
+	b := &Broker{}
+	// Block Receive so fromClientWorker doesn't exit on its own; we cancel manually.
+	stream := &testStream{recvBlock: true}
+	ctx, cancel := context.WithCancel(context.Background())
+	sess, errCh := b.Start(ctx, stream)
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := sess.(*session).RequestFile("firmware.bin")
+		done <- err
+	}()
+
+	// Give the goroutine time to block on fileReqCh/fileCh.
+	time.Sleep(20 * time.Millisecond)
+
+	// Cancel to shut down workers (closes done channel on session).
+	cancel()
+	if stream.unblockCh != nil {
+		close(stream.unblockCh)
+	}
+
+	collectErrors(t, errCh, 300*time.Millisecond)
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("expected RequestFile to return an error on shutdown, got nil")
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("RequestFile blocked after broker shutdown")
+	}
+}
+
+// TestSession_SendFileErrorOnShutdown verifies that SendFile returns an error
+// when done is closed before the broker's toClientWorker picks up the file channel.
+func TestSession_SendFileErrorOnShutdown(t *testing.T) {
+	b := &Broker{}
+	// Use a send error so toClientWorker exits as soon as it tries to send,
+	// which cancels the context and closes done before SendFile can hand off the file.
+	stream := &testStream{
+		sendErr:  errors.New("send died"),
+		recvErrs: []error{errors.New("recv died")},
+	}
+	sess, errCh := b.Start(context.Background(), stream)
+
+	// Wait for workers to exit.
+	collectErrors(t, errCh, 300*time.Millisecond)
+
+	err := sess.(*session).SendFile("result.bin", strings.NewReader("data"))
+	if err == nil {
+		t.Fatal("expected SendFile to return an error on shutdown, got nil")
 	}
 }

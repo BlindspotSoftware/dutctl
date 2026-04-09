@@ -14,6 +14,7 @@ import (
 
 // session implements the module.Session interface.
 type session struct {
+	done      <-chan struct{} // closed when broker workers shut down; unblocks pending session calls
 	printCh   chan string
 	stdinCh   chan []byte
 	stdoutCh  chan []byte
@@ -28,15 +29,24 @@ type session struct {
 }
 
 func (s *session) Print(a ...any) {
-	s.printCh <- fmt.Sprint(a...)
+	select {
+	case s.printCh <- fmt.Sprint(a...):
+	case <-s.done:
+	}
 }
 
 func (s *session) Printf(format string, a ...any) {
-	s.printCh <- fmt.Sprintf(format, a...)
+	select {
+	case s.printCh <- fmt.Sprintf(format, a...):
+	case <-s.done:
+	}
 }
 
 func (s *session) Println(a ...any) {
-	s.printCh <- fmt.Sprintln(a...)
+	select {
+	case s.printCh <- fmt.Sprintln(a...):
+	case <-s.done:
+	}
 }
 
 //nolint:nonamedreturns
@@ -72,9 +82,19 @@ func (s *session) RequestFile(name string) (io.Reader, error) {
 
 	log.Printf("Module issued file request for: %q", name)
 
-	s.fileReqCh <- name // Send the file request to the client.
+	select {
+	case s.fileReqCh <- name:
+	case <-s.done:
+		return nil, fmt.Errorf("session closed before file request %q could be sent", name)
+	}
 
-	file := <-s.fileCh // This will block until the client sends the file.
+	var file chan []byte
+
+	select {
+	case file = <-s.fileCh:
+	case <-s.done:
+		return nil, fmt.Errorf("session closed while waiting for file %q", name)
+	}
 
 	r, err := chanio.NewChanReader(file)
 	if err != nil {
@@ -99,7 +119,15 @@ func (s *session) SendFile(name string, r io.Reader) error {
 	s.currentFile = name
 
 	file := make(chan []byte, 1)
-	s.fileCh <- file
+
+	select {
+	case s.fileCh <- file:
+	case <-s.done:
+		s.currentFile = ""
+
+		return fmt.Errorf("session closed before file %q could be sent", name)
+	}
+
 	file <- content
 
 	close(file) // indicate EOF.
