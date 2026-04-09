@@ -259,6 +259,65 @@ func TestModuleArgs(t *testing.T) {
 	}
 }
 
+func TestValidate(t *testing.T) {
+	tests := []struct {
+		name    string
+		devs    Devlist
+		wantErr bool
+		wantIs  error
+	}{
+		{
+			name: "valid — no reserved names",
+			devs: Devlist{
+				"board1": {Cmds: map[string]Command{"flash": {}, "power": {}}},
+			},
+		},
+		{
+			name:    "invalid — command named lock",
+			devs:    Devlist{"board1": {Cmds: map[string]Command{"lock": {}}}},
+			wantErr: true,
+			wantIs:  ErrReservedName,
+		},
+		{
+			name:    "invalid — command named unlock",
+			devs:    Devlist{"board1": {Cmds: map[string]Command{"unlock": {}}}},
+			wantErr: true,
+			wantIs:  ErrReservedName,
+		},
+		{
+			name:    "invalid — command named status",
+			devs:    Devlist{"board1": {Cmds: map[string]Command{"status": {}}}},
+			wantErr: true,
+			wantIs:  ErrReservedName,
+		},
+		{
+			name: "empty device list — no error",
+			devs: Devlist{},
+		},
+		{
+			name: "device with no commands — no error",
+			devs: Devlist{"board1": {}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.devs.Validate()
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+
+				if tt.wantIs != nil && !errors.Is(err, tt.wantIs) {
+					t.Errorf("errors.Is(%v) = false, want true", tt.wantIs)
+				}
+			} else if err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
 // helpModule is a minimal test double implementing module.Module for HelpText tests.
 type helpModule struct {
 	text string

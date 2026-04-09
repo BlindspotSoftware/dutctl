@@ -10,6 +10,12 @@ service DeviceService {
   rpc Commands(CommandsRequest) returns (CommandsResponse) {}
   rpc Details(DetailsRequest) returns (DetailsResponse) {}
   rpc Run(stream RunRequest) returns (stream RunResponse) {}
+  // Lock acquires an exclusive lock on a device for a specified duration.
+  rpc Lock(LockRequest) returns (LockResponse) {}
+  // Unlock releases a previously acquired lock on a device.
+  rpc Unlock(UnlockRequest) returns (UnlockResponse) {}
+  // LockStatus returns the current lock status for one or all devices.
+  rpc LockStatus(LockStatusRequest) returns (LockStatusResponse) {}
 }
 
 // ListRequest is sent by the client to request a list of devices connected to the agent.
@@ -18,6 +24,7 @@ message ListRequest {}
 // ListResponse is sent by the agent in response to a ListRequest.
 message ListResponse {
   repeated string devices = 1;
+  repeated DeviceLockInfo lock_info = 2;
 }
 
 // CommandsRequest is sent by the client to request a list of commands available for
@@ -71,6 +78,7 @@ message Command {
   string device = 1;
   string command = 2;
   repeated string args = 3;
+  string owner = 4;
 }
 
 // Print is used by the agent to send the output of a command execution to the client.
@@ -97,6 +105,50 @@ message FileRequest {
 message File {
   string path = 1;
   bytes content = 2;
+}
+
+// LockRequest is sent by the client to acquire an exclusive lock on a device.
+message LockRequest {
+  string device = 1;
+  string owner = 2;
+  int64 duration_seconds = 3;
+}
+
+// LockResponse is sent by the agent in response to a successful LockRequest.
+message LockResponse {
+  string device = 1;
+  string owner = 2;
+  int64 locked_at = 3;
+  int64 expires_at = 4;
+}
+
+// UnlockRequest is sent by the client to release a lock on a device.
+message UnlockRequest {
+  string device = 1;
+  string owner = 2;
+}
+
+// UnlockResponse is sent by the agent in response to a successful UnlockRequest.
+message UnlockResponse {}
+
+// LockStatusRequest is sent by the client to query the lock status of devices.
+// If device is empty, the status of all devices is returned.
+message LockStatusRequest {
+  string device = 1;
+}
+
+// LockStatusResponse is sent by the agent in response to a LockStatusRequest.
+message LockStatusResponse {
+  repeated DeviceLockInfo locks = 1;
+}
+
+// DeviceLockInfo contains lock information for a single device.
+message DeviceLockInfo {
+  string device = 1;
+  bool locked = 2;
+  string owner = 3;
+  int64 locked_at = 4;
+  int64 expires_at = 5;
 }
 
 // RelayService defines the service for forwarding communication via relay server.

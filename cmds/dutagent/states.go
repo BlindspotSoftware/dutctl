@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"time"
 
 	"connectrpc.com/connect"
 	"github.com/BlindspotSoftware/dutctl/internal/dutagent"
@@ -19,11 +20,15 @@ import (
 	pb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1"
 )
 
+// autoLockDuration is the default lock duration for auto-acquired locks during Run.
+const autoLockDuration = 5 * time.Minute
+
 // runCmdArgs are arguments for the finite state machine in the Run RPC.
 type runCmdArgs struct {
 	// dependencies of the state machine
 	stream     dutagent.Stream
 	deviceList dut.Devlist
+	locker     *dutagent.Locker
 
 	// fields for the states used during execution
 	cmdMsg      *pb.Command
@@ -32,6 +37,7 @@ type runCmdArgs struct {
 	session     module.Session
 	moduleErrCh chan error
 	brokerErrCh <-chan error
+	autoLocked  bool // true if this execution auto-acquired the lock
 }
 
 // receiveCommandRPC is the first state of the Run RPC.
@@ -88,6 +94,39 @@ func findDUTCmd(_ context.Context, args runCmdArgs) (runCmdArgs, fsm.State[runCm
 
 	args.dev = dev
 	args.cmd = cmd
+
+	return args, acquireDeviceLock, nil
+}
+
+// acquireDeviceLock is a state of the Run RPC.
+//
+// It enforces device-level locking before execution:
+//   - Unlocked device → auto-acquire a 5-minute lock (autoLocked=true)
+//   - Locked by same owner → reuse existing lock (autoLocked=false)
+//   - Locked by a different owner → reject with CodeFailedPrecondition
+func acquireDeviceLock(_ context.Context, args runCmdArgs) (runCmdArgs, fsm.State[runCmdArgs], error) {
+	device := args.cmdMsg.GetDevice()
+	owner := args.cmdMsg.GetOwner()
+
+	// Inspect current lock state to distinguish "unlocked" from "already locked by same owner".
+	existingLock, isLocked := args.locker.Status(device)
+	alreadyOwnedByUs := isLocked && existingLock.Owner == owner
+
+	if isLocked && !alreadyOwnedByUs {
+		// A different owner holds the lock — reject.
+		return args, nil, connect.NewError(connect.CodeFailedPrecondition,
+			fmt.Errorf("device %q is locked by %q", device, existingLock.Owner))
+	}
+
+	// Device is either unlocked or already owned by us.
+	// Lock acquires a new lock or extends an existing one without reducing its expiry.
+	_, err := args.locker.Lock(device, owner, autoLockDuration)
+	if err != nil {
+		return args, nil, connect.NewError(connect.CodeFailedPrecondition, err)
+	}
+
+	// Only auto-release at the end of Run if we just acquired a new lock.
+	args.autoLocked = !alreadyOwnedByUs
 
 	return args, executeModules, nil
 }

@@ -11,6 +11,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"time"
 )
 
 // TextFormatter implements Formatter with plain text formatting capabilities.
@@ -53,24 +54,26 @@ func newTextFormatter(config Config) *TextFormatter {
 	}
 }
 
+// writerFor returns the appropriate io.Writer based on buffering mode and error flag.
+func (f *TextFormatter) writerFor(isError bool) io.Writer {
+	if f.buffering {
+		if isError {
+			return &f.errBuffer
+		}
+
+		return &f.stdBuffer
+	}
+
+	if isError {
+		return f.stderr
+	}
+
+	return f.stdout
+}
+
 // WriteContent formats and outputs structured content.
 func (f *TextFormatter) WriteContent(content Content) {
-	// Get appropriate writer based on buffering mode and error state
-	var writer io.Writer
-
-	if f.buffering {
-		if content.IsError {
-			writer = &f.errBuffer
-		} else {
-			writer = &f.stdBuffer
-		}
-	} else {
-		if content.IsError {
-			writer = f.stderr
-		} else {
-			writer = f.stdout
-		}
-	}
+	writer := f.writerFor(content.IsError)
 
 	// Format and write content based on type, regardless of error state
 	switch content.Type {
@@ -84,6 +87,10 @@ func (f *TextFormatter) WriteContent(content Content) {
 		f.writeDetailTo(content, writer)
 	case TypeModuleOutput:
 		f.writeModuleOutputTo(content, writer)
+	case TypeLockStatus:
+		f.writeLockStatusTo(content, writer)
+	case TypeLockInfo:
+		f.writeLockInfoTo(content, writer)
 	default:
 		// For general text or unrecognized types
 		f.writeGeneralTo(content, writer)
@@ -394,6 +401,46 @@ func hasMetadataValueChanged(f *TextFormatter, metadata map[string]string) bool 
 
 	// No changes detected - don't print metadata again
 	return false
+}
+
+// writeLockStatusTo formats the result of a lock or unlock operation.
+func (f *TextFormatter) writeLockStatusTo(content Content, writer io.Writer) {
+	lock, ok := content.Data.(DeviceLock)
+	if !ok {
+		f.writeGeneralTo(content, writer)
+
+		return
+	}
+
+	f.writeMetadata(content, writer)
+
+	if lock.Locked {
+		expires := time.Unix(lock.ExpiresAt, 0).UTC().Format(time.RFC3339)
+		fmt.Fprintf(writer, "Device %q locked by %q until %s\n", lock.Device, lock.Owner, expires)
+	} else {
+		fmt.Fprintf(writer, "Device %q unlocked\n", lock.Device)
+	}
+}
+
+// writeLockInfoTo formats lock status for one or more devices.
+func (f *TextFormatter) writeLockInfoTo(content Content, writer io.Writer) {
+	locks, ok := content.Data.([]DeviceLock)
+	if !ok {
+		f.writeGeneralTo(content, writer)
+
+		return
+	}
+
+	f.writeMetadata(content, writer)
+
+	for _, lock := range locks {
+		if lock.Locked {
+			expires := time.Unix(lock.ExpiresAt, 0).UTC().Format(time.RFC3339)
+			fmt.Fprintf(writer, "  %s\t[locked by %q until %s]\n", lock.Device, lock.Owner, expires)
+		} else {
+			fmt.Fprintf(writer, "  %s\n", lock.Device)
+		}
+	}
 }
 
 // Skip the separate metadataValuesChanged function to simplify the implementation

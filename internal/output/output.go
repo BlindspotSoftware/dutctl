@@ -30,7 +30,24 @@ const (
 
 	// TypeVersion represents version information.
 	TypeVersion ContentType = "version"
+
+	// TypeLockStatus represents the result of a lock or unlock operation.
+	TypeLockStatus ContentType = "lock-status"
+
+	// TypeLockInfo represents lock status information for one or more devices.
+	TypeLockInfo ContentType = "lock-info"
 )
+
+// DeviceLock holds the displayable lock state for a single device.
+// Data for TypeLockStatus is a DeviceLock (result of a lock operation).
+// Data for TypeLockInfo is a []DeviceLock (status query for one or more devices).
+type DeviceLock struct {
+	Device    string
+	Locked    bool
+	Owner     string
+	LockedAt  int64 // unix seconds; zero when unlocked
+	ExpiresAt int64 // unix seconds; zero when unlocked
+}
 
 // Content is a structured data unit to be formatted and displayed.
 type Content struct {
