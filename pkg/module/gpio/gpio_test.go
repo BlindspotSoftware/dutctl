@@ -290,11 +290,12 @@ func TestButtonHelp(t *testing.T) {
 
 func TestSwitchInit(t *testing.T) {
 	tests := []struct {
-		name       string
-		swtch      Switch
-		mockErr    error
-		expectFunc func(mock *MockGpio) bool
-		expectErr  bool
+		name          string
+		swtch         Switch
+		mockErr       error
+		expectFunc    func(mock *MockGpio) bool
+		expectErr     bool
+		expectedState switchState
 	}{
 		{
 			name: "Init with Initial 'on' and ActiveLow false",
@@ -305,6 +306,7 @@ func TestSwitchInit(t *testing.T) {
 			expectFunc: func(mock *MockGpio) bool {
 				return mock.HighCalled
 			},
+			expectedState: on,
 		},
 		{
 			name: "Init with Initial 'On' and ActiveLow false",
@@ -315,6 +317,7 @@ func TestSwitchInit(t *testing.T) {
 			expectFunc: func(mock *MockGpio) bool {
 				return mock.HighCalled
 			},
+			expectedState: on,
 		},
 		{
 			name: "Init with Initial 'off' and ActiveLow false",
@@ -325,6 +328,7 @@ func TestSwitchInit(t *testing.T) {
 			expectFunc: func(mock *MockGpio) bool {
 				return mock.LowCalled
 			},
+			expectedState: off,
 		},
 		{
 			name: "Init with Initial 'Off' and ActiveLow false",
@@ -335,6 +339,7 @@ func TestSwitchInit(t *testing.T) {
 			expectFunc: func(mock *MockGpio) bool {
 				return mock.LowCalled
 			},
+			expectedState: off,
 		},
 		{
 			name: "Init with Initial 'on' and ActiveLow true",
@@ -345,6 +350,7 @@ func TestSwitchInit(t *testing.T) {
 			expectFunc: func(mock *MockGpio) bool {
 				return mock.LowCalled
 			},
+			expectedState: on,
 		},
 		{
 			name: "Init with Initial 'On' and ActiveLow true",
@@ -355,6 +361,7 @@ func TestSwitchInit(t *testing.T) {
 			expectFunc: func(mock *MockGpio) bool {
 				return mock.LowCalled
 			},
+			expectedState: on,
 		},
 		{
 			name: "Init with Initial 'off' and ActiveLow true",
@@ -365,6 +372,7 @@ func TestSwitchInit(t *testing.T) {
 			expectFunc: func(mock *MockGpio) bool {
 				return mock.HighCalled
 			},
+			expectedState: off,
 		},
 		{
 			name: "Init with Initial 'Off' and ActiveLow true",
@@ -375,6 +383,7 @@ func TestSwitchInit(t *testing.T) {
 			expectFunc: func(mock *MockGpio) bool {
 				return mock.HighCalled
 			},
+			expectedState: off,
 		},
 		{
 			name: "Init with Initial '' and ActiveLow false",
@@ -385,6 +394,7 @@ func TestSwitchInit(t *testing.T) {
 			expectFunc: func(mock *MockGpio) bool {
 				return mock.LowCalled
 			},
+			expectedState: off,
 		},
 		{
 			name: "Init with Initial 'unknown' and ActiveLow false",
@@ -395,6 +405,7 @@ func TestSwitchInit(t *testing.T) {
 			expectFunc: func(mock *MockGpio) bool {
 				return mock.LowCalled
 			},
+			expectedState: off,
 		},
 		{
 			name: "Init with Initial '' and ActiveLow true",
@@ -405,6 +416,7 @@ func TestSwitchInit(t *testing.T) {
 			expectFunc: func(mock *MockGpio) bool {
 				return mock.HighCalled
 			},
+			expectedState: off,
 		},
 		{
 			name: "Init with Initial 'unknown' and ActiveLow true",
@@ -415,6 +427,7 @@ func TestSwitchInit(t *testing.T) {
 			expectFunc: func(mock *MockGpio) bool {
 				return mock.HighCalled
 			},
+			expectedState: off,
 		},
 	}
 
@@ -428,6 +441,9 @@ func TestSwitchInit(t *testing.T) {
 			}
 			if tt.expectFunc != nil && !tt.expectFunc(tt.swtch.gpio.(*MockGpio)) {
 				t.Errorf("expected function not called for %s", tt.name)
+			}
+			if tt.swtch.state != tt.expectedState {
+				t.Errorf("expected state %q after Init, got %q", tt.expectedState, tt.swtch.state)
 			}
 		})
 	}
@@ -470,12 +486,13 @@ func TestSwitchDeinit(t *testing.T) {
 
 func TestSwitchRun(t *testing.T) {
 	tests := []struct {
-		name       string
-		swtch      Switch
-		args       []string
-		mockErr    error
-		expectFunc func(mock *MockGpio) bool
-		expectErr  bool
+		name        string
+		swtch       Switch
+		args        []string
+		mockErr     error
+		expectFunc  func(mock *MockGpio) bool
+		expectErr   bool
+		expectPrint string // non-empty: assert mock.Session.PrintText equals this value
 	}{
 		{
 			name: "Run with state 'on', ActiveLow false, and args 'on'",
@@ -534,7 +551,8 @@ func TestSwitchRun(t *testing.T) {
 				state:     on,
 				ActiveLow: false,
 			},
-			expectErr: false,
+			expectErr:   false,
+			expectPrint: "Current state: on\n",
 		},
 		{
 			name: "Run with state 'off', ActiveLow true, and args 'on'",
@@ -593,7 +611,8 @@ func TestSwitchRun(t *testing.T) {
 				state:     off,
 				ActiveLow: true,
 			},
-			expectErr: false,
+			expectErr:   false,
+			expectPrint: "Current state: off\n",
 		},
 		{
 			name: "Run with args 'on' with GPIO error",
@@ -646,6 +665,9 @@ func TestSwitchRun(t *testing.T) {
 			}
 			if tt.expectFunc != nil && !tt.expectFunc(mockGpio) {
 				t.Errorf("expected function not called for %s", tt.name)
+			}
+			if tt.expectPrint != "" && sesh.PrintText != tt.expectPrint {
+				t.Errorf("expected print %q, got %q", tt.expectPrint, sesh.PrintText)
 			}
 		})
 	}
