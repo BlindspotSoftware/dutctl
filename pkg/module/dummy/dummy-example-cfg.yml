@@ -12,9 +12,6 @@ devices:
         uses:
           - module: dummy-status
             main: true
-            args:
-              - foo
-              - bar
       repeat:
         desc: "Interactively repeat user input via the dummy-repeat module"
         uses:
