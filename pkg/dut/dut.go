@@ -18,10 +18,30 @@ var (
 	ErrDeviceNotFound  = errors.New("no such device")
 	ErrCommandNotFound = errors.New("no such command")
 	ErrNoMainForArgs   = errors.New("arguments provided but command has no main module to receive them")
+	ErrReservedName    = errors.New("reserved command name")
 )
 
 // Devlist is a list of devices-under-test.
 type Devlist map[string]Device
+
+// Validate checks the device list for configuration errors, such as commands
+// using reserved names that conflict with built-in dutctl CLI commands.
+func (devs *Devlist) Validate() error {
+	// reservedCmdNames are command names used by the dutctl CLI itself and may not
+	// be used as device command names in the configuration.
+	reservedCmdNames := []string{"lock", "unlock", "status"}
+
+	for devName, dev := range *devs {
+		for cmdName := range dev.Cmds {
+			if slices.Contains(reservedCmdNames, cmdName) {
+				return fmt.Errorf("%w: device %q has command %q which conflicts with a built-in dutctl command",
+					ErrReservedName, devName, cmdName)
+			}
+		}
+	}
+
+	return nil
+}
 
 // Names returns the names of all devices in the list.
 // The names are sorted alphabetically.

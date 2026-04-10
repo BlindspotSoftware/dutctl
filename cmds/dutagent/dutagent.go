@@ -132,6 +132,11 @@ func (agt *agent) loadConfig() error {
 		return fmt.Errorf("parsing YAML failed: %w", err)
 	}
 
+	err = agt.config.Devices.Validate()
+	if err != nil {
+		return fmt.Errorf("invalid configuration: %w", err)
+	}
+
 	return nil
 }
 
@@ -160,6 +165,7 @@ func printInitErr(err error) {
 func (agt *agent) startRPCService() error {
 	service := &rpcService{
 		devices: agt.config.Devices,
+		locker:  dutagent.NewLocker(),
 	}
 
 	mux := http.NewServeMux()

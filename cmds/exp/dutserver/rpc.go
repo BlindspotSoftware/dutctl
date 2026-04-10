@@ -50,7 +50,7 @@ func (a *agent) conn() dutctlv1connect.DeviceServiceClient {
 // It implements both, the DeviceService used by clients as they would use with dutagents
 // and the RelayService used by agents to register with the server.
 type rpcService struct {
-	sync.RWMutex
+	mu sync.RWMutex
 
 	// agents holds handles of the registered DUT agents.
 	agents map[string]*agent
@@ -58,8 +58,8 @@ type rpcService struct {
 
 // findAgent returns the handle for the DUT agent, that controls the device with the given name.
 func (s *rpcService) findAgent(device string) (*agent, error) {
-	s.RLock()
-	defer s.RUnlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
 	if agent, ok := s.agents[device]; ok {
 		return agent, nil
@@ -71,8 +71,8 @@ func (s *rpcService) findAgent(device string) (*agent, error) {
 // addAgent tries to register devices handled by an agent with address.
 // If one of the provided devices already exists an error is returned and none of the deviced will be stored.
 func (s *rpcService) addAgent(address string, devices []string) error {
-	s.Lock()
-	defer s.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	for _, device := range devices {
 		if _, exists := s.agents[device]; exists {
@@ -310,6 +310,51 @@ func (s *rpcService) Run(
 	}
 
 	return nil
+}
+
+// Lock forwards the Lock RPC to the appropriate DUT agent.
+func (s *rpcService) Lock(
+	ctx context.Context,
+	req *connect.Request[pb.LockRequest],
+) (*connect.Response[pb.LockResponse], error) {
+	agent, err := s.findAgent(req.Msg.GetDevice())
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+
+	return agent.conn().Lock(ctx, req)
+}
+
+// Unlock forwards the Unlock RPC to the appropriate DUT agent.
+func (s *rpcService) Unlock(
+	ctx context.Context,
+	req *connect.Request[pb.UnlockRequest],
+) (*connect.Response[pb.UnlockResponse], error) {
+	agent, err := s.findAgent(req.Msg.GetDevice())
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+
+	return agent.conn().Unlock(ctx, req)
+}
+
+// LockStatus forwards the LockStatus RPC to the appropriate DUT agent.
+func (s *rpcService) LockStatus(
+	ctx context.Context,
+	req *connect.Request[pb.LockStatusRequest],
+) (*connect.Response[pb.LockStatusResponse], error) {
+	device := req.Msg.GetDevice()
+	if device == "" {
+		return nil, connect.NewError(connect.CodeUnimplemented,
+			errors.New("querying all devices is not supported by the relay server"))
+	}
+
+	agent, err := s.findAgent(device)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+
+	return agent.conn().LockStatus(ctx, req)
 }
 
 // isCommandMsg checks if the run request contains a command message and returns it if so.
