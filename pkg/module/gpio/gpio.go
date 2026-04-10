@@ -256,6 +256,8 @@ func (s *Switch) Init() error {
 		return s.on()
 	}
 
+	s.state = off
+
 	return s.off()
 }
 
@@ -274,7 +276,7 @@ func (s *Switch) Run(_ context.Context, sesh module.Session, args ...string) err
 	log.Println("gpio.Switch module: Run called")
 
 	if len(args) == 0 {
-		sesh.Print(fmt.Sprintf("Current state: %s", s.state))
+		sesh.Printf("Current state: %s\n", s.state)
 
 		return nil
 	}
