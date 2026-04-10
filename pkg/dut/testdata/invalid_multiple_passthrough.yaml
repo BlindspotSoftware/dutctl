@@ -2,9 +2,9 @@ device1:
   desc: "Device 1"
   cmds:
     status:
-      desc: "two main modules"
+      desc: "two passthrough modules"
       uses:
         - module: dummy-repeat
-          main: true
+          passthrough: true
         - module: dummy-repeat
-          main: true
+          passthrough: true

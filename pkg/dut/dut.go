@@ -15,9 +15,9 @@ import (
 )
 
 var (
-	ErrDeviceNotFound  = errors.New("no such device")
-	ErrCommandNotFound = errors.New("no such command")
-	ErrNoMainForArgs   = errors.New("arguments provided but command has no main module to receive them")
+	ErrDeviceNotFound        = errors.New("no such device")
+	ErrCommandNotFound       = errors.New("no such command")
+	ErrNoPassthroughForArgs  = errors.New("arguments provided but command has no passthrough module to receive them")
 )
 
 // Devlist is a list of devices-under-test.
@@ -58,7 +58,7 @@ func (devs *Devlist) CmdNames(device string) ([]string, error) {
 // FindCmd returns the device and command for a given device and command name.
 // If the device is not found, it returns ErrDeviceNotFound, if the command is not found,
 // it returns ErrCommandNotFound. If the requested command has no modules, it returns ErrNoModules.
-// If the requested command has multiple main modules, it returns ErrMultipleMainModules.
+// If the requested command has multiple passthrough modules, it returns ErrMultiplePassthroughModules.
 func (devs *Devlist) FindCmd(device, command string) (Device, Command, error) {
 	dev, ok := (*devs)[device]
 	if !ok {
@@ -74,8 +74,8 @@ func (devs *Devlist) FindCmd(device, command string) (Device, Command, error) {
 		return dev, cmd, ErrNoModules
 	}
 
-	if cmd.countMain() > 1 {
-		return dev, cmd, ErrMultipleMainModules
+	if cmd.countPassthrough() > 1 {
+		return dev, cmd, ErrMultiplePassthroughModules
 	}
 
 	return dev, cmd, nil
@@ -102,16 +102,16 @@ type ArgDecl struct {
 	Desc string `yaml:"desc"`
 }
 
-// HasMain reports whether the command has a main module.
-func (c *Command) HasMain() bool {
-	return c.countMain() > 0
+// HasPassthrough reports whether the command has a passthrough module.
+func (c *Command) HasPassthrough() bool {
+	return c.countPassthrough() > 0
 }
 
-func (c *Command) countMain() int {
+func (c *Command) countPassthrough() int {
 	count := 0
 
 	for _, mod := range c.Modules {
-		if mod.Config.Main {
+		if mod.Config.Passthrough {
 			count++
 		}
 	}
@@ -120,21 +120,21 @@ func (c *Command) countMain() int {
 }
 
 // ModuleArgs builds the argument list for each module in the command.
-// Main modules receive runtimeArgs directly. Non-main modules
+// Passthrough modules receive runtimeArgs directly. Non-passthrough modules
 // receive their statically configured Args with template references substituted
 // using runtimeArgs. The returned slice has the same length and ordering as c.Modules.
 func (c *Command) ModuleArgs(runtimeArgs []string) ([][]string, error) {
-	if len(runtimeArgs) > 0 && !c.HasMain() {
-		return nil, ErrNoMainForArgs
+	if len(runtimeArgs) > 0 && !c.HasPassthrough() {
+		return nil, ErrNoPassthroughForArgs
 	}
 
 	result := make([][]string, len(c.Modules))
 
 	for idx, mod := range c.Modules {
-		if mod.Config.Main {
+		if mod.Config.Passthrough {
 			result[idx] = runtimeArgs
 		} else {
-			// Apply argument substitution for non-interactive modules
+			// Apply argument substitution for non-passthrough modules
 			substituted, err := c.SubstituteArgs(mod.Config.Args, runtimeArgs)
 			if err != nil {
 				return nil, err
@@ -147,16 +147,16 @@ func (c *Command) ModuleArgs(runtimeArgs []string) ([][]string, error) {
 	return result, nil
 }
 
-// HelpText returns the help string of the main module.
-// If no main module exists, returns an overview of all modules.
+// HelpText returns the help string of the passthrough module.
+// If no passthrough module exists, returns an overview of all modules.
 func (c *Command) HelpText() string {
 	for _, mod := range c.Modules {
-		if mod.Config.Main {
+		if mod.Config.Passthrough {
 			return mod.Help()
 		}
 	}
 
-	// If no main module, provide overview of all modules
+	// If no passthrough module, provide overview of all modules
 
 	moduleNames := make([]string, 0, len(c.Modules))
 	for _, module := range c.Modules {
@@ -185,8 +185,8 @@ type Module struct {
 }
 
 type ModuleConfig struct {
-	Name    string `yaml:"module"`
-	Main    bool
-	Args    []string
-	Options map[string]any `yaml:"with"`
+	Name        string `yaml:"module"`
+	Passthrough bool   `yaml:"passthrough"`
+	Args        []string
+	Options     map[string]any `yaml:"with"`
 }
