@@ -1,0 +1,33 @@
+post-stage:
+  # ===========================================
+  #  Delete the files copied over for the test
+  # ===========================================
+  - cmd: shell
+    name: Stop remotelab-server systemd service
+    transport: *transport_root
+    parameters:
+      command: "systemctl stop {{ defaults.SYSTEMD_FILE }} || true"
+
+  - cmd: shell
+    name: Uninstall the package
+    transport: *transport_root
+    parameters:
+      command: "apt remove --assume-yes {{ defaults.PKG_NAME }} || true"
+
+  - cmd: shell
+    name: Delete testing configuration file
+    transport: *transport_root
+    parameters:
+      command: "rm {{ defaults.DUTCTL_CONFIG_FILE }} || true"
+
+  - cmd: shell
+    name: Delete package
+    transport: *transport_root
+    parameters:
+      command: "rm {{ defaults.PKG_NAME }}.deb || true"
+
+  - cmd: shell
+    name: Shutdown fake serial
+    transport: *transport_oscar
+    parameters:
+      command: "pkill socat || true"

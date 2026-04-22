@@ -1,0 +1,109 @@
+---
+name: Test dummy modules
+description: Test that all dummy modules work
+
+defaults:
+  {%- import ".jinja2_templates/defaults.j2" as defaults %}
+  {%- macro someop() %}{% include ".jinja2_templates/defaults.yaml" with context %}{% endmacro %}
+  {{ someop()|indent(2) }}
+
+{% include ".jinja2_templates/pre.yaml.j2" %}
+
+# "contrib/dutagent-cfg-example.yaml"
+
+stages:
+  - name: Test Device 1
+    steps:
+      - cmd: cmd
+        name: Test status
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: [{{ defaults.DUTCTL_ARGS }}, "device1", "status"]
+          expect:
+            - regex: "Hello from dummy status module\nCalled with 0 arguments"
+        options:
+          timeout: 1s
+
+      - cmd: cmd
+        name: Test status with argument
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: [{{ defaults.DUTCTL_ARGS }}, "device1", "status", "hello"]
+          expect:
+            - regex: "Hello from dummy status module\nCalled with 1 arguments\nArg 0: hello"
+        options:
+          timeout: 1s
+
+  - name: Test Device 2
+    steps:
+      - cmd: cmd
+        name: Test status
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: [{{ defaults.DUTCTL_ARGS }}, "device2", "status"]
+          expect:
+            - regex: "Hello from dummy status module\nCalled with 2 arguments"
+        options:
+          timeout: 1s
+
+      - cmd: shell
+        name: Test repeat
+        transport:
+          proto: local
+        parameters:
+          command: "echo -e 'hello\nhello world\n' | [[input.DUTCTL]] {{ defaults.DUTCTL_ARGS_STR }} device2 repeat"
+          expect:
+            - regex: "Hello from dummy repeat module!\nEnter one word per line."
+        options:
+          timeout: 1s
+
+  - name: Test Device 3
+    steps:
+      - cmd: cmd
+        name: Test status
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: [{{ defaults.DUTCTL_ARGS }}, "device3", "status"]
+          expect:
+            - regex: "Hello from dummy status module\nCalled with 0 arguments"
+        options:
+          timeout: 1s
+
+      - cmd: shell
+        name: Create test file
+        transport:
+          proto: local
+        parameters:
+          command: "echo 'hello' > test.txt"
+
+      - cmd: cmd
+        name: Test file transfer
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: [{{ defaults.DUTCTL_ARGS }}, "device3", "file-transfer", "test.txt", "test2.txt"]
+          expect:
+            - regex: "Hello from dummy file transfer module"
+        options:
+          timeout: 1s
+
+      - cmd: cmd
+        name: Read test file
+        transport:
+          proto: local
+        parameters:
+          executable: "cat"
+          args: ["test2.txt"]
+          expect:
+            - regex: "processed by dummy.FT module"
+
+{% include ".jinja2_templates/post.yaml.j2" -%}
