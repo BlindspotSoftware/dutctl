@@ -5,6 +5,6 @@ device1:
       desc: "All dummy modules"
       uses:
         - module: dummy-status
-          main: true
+          passthrough: true
         - module: dummy-repeat
         - module: dummy-ft

@@ -9,7 +9,7 @@ devices:
           Basic demo of the FlashEmulate module.
         uses:
           - module: flash-emulate
-            main: true
+            passthrough: true
             with:
               chip: "N25Q256A13"
               # tool: "/usr/local/bin/em100"  # optional, defaults to em100

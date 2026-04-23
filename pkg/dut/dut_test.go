@@ -82,7 +82,7 @@ func TestFindCmd(t *testing.T) {
 					Modules: []Module{
 						{
 							Config: ModuleConfig{
-								Main: true,
+								Passthrough: true,
 							},
 						},
 					},
@@ -94,12 +94,12 @@ func TestFindCmd(t *testing.T) {
 					Modules: []Module{
 						{
 							Config: ModuleConfig{
-								Main: true,
+								Passthrough: true,
 							},
 						},
 						{
 							Config: ModuleConfig{
-								Main: true,
+								Passthrough: true,
 							},
 						},
 					},
@@ -149,12 +149,12 @@ func TestFindCmd(t *testing.T) {
 			err:     ErrNoModules,
 		},
 		{
-			name:    "invalid command with multiple main modules",
+			name:    "invalid command with multiple passthrough modules",
 			device:  "device1",
 			command: "cmd3",
 			wantDev: devs["device1"],
 			wantCmd: devs["device1"].Cmds["cmd3"],
-			err:     ErrMultipleMainModules,
+			err:     ErrMultiplePassthroughModules,
 		},
 	}
 
@@ -177,40 +177,40 @@ func TestModuleArgs(t *testing.T) {
 		err         error
 	}{
 		{
-			name: "single main module gets runtime args",
+			name: "single passthrough module gets runtime args",
 			cmd: Command{Modules: []Module{
-				{Config: ModuleConfig{Main: true}},
+				{Config: ModuleConfig{Passthrough: true}},
 			}},
 			runtimeArgs: []string{"a", "b"},
 			want:        [][]string{{"a", "b"}},
 		},
 		{
-			name: "non-main gets static args",
+			name: "non-passthrough gets static args",
 			cmd: Command{Modules: []Module{
 				{Config: ModuleConfig{Args: []string{"x"}}},
 			}},
 			runtimeArgs: []string{"a"},
 			want:        nil,
-			err:         ErrNoMainForArgs,
+			err:         ErrNoPassthroughForArgs,
 		},
 		{
-			name: "mixed main and non-main",
+			name: "mixed passthrough and non-passthrough",
 			cmd: Command{Modules: []Module{
-				{Config: ModuleConfig{Main: true}},
+				{Config: ModuleConfig{Passthrough: true}},
 				{Config: ModuleConfig{Args: []string{"static1", "static2"}}},
 			}},
 			runtimeArgs: []string{"run1"},
 			want:        [][]string{{"run1"}, {"static1", "static2"}},
 		},
 		{
-			name: "template substitution in non-main module",
+			name: "template substitution in non-passthrough module",
 			cmd: Command{
 				Args: []ArgDecl{
 					{Name: "file", Desc: "Input file"},
 					{Name: "device", Desc: "Device ID"},
 				},
 				Modules: []Module{
-					{Config: ModuleConfig{Main: true}},
+					{Config: ModuleConfig{Passthrough: true}},
 					{Config: ModuleConfig{Args: []string{"flash", "${file}", "--device=${device}"}}},
 				},
 			},
@@ -222,21 +222,21 @@ func TestModuleArgs(t *testing.T) {
 			cmd:         Command{},
 			runtimeArgs: []string{"a"},
 			want:        nil,
-			err:         ErrNoMainForArgs,
+			err:         ErrNoPassthroughForArgs,
 		},
 		{
-			name: "error when runtime args provided but no main module",
+			name: "error when runtime args provided but no passthrough module",
 			cmd: Command{Modules: []Module{
 				{Config: ModuleConfig{}},
 			}},
 			runtimeArgs: []string{"a"},
 			want:        nil,
-			err:         ErrNoMainForArgs,
+			err:         ErrNoPassthroughForArgs,
 		},
 		{
-			name: "main module with no runtime args",
+			name: "passthrough module with no runtime args",
 			cmd: Command{Modules: []Module{
-				{Config: ModuleConfig{Main: true}},
+				{Config: ModuleConfig{Passthrough: true}},
 			}},
 			runtimeArgs: nil,
 			want:        [][]string{nil},
@@ -281,17 +281,17 @@ func TestHelpText(t *testing.T) {
 			wantText: "Command with 0 module(s): ",
 		},
 		{
-			name: "main module exists",
+			name: "passthrough module exists",
 			cmd: Command{Modules: []Module{
 				{
 					Module: &helpModule{text: "usage: flash <image>"},
-					Config: ModuleConfig{Name: "flash", Main: true},
+					Config: ModuleConfig{Name: "flash", Passthrough: true},
 				},
 			}},
 			wantText: "usage: flash <image>",
 		},
 		{
-			name: "no main module",
+			name: "no passthrough module",
 			cmd: Command{Modules: []Module{
 				{
 					Module: &helpModule{text: "helper"},
@@ -301,7 +301,7 @@ func TestHelpText(t *testing.T) {
 			wantText: "Command with 1 module(s): helper",
 		},
 		{
-			name: "multiple modules without main",
+			name: "multiple modules without passthrough",
 			cmd: Command{Modules: []Module{
 				{
 					Module: &helpModule{text: "setup"},
@@ -315,18 +315,18 @@ func TestHelpText(t *testing.T) {
 			wantText: "Command with 2 module(s): setup, cleanup",
 		},
 		{
-			name: "main among multiple modules",
+			name: "passthrough among multiple modules",
 			cmd: Command{Modules: []Module{
 				{
 					Module: &helpModule{text: "helper"},
 					Config: ModuleConfig{Name: "helper"},
 				},
 				{
-					Module: &helpModule{text: "main help"},
-					Config: ModuleConfig{Name: "main", Main: true},
+					Module: &helpModule{text: "passthrough help"},
+					Config: ModuleConfig{Name: "pt", Passthrough: true},
 				},
 			}},
-			wantText: "main help",
+			wantText: "passthrough help",
 		},
 	}
 
