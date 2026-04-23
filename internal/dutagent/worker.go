@@ -216,7 +216,13 @@ func fromClientWorker(ctx context.Context, stream Stream, s *session) error {
 				log.Printf("Server received file %q from client", path)
 
 				file := make(chan []byte, 1)
-				s.fileCh <- file
+
+				select {
+				case <-ctx.Done():
+					return nil
+				case s.fileCh <- file:
+				}
+
 				file <- content
 
 				close(file)
