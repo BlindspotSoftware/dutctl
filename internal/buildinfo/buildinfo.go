@@ -51,13 +51,13 @@ func (i *info) String() string {
 func (i *info) read() {
 	const unknown = "unknown"
 
+	i.semver = Version
+
 	if bi, ok := debug.ReadBuildInfo(); ok {
-		i.semver = bi.Main.Version
 		i.revision = cvsShortHash(findSetting("vcs.revision", bi.Settings))
 		i.time = parseTime(findSetting("vcs.time", bi.Settings))
 		i.compiler = bi.GoVersion
 	} else {
-		i.semver = unknown
 		i.revision = unknown
 		i.time = time.Time{}
 		i.compiler = unknown
