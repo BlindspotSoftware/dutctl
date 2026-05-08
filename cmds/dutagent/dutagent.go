@@ -81,7 +81,7 @@ type agent struct {
 
 // config holds the dutagent configuration that is parsed from YAML data.
 type config struct {
-	Version int
+	Version string
 	Devices dut.Devlist
 }
 
