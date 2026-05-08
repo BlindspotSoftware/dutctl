@@ -46,6 +46,11 @@
         }
     ],
     "packages": {
-        ".": {}
+        ".": {
+            "extra-files": [
+                "internal/buildinfo/version.go",
+                "contrib/dutagent-cfg-example.yaml"
+            ]
+        }
     }
 }
