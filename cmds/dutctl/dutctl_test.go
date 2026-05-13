@@ -119,13 +119,26 @@ func TestDispatch(t *testing.T) {
 		{
 			name:        "single arg lists commands for that device",
 			args:        []string{"mydevice"},
+			listDevices: []string{"mydevice"},
+			wantListHit: 1,
 			wantCmdHits: []string{"mydevice"},
 		},
 		{
-			name: "device command help calls details",
-			args: []string{"mydevice", "power", "help"},
+			name:        "device command help calls details",
+			args:        []string{"mydevice", "power", "help"},
+			listDevices: []string{"mydevice"},
+			wantListHit: 1,
 			wantDetailHi: []detailsCall{
 				{device: "mydevice", cmd: "power", keyword: "help"},
+			},
+		},
+		{
+			name:        "single device auto-resolves help into details",
+			args:        []string{"power", "help"},
+			listDevices: []string{"onlydev"},
+			wantListHit: 1,
+			wantDetailHi: []detailsCall{
+				{device: "onlydev", cmd: "power", keyword: "help"},
 			},
 		},
 	}
@@ -155,6 +168,67 @@ func TestDispatch(t *testing.T) {
 
 			if !equalDetails(fake.detailsCalls, tt.wantDetailHi) {
 				t.Errorf("Details calls: want %v, got %v", tt.wantDetailHi, fake.detailsCalls)
+			}
+		})
+	}
+}
+
+func TestMaybeResolveSingleDevice(t *testing.T) {
+	errBoom := errors.New("boom")
+
+	tests := []struct {
+		name        string
+		args        []string
+		listDevices []string
+		listErr     error
+		want        []string
+	}{
+		{
+			name: "empty args returns empty",
+			args: nil,
+			want: nil,
+		},
+		{
+			name:        "single device matching first arg is unchanged",
+			args:        []string{"only"},
+			listDevices: []string{"only"},
+			want:        []string{"only"},
+		},
+		{
+			name:        "single device differing from first arg is prepended",
+			args:        []string{"power", "on"},
+			listDevices: []string{"only"},
+			want:        []string{"only", "power", "on"},
+		},
+		{
+			name:        "multiple devices: no rewrite",
+			args:        []string{"power", "on"},
+			listDevices: []string{"a", "b"},
+			want:        []string{"power", "on"},
+		},
+		{
+			name:        "zero devices: no rewrite",
+			args:        []string{"power"},
+			listDevices: []string{},
+			want:        []string{"power"},
+		},
+		{
+			name:    "list RPC failure: no rewrite",
+			args:    []string{"power", "on"},
+			listErr: errBoom,
+			want:    []string{"power", "on"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fake := &fakeDeviceServiceClient{listDevices: tt.listDevices, listErr: tt.listErr}
+			app := newTestApp(t, fake)
+
+			got := app.maybeResolveSingleDevice(tt.args)
+
+			if !equalStrings(got, tt.want) {
+				t.Errorf("resolve: want %v, got %v", tt.want, got)
 			}
 		})
 	}

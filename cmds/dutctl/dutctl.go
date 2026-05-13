@@ -171,6 +171,8 @@ func (app *application) dispatch() error {
 		return app.listRPC()
 	}
 
+	app.args = app.maybeResolveSingleDevice(app.args)
+
 	if len(app.args) == 1 {
 		return app.commandsRPC(app.args[0])
 	}
