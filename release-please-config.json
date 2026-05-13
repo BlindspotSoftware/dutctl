@@ -4,7 +4,7 @@
     "pull-request-title-pattern": "chore: release ${version}",
     "include-component-in-tag": false,
     "include-v-in-tag": true,
-    "signoff": "Jens Drenhaus <jens.drenhaus@blindspot.software>",
+    "signoff": "Jens Topp <jens.topp@blindspot.software>",
     "changelog-sections": [
         {
             "type": "feat",
