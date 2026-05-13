@@ -46,11 +46,13 @@ var _ module.Module = &Serial{}
 
 const abstract = `Serial connection to the DUT
 `
+
 const usage = `
 ARGUMENTS:
 	[-t <duration>] [<expect>]
 
 `
+
 const description = `
 The serial connection is read-only and does not support stdin yet.
 If a regex is provided, the module will wait for the regex to match on the serial output, 
@@ -113,6 +115,13 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 		return err
 	}
 	defer port.Close()
+
+	// Discard any stale bytes left in the kernel/driver RX buffer from a
+	// previous session, otherwise the user sees data from the last boot.
+	err = port.Flush()
+	if err != nil {
+		log.Printf("serial module: flush failed: %v", err)
+	}
 
 	log.Printf("serial module: connected to %s at %d baud", s.Port, s.Baud)
 	session.Print(fmt.Sprintf("--- Connected to %s at %d baud ---\n", s.Port, s.Baud))
