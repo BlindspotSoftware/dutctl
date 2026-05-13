@@ -88,6 +88,10 @@ func (d *Devlist) UnmarshalYAML(node *yaml.Node) error {
 	for idx := 0; idx < len(node.Content); idx += 2 {
 		devName := node.Content[idx].Value
 
+		if IsReservedDeviceName(devName) {
+			return &ConfigError{Device: devName, Err: ErrReservedName}
+		}
+
 		var dev Device
 
 		// Decode triggers Device.UnmarshalYAML on the value node.
@@ -184,13 +188,17 @@ func decodeCmds(node *yaml.Node) (map[string]Command, error) {
 	cmds := make(map[string]Command, len(node.Content)/2) //nolint:mnd // MappingNode stores key/value as alternating pairs
 
 	// Iterate command entries to capture the command name for errors.
-	for i := 0; i < len(node.Content); i += 2 {
-		cmdName := node.Content[i].Value
+	for idx := 0; idx < len(node.Content); idx += 2 {
+		cmdName := node.Content[idx].Value
+
+		if IsReservedCommandName(cmdName) {
+			return nil, &ConfigError{Command: cmdName, Err: ErrReservedName}
+		}
 
 		var cmd Command
 
 		// Decode triggers Command.UnmarshalYAML.
-		err := node.Content[i+1].Decode(&cmd)
+		err := node.Content[idx+1].Decode(&cmd)
 		if err != nil {
 			var configErr *ConfigError
 			if errors.As(err, &configErr) {
