@@ -28,6 +28,7 @@ const usageAbstract = `dutctl - The client application of the DUT Control system
 `
 const usageSynopsis = `
 SYNOPSIS:
+	dutctl [options]
 	dutctl [options] list
 	dutctl [options] <device>
 	dutctl [options] <device> <command> [args...]
@@ -42,8 +43,13 @@ The optional args are passed to the command.
 To list all available devices, use the list command. If only a device is provided,
 dutctl list all available commands for the device.
 
-If a device, a command and the keyword help are provided, dutctl will show usage 
+If a device, a command and the keyword help are provided, dutctl will show usage
 information for the command.
+
+When dutctl is run without any positional arguments, it defaults to the list command.
+
+When the dutagent advertises exactly one device, the <device> argument may be omitted
+and dutctl will resolve it automatically. An explicit device argument always wins.
 
 `
 
