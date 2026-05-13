@@ -147,11 +147,7 @@ var errInvalidCmdline = fmt.Errorf("invalid command line")
 func (app *application) start() {
 	log.SetOutput(app.stdout)
 
-	if len(app.args) == 0 {
-		app.exit(errInvalidCmdline)
-	}
-
-	if app.args[0] == "version" {
+	if len(app.args) > 0 && app.args[0] == "version" {
 		app.printVersion()
 		app.exit(nil)
 	}
@@ -163,6 +159,10 @@ func (app *application) start() {
 // dispatch decides which RPC to call based on app.args.
 // It is split out from start so it can be unit tested without os.Exit.
 func (app *application) dispatch() error {
+	if len(app.args) == 0 {
+		return app.listRPC()
+	}
+
 	if app.args[0] == "list" {
 		if len(app.args) > 1 {
 			return errInvalidCmdline

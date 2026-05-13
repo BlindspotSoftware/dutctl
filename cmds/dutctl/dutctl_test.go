@@ -102,6 +102,11 @@ func TestDispatch(t *testing.T) {
 		wantDetailHi []detailsCall
 	}{
 		{
+			name:        "no args defaults to list",
+			args:        nil,
+			wantListHit: 1,
+		},
+		{
 			name:        "explicit list",
 			args:        []string{"list"},
 			wantListHit: 1,
