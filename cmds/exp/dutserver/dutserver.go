@@ -16,8 +16,6 @@ import (
 	"syscall"
 
 	"github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1/dutctlv1connect"
-	"golang.org/x/net/http2"
-	"golang.org/x/net/http2/h2c"
 )
 
 const (
@@ -94,12 +92,20 @@ func (svr *server) startRPCService() error {
 	path, handler = dutctlv1connect.NewRelayServiceHandler(service)
 	mux.Handle(path, handler)
 
+	// Serve HTTP/2 without TLS via http.Server.Protocols (replaces the
+	// deprecated golang.org/x/net/http2/h2c handler).
+	protocols := new(http.Protocols)
+	protocols.SetHTTP1(true)
+	protocols.SetUnencryptedHTTP2(true)
+
 	//nolint:gosec
-	return http.ListenAndServe(
-		svr.address,
-		// Use h2c so we can serve HTTP/2 without TLS.
-		h2c.NewHandler(mux, &http2.Server{}),
-	)
+	srv := &http.Server{
+		Addr:      svr.address,
+		Handler:   mux,
+		Protocols: protocols,
+	}
+
+	return srv.ListenAndServe()
 }
 
 // start orchestrates the dutagent execution.
