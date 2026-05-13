@@ -167,6 +167,14 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 				continue
 			}
 
+			// Forward bytes to the client immediately so partial lines are
+			// not held back waiting for a newline from the DUT.
+			session.Print(string(readBuffer[:sbytes]))
+
+			if s.expect == nil {
+				continue
+			}
+
 			// Process the data read character by character
 			for i := range sbytes {
 				b := readBuffer[i]
@@ -175,10 +183,9 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 				// If we reach a newline or a buffer limit, process the line
 				if b == '\n' || lineBuffer.Len() >= 1024 {
 					line := lineBuffer.String()
-					session.Print(line)
 
 					// Check for regex match if we have one
-					if s.expect != nil && s.expect.MatchString(line) {
+					if s.expect.MatchString(line) {
 						session.Print("\n--- Pattern matched, connection closed ---\n")
 
 						return nil // Success - pattern found
