@@ -157,20 +157,22 @@ func (app *application) start() {
 	}
 
 	app.setupRPCClient()
+	app.exit(app.dispatch())
+}
 
+// dispatch decides which RPC to call based on app.args.
+// It is split out from start so it can be unit tested without os.Exit.
+func (app *application) dispatch() error {
 	if app.args[0] == "list" {
 		if len(app.args) > 1 {
-			app.exit(errInvalidCmdline)
+			return errInvalidCmdline
 		}
 
-		err := app.listRPC()
-		app.exit(err)
+		return app.listRPC()
 	}
 
 	if len(app.args) == 1 {
-		device := app.args[0]
-		err := app.commandsRPC(device)
-		app.exit(err)
+		return app.commandsRPC(app.args[0])
 	}
 
 	device := app.args[0]
@@ -178,12 +180,10 @@ func (app *application) start() {
 	cmdArgs := app.args[2:]
 
 	if len(cmdArgs) > 0 && cmdArgs[0] == "help" {
-		err := app.detailsRPC(device, command, "help")
-		app.exit(err)
+		return app.detailsRPC(device, command, "help")
 	}
 
-	err := app.runRPC(device, command, cmdArgs)
-	app.exit(err)
+	return app.runRPC(device, command, cmdArgs)
 }
 
 // exit terminates the application. If the provided error is not nil, it is printed to
