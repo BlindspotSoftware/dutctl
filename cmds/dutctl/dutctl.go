@@ -28,6 +28,7 @@ const usageAbstract = `dutctl - The client application of the DUT Control system
 `
 const usageSynopsis = `
 SYNOPSIS:
+	dutctl [options]
 	dutctl [options] list
 	dutctl [options] <device>
 	dutctl [options] <device> <command> [args...]
@@ -42,8 +43,13 @@ The optional args are passed to the command.
 To list all available devices, use the list command. If only a device is provided,
 dutctl list all available commands for the device.
 
-If a device, a command and the keyword help are provided, dutctl will show usage 
+If a device, a command and the keyword help are provided, dutctl will show usage
 information for the command.
+
+When dutctl is run without any positional arguments, it defaults to the list command.
+
+When the dutagent advertises exactly one device, the <device> argument may be omitted
+and dutctl will resolve it automatically. An explicit device argument always wins.
 
 `
 
@@ -147,30 +153,34 @@ var errInvalidCmdline = fmt.Errorf("invalid command line")
 func (app *application) start() {
 	log.SetOutput(app.stdout)
 
-	if len(app.args) == 0 {
-		app.exit(errInvalidCmdline)
-	}
-
-	if app.args[0] == "version" {
+	if len(app.args) > 0 && app.args[0] == "version" {
 		app.printVersion()
 		app.exit(nil)
 	}
 
 	app.setupRPCClient()
+	app.exit(app.dispatch())
+}
+
+// dispatch decides which RPC to call based on app.args.
+// It is split out from start so it can be unit tested without os.Exit.
+func (app *application) dispatch() error {
+	if len(app.args) == 0 {
+		return app.listRPC()
+	}
 
 	if app.args[0] == "list" {
 		if len(app.args) > 1 {
-			app.exit(errInvalidCmdline)
+			return errInvalidCmdline
 		}
 
-		err := app.listRPC()
-		app.exit(err)
+		return app.listRPC()
 	}
 
+	app.args = app.maybeResolveSingleDevice(app.args)
+
 	if len(app.args) == 1 {
-		device := app.args[0]
-		err := app.commandsRPC(device)
-		app.exit(err)
+		return app.commandsRPC(app.args[0])
 	}
 
 	device := app.args[0]
@@ -178,12 +188,10 @@ func (app *application) start() {
 	cmdArgs := app.args[2:]
 
 	if len(cmdArgs) > 0 && cmdArgs[0] == "help" {
-		err := app.detailsRPC(device, command, "help")
-		app.exit(err)
+		return app.detailsRPC(device, command, "help")
 	}
 
-	err := app.runRPC(device, command, cmdArgs)
-	app.exit(err)
+	return app.runRPC(device, command, cmdArgs)
 }
 
 // exit terminates the application. If the provided error is not nil, it is printed to
