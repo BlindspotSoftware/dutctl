@@ -27,7 +27,6 @@ import (
 	"github.com/BlindspotSoftware/dutctl/pkg/dut"
 	"github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1/dutctlv1connect"
 	"golang.org/x/net/http2"
-	"golang.org/x/net/http2/h2c"
 	"gopkg.in/yaml.v3"
 
 	pb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1"
@@ -166,12 +165,20 @@ func (agt *agent) startRPCService() error {
 	path, handler := dutctlv1connect.NewDeviceServiceHandler(service)
 	mux.Handle(path, handler)
 
+	// Serve HTTP/2 without TLS via http.Server.Protocols (replaces the
+	// deprecated golang.org/x/net/http2/h2c handler).
+	protocols := new(http.Protocols)
+	protocols.SetHTTP1(true)
+	protocols.SetUnencryptedHTTP2(true)
+
 	//nolint:gosec
-	return http.ListenAndServe(
-		agt.address,
-		// Use h2c so we can serve HTTP/2 without TLS.
-		h2c.NewHandler(mux, &http2.Server{}),
-	)
+	srv := &http.Server{
+		Addr:      agt.address,
+		Handler:   mux,
+		Protocols: protocols,
+	}
+
+	return srv.ListenAndServe()
 }
 
 func (agt *agent) registerWithServer() error {
