@@ -3,7 +3,7 @@ devices:
   fancy-server:
     desc: "A server with power control via PDU"
     cmds:
-      power-on:
+      power:
         desc: "Turn the power ON via PDU"
         uses:
           - module: pdu
@@ -12,4 +12,5 @@ devices:
               host: http://192.168.1.100
               user: admin
               password: admin
-              outlet: 6
+              outlet: 1
+              pdutype: intellinet
