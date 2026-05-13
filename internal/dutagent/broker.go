@@ -53,6 +53,8 @@ func (b *Broker) Start(ctx context.Context, s Stream) (module.Session, <-chan er
 
 		workerCtx, workerCancel := context.WithCancel(ctx)
 
+		b.session.done = workerCtx.Done()
+
 		b.wg.Add(numWorkers)
 		b.toClient(workerCtx, workerCancel)
 		b.fromClient(workerCtx, workerCancel)
