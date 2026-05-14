@@ -90,6 +90,8 @@ func (p *PDU) Init() error {
 	p.client = &http.Client{Timeout: defaultTimeout}
 
 	switch p.PDUType {
+	case gudePDU:
+		p.pduInterface = &gude{pdu: p}
 	case intellinetPDU:
 		p.pduInterface = &intellinet{pdu: p}
 	default: // Legacy configs dont contain PDUType and are meant for Intillinet (style) PDUs
