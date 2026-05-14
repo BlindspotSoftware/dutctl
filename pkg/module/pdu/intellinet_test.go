@@ -116,11 +116,10 @@ func TestParseOutletStatus(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			p := &PDU{
-				Outlet: tt.outlet,
-			}
 
-			result, err := p.parseOutletStatus([]byte(tt.xmlBody))
+			i := intellinet{}
+
+			result, err := i.parseOutletStatus([]byte(tt.xmlBody))
 
 			if tt.err {
 				if err == nil {
