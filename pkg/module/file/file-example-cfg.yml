@@ -2,6 +2,7 @@
 # This file demonstrates various use cases for file transfers between client and dutagent
 # $WD is a placeholder of the working directory on both the client and dutagent
 
+version: 1.0.0-alpha.1 # x-release-please-version
 devices:
   example-device:
     cmds:

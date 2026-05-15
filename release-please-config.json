@@ -46,6 +46,28 @@
         }
     ],
     "packages": {
-        ".": {}
+        ".": {
+            "extra-files": [
+                "internal/buildinfo/version.go",
+                {
+                    "type": "yaml",
+                    "path": "contrib/*.yaml",
+                    "glob": true,
+                    "jsonpath": "$.version"
+                },
+                {
+                    "type": "yaml",
+                    "path": "cmds/exp/contrib/*.yaml",
+                    "glob": true,
+                    "jsonpath": "$.version"
+                },
+                {
+                    "type": "yaml",
+                    "path": "pkg/module/*/*-example-cfg.yml",
+                    "glob": true,
+                    "jsonpath": "$.version"
+                }
+            ]
+        }
     }
 }
