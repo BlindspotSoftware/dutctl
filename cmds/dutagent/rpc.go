@@ -9,10 +9,14 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/http"
+	"time"
 
 	"connectrpc.com/connect"
+	"github.com/BlindspotSoftware/dutctl/internal/dutagent"
 	"github.com/BlindspotSoftware/dutctl/internal/fsm"
 	"github.com/BlindspotSoftware/dutctl/pkg/dut"
+	"github.com/BlindspotSoftware/dutctl/pkg/lock"
 
 	pb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1"
 )
@@ -20,6 +24,17 @@ import (
 // rpcService is the service implementation for the RPCs provided by dutagent.
 type rpcService struct {
 	devices dut.Devlist
+	locker  *dutagent.Locker
+}
+
+// userFromHeader returns the calling user's identity from a request header,
+// or a unique anonymous placeholder when the header is missing.
+func userFromHeader(h http.Header) string {
+	if user := h.Get(lock.UserHeader); user != "" {
+		return user
+	}
+
+	return lock.AnonymousUser()
 }
 
 // List is the handler for the List RPC.
@@ -119,6 +134,87 @@ func (a *rpcService) Details(
 	log.Print("Details-RPC finished")
 
 	return res, nil
+}
+
+// Lock is the handler for the Lock RPC.
+func (a *rpcService) Lock(
+	_ context.Context,
+	req *connect.Request[pb.LockRequest],
+) (*connect.Response[pb.LockResponse], error) {
+	log.Println("Server received Lock request")
+
+	device := req.Msg.GetDevice()
+	user := userFromHeader(req.Header())
+
+	if _, ok := a.devices[device]; !ok {
+		return nil, connect.NewError(
+			connect.CodeInvalidArgument,
+			fmt.Errorf("device %q: %w", device, dut.ErrDeviceNotFound),
+		)
+	}
+
+	dur := time.Duration(req.Msg.GetDurationSeconds()) * time.Second
+
+	info, lockErr := a.locker.Lock(device, user, dur)
+	if lockErr != nil {
+		switch {
+		case errors.Is(lockErr, dutagent.ErrWrongOwner):
+			return nil, connect.NewError(connect.CodeFailedPrecondition, lockErr)
+		case errors.Is(lockErr, dutagent.ErrInvalidDuration):
+			return nil, connect.NewError(connect.CodeInvalidArgument, lockErr)
+		default:
+			return nil, connect.NewError(connect.CodeInternal, lockErr)
+		}
+	}
+
+	var expiresAt int64
+	if !info.ExpiresAt.IsZero() {
+		expiresAt = info.ExpiresAt.Unix()
+	}
+
+	res := connect.NewResponse(&pb.LockResponse{
+		Device:    device,
+		Owner:     info.Owner,
+		LockedAt:  info.LockedAt.Unix(),
+		ExpiresAt: expiresAt,
+	})
+
+	log.Print("Lock-RPC finished")
+
+	return res, nil
+}
+
+// Unlock is the handler for the Unlock RPC.
+func (a *rpcService) Unlock(
+	_ context.Context,
+	req *connect.Request[pb.UnlockRequest],
+) (*connect.Response[pb.UnlockResponse], error) {
+	log.Println("Server received Unlock request")
+
+	device := req.Msg.GetDevice()
+	user := userFromHeader(req.Header())
+
+	var err error
+	if req.Msg.GetForce() {
+		err = a.locker.ForceClearLock(device)
+	} else {
+		err = a.locker.ClearLock(device, user)
+	}
+
+	if err != nil {
+		switch {
+		case errors.Is(err, dutagent.ErrWrongOwner):
+			return nil, connect.NewError(connect.CodePermissionDenied, err)
+		case errors.Is(err, dutagent.ErrNotLocked):
+			return nil, connect.NewError(connect.CodeFailedPrecondition, err)
+		default:
+			return nil, connect.NewError(connect.CodeInternal, err)
+		}
+	}
+
+	log.Print("Unlock-RPC finished")
+
+	return connect.NewResponse(&pb.UnlockResponse{}), nil
 }
 
 // streamAdapter decouples a connect.BidiStream to the dutagent.Stream interface.

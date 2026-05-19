@@ -50,7 +50,12 @@ func (a *agent) conn() dutctlv1connect.DeviceServiceClient {
 // It implements both, the DeviceService used by clients as they would use with dutagents
 // and the RelayService used by agents to register with the server.
 type rpcService struct {
-	sync.RWMutex
+	// UnimplementedDeviceServiceHandler provides default CodeUnimplemented
+	// responses for DeviceService RPCs that dutserver does not forward,
+	// such as Lock and Unlock.
+	dutctlv1connect.UnimplementedDeviceServiceHandler
+
+	mu sync.RWMutex
 
 	// agents holds handles of the registered DUT agents.
 	agents map[string]*agent
@@ -58,8 +63,8 @@ type rpcService struct {
 
 // findAgent returns the handle for the DUT agent, that controls the device with the given name.
 func (s *rpcService) findAgent(device string) (*agent, error) {
-	s.RLock()
-	defer s.RUnlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
 	if agent, ok := s.agents[device]; ok {
 		return agent, nil
@@ -71,8 +76,8 @@ func (s *rpcService) findAgent(device string) (*agent, error) {
 // addAgent tries to register devices handled by an agent with address.
 // If one of the provided devices already exists an error is returned and none of the deviced will be stored.
 func (s *rpcService) addAgent(address string, devices []string) error {
-	s.Lock()
-	defer s.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	for _, device := range devices {
 		if _, exists := s.agents[device]; exists {
