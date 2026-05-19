@@ -30,7 +30,18 @@ const (
 
 	// TypeVersion represents version information.
 	TypeVersion ContentType = "version"
+
+	// TypeLockResult represents the result of a lock or unlock operation.
+	TypeLockResult ContentType = "lock-result"
 )
+
+// DeviceEntry describes a device and its lock state for TypeDeviceList output.
+type DeviceEntry struct {
+	Name      string
+	Locked    bool
+	Owner     string
+	ExpiresAt int64 // Unix seconds, 0 means no expiry.
+}
 
 // Content is a structured data unit to be formatted and displayed.
 type Content struct {

@@ -44,8 +44,27 @@ func (a *rpcService) List(
 ) (*connect.Response[pb.ListResponse], error) {
 	log.Println("Server received List request")
 
+	locks := a.locker.StatusAll()
+
+	names := a.devices.Names()
+	infos := make([]*pb.DeviceInfo, 0, len(names))
+
+	for _, name := range names {
+		info := &pb.DeviceInfo{Name: name}
+
+		if explicit := locks[name].Explicit; explicit != nil {
+			info.Lock = &pb.LockInfo{
+				Owner:     explicit.Owner,
+				LockedAt:  explicit.LockedAt.Unix(),
+				ExpiresAt: explicit.ExpiresAt.Unix(),
+			}
+		}
+
+		infos = append(infos, info)
+	}
+
 	res := connect.NewResponse(&pb.ListResponse{
-		Devices: a.devices.Names(),
+		Devices: infos,
 	})
 
 	log.Print("List-RPC finished")

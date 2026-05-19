@@ -28,7 +28,7 @@ func TestOneLineFormatter(t *testing.T) {
 	// Test case 2: Output with metadata
 	formatter.WriteContent(Content{
 		Type: TypeDeviceList,
-		Data: []string{"device1", "device2", "device3"},
+		Data: []DeviceEntry{{Name: "device1"}, {Name: "device2"}, {Name: "device3"}},
 		Metadata: map[string]string{
 			"server": "localhost:1024",
 			"device": "test-device",
