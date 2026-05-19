@@ -18,6 +18,7 @@ import (
 	"sync"
 
 	"connectrpc.com/connect"
+	"github.com/BlindspotSoftware/dutctl/pkg/lock"
 	"github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1/dutctlv1connect"
 	"golang.org/x/net/http2"
 
@@ -201,6 +202,9 @@ func (s *rpcService) Run(
 
 	// This is the first message of a new Run RPC from a client.
 	log.Println("Run request has a command message - starting new stream to DUT agent")
+
+	// Forward the requesting user's identity to the agent so it can enforce locking.
+	upstream.RequestHeader().Set(lock.UserHeader, downstream.RequestHeader().Get(lock.UserHeader))
 
 	// Forward the initial request to the DUT agent.
 	err = upstream.Send(donwnStreamRequest)

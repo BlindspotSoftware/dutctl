@@ -24,6 +24,8 @@ type runCmdArgs struct {
 	// dependencies of the state machine
 	stream     dutagent.Stream
 	deviceList dut.Devlist
+	locker     *dutagent.Locker
+	user       string
 
 	// fields for the states used during execution
 	cmdMsg      *pb.Command
@@ -89,7 +91,58 @@ func findDUTCmd(_ context.Context, args runCmdArgs) (runCmdArgs, fsm.State[runCm
 	args.dev = dev
 	args.cmd = cmd
 
+	return args, checkDeviceAccess, nil
+}
+
+// checkDeviceAccess is a state of the Run RPC.
+//
+// It rejects the run if the device is held by a different owner in either
+// the explicit or auto lock slot. Otherwise the FSM proceeds to acquire the
+// command-scoped auto-lock.
+func checkDeviceAccess(_ context.Context, args runCmdArgs) (runCmdArgs, fsm.State[runCmdArgs], error) {
+	err := args.locker.CheckAccess(args.cmdMsg.GetDevice(), args.user)
+	if err != nil {
+		if errors.Is(err, dutagent.ErrWrongOwner) {
+			return args, nil, connect.NewError(connect.CodeFailedPrecondition, err)
+		}
+
+		return args, nil, connect.NewError(connect.CodeInternal, err)
+	}
+
+	return args, acquireAutoLock, nil
+}
+
+// acquireAutoLock is a state of the Run RPC.
+//
+// It acquires the command-scoped auto-lock for the device. AutoLock is
+// idempotent for the same owner, so this is safe even if the same owner
+// already holds an auto-lock from a previous race-lost step.
+func acquireAutoLock(_ context.Context, args runCmdArgs) (runCmdArgs, fsm.State[runCmdArgs], error) {
+	_, err := args.locker.AutoLock(args.cmdMsg.GetDevice(), args.user)
+	if err != nil {
+		if errors.Is(err, dutagent.ErrWrongOwner) {
+			return args, nil, connect.NewError(connect.CodeFailedPrecondition, err)
+		}
+
+		return args, nil, connect.NewError(connect.CodeInternal, err)
+	}
+
 	return args, executeModules, nil
+}
+
+// releaseAutoLock is the final state of the Run RPC's happy path.
+//
+// It releases the command-scoped auto-lock acquired by acquireAutoLock. It
+// never touches the explicit lock slot, so an explicit Lock the same owner
+// holds for the device survives the run. ErrNotLocked is tolerated because
+// a forced unlock by an admin may have wiped the slot concurrently.
+func releaseAutoLock(_ context.Context, args runCmdArgs) (runCmdArgs, fsm.State[runCmdArgs], error) {
+	err := args.locker.ClearAutoLock(args.cmdMsg.GetDevice(), args.user)
+	if err != nil && !errors.Is(err, dutagent.ErrNotLocked) {
+		log.Printf("Failed to release auto-lock on device %q: %v", args.cmdMsg.GetDevice(), err)
+	}
+
+	return args, nil, nil
 }
 
 // executeModules is a state of the Run RPC.
@@ -199,5 +252,5 @@ func waitModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State[ru
 		}
 	}
 
-	return args, nil, nil
+	return args, releaseAutoLock, nil
 }

@@ -235,9 +235,20 @@ func (a *rpcService) Run(
 	fsmArgs := runCmdArgs{
 		stream:     &streamAdapter{inner: stream},
 		deviceList: a.devices,
+		locker:     a.locker,
+		user:       userFromHeader(stream.RequestHeader()),
 	}
 
-	_, err := fsm.Run(ctx, fsmArgs, receiveCommandRPC)
+	finalArgs, err := fsm.Run(ctx, fsmArgs, receiveCommandRPC)
+
+	// Safety net for error paths that short-circuit the FSM before
+	// releaseAutoLock runs. Delegating to the state function keeps the
+	// cleanup logic in one place. The state tolerates ErrNotLocked, so a
+	// happy-path call (where the FSM already released the auto-lock) is a
+	// harmless no-op.
+	if finalArgs.cmdMsg != nil {
+		releaseAutoLock(ctx, finalArgs) //nolint:errcheck // state never returns an error
+	}
 
 	var connectErr *connect.Error
 	if err != nil && !errors.As(err, &connectErr) {
