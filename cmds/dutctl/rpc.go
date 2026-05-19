@@ -14,9 +14,11 @@ import (
 	"log"
 	"os"
 	"strings"
+	"time"
 
 	"connectrpc.com/connect"
 	"github.com/BlindspotSoftware/dutctl/internal/output"
+	"github.com/BlindspotSoftware/dutctl/pkg/lock"
 
 	pb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1"
 )
@@ -50,6 +52,86 @@ func (app *application) listRPC() error {
 		Metadata: map[string]string{
 			"server": app.serverAddr,
 			"msg":    "List Response",
+		},
+	})
+
+	return nil
+}
+
+// defaultLockDuration is used when the user runs "lock" without a duration.
+const defaultLockDuration = 30 * time.Minute
+
+// parseLockDuration resolves the lock duration from the lock command's
+// arguments. An empty argument list yields defaultLockDuration. The duration
+// must be positive.
+func parseLockDuration(cmdArgs []string) (time.Duration, error) {
+	if len(cmdArgs) == 0 || cmdArgs[0] == "" {
+		return defaultLockDuration, nil
+	}
+
+	parsed, err := time.ParseDuration(cmdArgs[0])
+	if err != nil {
+		return 0, fmt.Errorf("invalid lock duration %q: %w", cmdArgs[0], err)
+	}
+
+	if parsed <= 0 {
+		return 0, fmt.Errorf("lock duration must be positive, got %q", cmdArgs[0])
+	}
+
+	return parsed, nil
+}
+
+func (app *application) lockRPC(device string, cmdArgs []string) error {
+	duration, err := parseLockDuration(cmdArgs)
+	if err != nil {
+		return err
+	}
+
+	ctx := context.Background()
+	req := connect.NewRequest(&pb.LockRequest{
+		Device:          device,
+		DurationSeconds: int64(duration.Seconds()),
+	})
+	req.Header().Set(lock.UserHeader, app.user)
+
+	res, err := app.rpcClient.Lock(ctx, req)
+	if err != nil {
+		return err
+	}
+
+	app.formatter.WriteContent(output.Content{
+		Type: output.TypeLockResult,
+		Data: output.DeviceEntry{
+			Name:      res.Msg.GetDevice(),
+			Locked:    true,
+			Owner:     res.Msg.GetOwner(),
+			ExpiresAt: res.Msg.GetExpiresAt(),
+		},
+		Metadata: map[string]string{
+			"server": app.serverAddr,
+			"msg":    "Lock Response",
+		},
+	})
+
+	return nil
+}
+
+func (app *application) unlockRPC(device string) error {
+	ctx := context.Background()
+	req := connect.NewRequest(&pb.UnlockRequest{Device: device, Force: app.force})
+	req.Header().Set(lock.UserHeader, app.user)
+
+	_, err := app.rpcClient.Unlock(ctx, req)
+	if err != nil {
+		return err
+	}
+
+	app.formatter.WriteContent(output.Content{
+		Type: output.TypeLockResult,
+		Data: output.DeviceEntry{Name: device},
+		Metadata: map[string]string{
+			"server": app.serverAddr,
+			"msg":    "Unlock Response",
 		},
 	})
 
@@ -116,6 +198,8 @@ func (app *application) runRPC(device, command string, cmdArgs []string) error {
 	errChan := make(chan error, numWorkers)
 
 	stream := app.rpcClient.Run(runCtx)
+	stream.RequestHeader().Set(lock.UserHeader, app.user)
+
 	req := &pb.RunRequest{
 		Msg: &pb.RunRequest_Command{
 			Command: &pb.Command{
