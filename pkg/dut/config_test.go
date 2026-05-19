@@ -140,6 +140,15 @@ func TestInvalidConfig(t *testing.T) {
 			wantLine:     12,
 		},
 
+		// Reserved command names
+		{
+			name:         "reserved_command_name",
+			file:         "invalid_reserved_command.yaml",
+			wantSentinel: ErrReservedCommand,
+			wantDevice:   "device1",
+			wantCommand:  "lock",
+		},
+
 		// Null device value
 		{
 			name:         "null_device",
