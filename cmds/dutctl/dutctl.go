@@ -20,6 +20,7 @@ import (
 	"connectrpc.com/connect"
 	"github.com/BlindspotSoftware/dutctl/internal/buildinfo"
 	"github.com/BlindspotSoftware/dutctl/internal/output"
+	"github.com/BlindspotSoftware/dutctl/pkg/lock"
 	"github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1/dutctlv1connect"
 	"golang.org/x/net/http2"
 )
@@ -32,6 +33,8 @@ SYNOPSIS:
 	dutctl [options] <device>
 	dutctl [options] <device> <command> [args...]
 	dutctl [options] <device> <command> help
+	dutctl [options] <device> lock [duration]
+	dutctl [options] <device> unlock
 	dutctl version
 
 `
@@ -42,8 +45,12 @@ The optional args are passed to the command.
 To list all available devices, use the list command. If only a device is provided,
 dutctl list all available commands for the device.
 
-If a device, a command and the keyword help are provided, dutctl will show usage 
+If a device, a command and the keyword help are provided, dutctl will show usage
 information for the command.
+
+The lock command reserves a device for the current user; the optional duration
+(e.g. 30m, 2h) defaults to 30m. The unlock command releases it; pass the -force
+option to release a lock held by another user.
 
 `
 
@@ -52,6 +59,8 @@ const (
 	outputFormatInfo = `Output format, text|json|yaml|oneline, default is text`
 	verboseInfo      = `Verbose output`
 	noColorInfo      = `Disable colored output`
+	userInfo         = `User Identity of the user of the device, defaults to <user>@<host>`
+	forceInfo        = `Force unlock a device locked by another user`
 )
 
 func newApp(stdin io.Reader, stdout, stderr io.Writer, exitFunc func(int), args []string) *application {
@@ -78,6 +87,8 @@ func newApp(stdin io.Reader, stdout, stderr io.Writer, exitFunc func(int), args 
 	fs.StringVar(&app.outputFormat, "f", "", outputFormatInfo)
 	fs.BoolVar(&app.verbose, "v", false, verboseInfo)
 	fs.BoolVar(&app.noColor, "no-color", false, noColorInfo)
+	fs.StringVar(&app.user, "u", lock.DefaultUser(), userInfo)
+	fs.BoolVar(&app.force, "force", false, forceInfo)
 
 	//nolint:errcheck // flag.Parse always returns no error because of flag.ExitOnError
 	fs.Parse(args[1:])
@@ -106,6 +117,8 @@ type application struct {
 	outputFormat      string
 	verbose           bool
 	noColor           bool
+	user              string
+	force             bool
 	args              []string
 	printFlagDefaults func()
 
@@ -176,6 +189,13 @@ func (app *application) start() {
 	device := app.args[0]
 	command := app.args[1]
 	cmdArgs := app.args[2:]
+
+	switch command {
+	case "lock":
+		app.exit(app.lockRPC(device, cmdArgs))
+	case "unlock":
+		app.exit(app.unlockRPC(device))
+	}
 
 	if len(cmdArgs) > 0 && cmdArgs[0] == "help" {
 		err := app.detailsRPC(device, command, "help")
