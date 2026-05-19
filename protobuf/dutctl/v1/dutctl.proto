@@ -10,6 +10,8 @@ service DeviceService {
   rpc Commands(CommandsRequest) returns (CommandsResponse) {}
   rpc Details(DetailsRequest) returns (DetailsResponse) {}
   rpc Run(stream RunRequest) returns (stream RunResponse) {}
+  rpc Lock(LockRequest) returns (LockResponse) {}
+  rpc Unlock(UnlockRequest) returns (UnlockResponse) {}
 }
 
 // ListRequest is sent by the client to request a list of devices connected to the agent.
@@ -98,6 +100,31 @@ message File {
   string path = 1;
   bytes content = 2;
 }
+
+// LockRequest is sent by the client to acquire or extend a lock on a device.
+// The lock owner identity is carried in an HTTP header, not in this message.
+message LockRequest {
+  string device = 1;
+  int64 duration_seconds = 2; // 0 means a lock with no time-based expiry.
+}
+
+// LockResponse is sent by the agent in response to a successful LockRequest.
+message LockResponse {
+  string device = 1;
+  string owner = 2;
+  int64 locked_at = 3; // Unix seconds.
+  int64 expires_at = 4; // Unix seconds, 0 means no expiry.
+}
+
+// UnlockRequest is sent by the client to release a lock on a device.
+// The lock owner identity is carried in an HTTP header, not in this message.
+message UnlockRequest {
+  string device = 1;
+  bool force = 2; // Release the lock regardless of owner.
+}
+
+// UnlockResponse is sent by the agent in response to a successful UnlockRequest.
+message UnlockResponse {}
 
 // RelayService defines the service for forwarding communication via relay server.
 // NOTE: This is an experimental service and may change in the future.

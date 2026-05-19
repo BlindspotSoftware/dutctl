@@ -160,6 +160,7 @@ func printInitErr(err error) {
 func (agt *agent) startRPCService() error {
 	service := &rpcService{
 		devices: agt.config.Devices,
+		locker:  dutagent.NewLocker(),
 	}
 
 	mux := http.NewServeMux()
