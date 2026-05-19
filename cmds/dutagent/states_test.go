@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"github.com/BlindspotSoftware/dutctl/internal/dutagent"
 	"github.com/BlindspotSoftware/dutctl/internal/fsm"
 	"github.com/BlindspotSoftware/dutctl/internal/test/fakes"
 	"github.com/BlindspotSoftware/dutctl/pkg/dut"
@@ -131,7 +132,7 @@ func TestFindDUTCmd(t *testing.T) {
 			name:     "success_valid_command",
 			cmdMsg:   &validCmd,
 			devs:     makeDevlist(true, 1, 1),
-			wantNext: executeModules,
+			wantNext: checkDeviceAccess,
 		},
 		{
 			name:        "device_not_found",
@@ -187,14 +188,156 @@ func TestFindDUTCmd(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if !stateEqual(next, executeModules) {
-				t.Fatalf("expected next state executeModules, got %p", next)
+			if !stateEqual(next, checkDeviceAccess) {
+				t.Fatalf("expected next state checkDeviceAccess, got %p", next)
 			}
 			if gotArgs.dev.Desc == "" && len(gotArgs.cmd.Modules) == 0 { // simple sanity check device/command captured
 				t.Fatalf("expected device and command to be set")
 			}
 		})
 	}
+}
+
+func TestCheckDeviceAccess(t *testing.T) {
+	const device = "dev1"
+
+	cmdMsg := &pb.Command{Device: device, Command: "echo"}
+
+	t.Run("unlocked_proceeds_to_acquireAutoLock", func(t *testing.T) {
+		locker := dutagent.NewLocker()
+		args := runCmdArgs{cmdMsg: cmdMsg, locker: locker, user: "alice"}
+
+		_, next, err := checkDeviceAccess(context.Background(), args)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if !stateEqual(next, acquireAutoLock) {
+			t.Fatalf("next state = %p, want acquireAutoLock", next)
+		}
+	})
+
+	t.Run("same_owner_explicit_lock_passes", func(t *testing.T) {
+		locker := dutagent.NewLocker()
+		if _, err := locker.Lock(device, "alice", time.Hour); err != nil {
+			t.Fatalf("setup Lock: %v", err)
+		}
+
+		args := runCmdArgs{cmdMsg: cmdMsg, locker: locker, user: "alice"}
+
+		_, next, err := checkDeviceAccess(context.Background(), args)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if !stateEqual(next, acquireAutoLock) {
+			t.Fatalf("next state = %p, want acquireAutoLock", next)
+		}
+	})
+
+	t.Run("different_owner_rejected", func(t *testing.T) {
+		locker := dutagent.NewLocker()
+		if _, err := locker.Lock(device, "bob", time.Hour); err != nil {
+			t.Fatalf("setup Lock: %v", err)
+		}
+
+		args := runCmdArgs{cmdMsg: cmdMsg, locker: locker, user: "alice"}
+
+		_, next, err := checkDeviceAccess(context.Background(), args)
+		if connect.CodeOf(err) != connect.CodeFailedPrecondition {
+			t.Errorf("code = %v, want FailedPrecondition", connect.CodeOf(err))
+		}
+
+		if next != nil {
+			t.Errorf("next state = %p, want nil on error", next)
+		}
+	})
+}
+
+func TestAcquireAutoLock(t *testing.T) {
+	const device = "dev1"
+
+	cmdMsg := &pb.Command{Device: device, Command: "echo"}
+
+	t.Run("acquires_and_proceeds_to_executeModules", func(t *testing.T) {
+		locker := dutagent.NewLocker()
+		args := runCmdArgs{cmdMsg: cmdMsg, locker: locker, user: "alice"}
+
+		_, next, err := acquireAutoLock(context.Background(), args)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if !stateEqual(next, executeModules) {
+			t.Fatalf("next state = %p, want executeModules", next)
+		}
+
+		state := locker.StatusAll()[device]
+		if state.Auto == nil {
+			t.Error("auto-lock not taken")
+		}
+	})
+
+	t.Run("blocked_by_other_owner_returns_FailedPrecondition", func(t *testing.T) {
+		locker := dutagent.NewLocker()
+		if _, err := locker.AutoLock(device, "bob"); err != nil {
+			t.Fatalf("setup AutoLock: %v", err)
+		}
+
+		args := runCmdArgs{cmdMsg: cmdMsg, locker: locker, user: "alice"}
+
+		_, _, err := acquireAutoLock(context.Background(), args)
+		if connect.CodeOf(err) != connect.CodeFailedPrecondition {
+			t.Errorf("code = %v, want FailedPrecondition", connect.CodeOf(err))
+		}
+	})
+}
+
+func TestReleaseAutoLock(t *testing.T) {
+	const device = "dev1"
+
+	cmdMsg := &pb.Command{Device: device, Command: "echo"}
+
+	t.Run("clears_auto_slot_only", func(t *testing.T) {
+		locker := dutagent.NewLocker()
+		if _, err := locker.Lock(device, "alice", time.Hour); err != nil {
+			t.Fatalf("setup Lock: %v", err)
+		}
+
+		if _, err := locker.AutoLock(device, "alice"); err != nil {
+			t.Fatalf("setup AutoLock: %v", err)
+		}
+
+		args := runCmdArgs{cmdMsg: cmdMsg, locker: locker, user: "alice"}
+
+		_, next, err := releaseAutoLock(context.Background(), args)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if next != nil {
+			t.Errorf("next state = %p, want nil (terminal)", next)
+		}
+
+		state := locker.StatusAll()[device]
+		if state.Explicit == nil {
+			t.Error("releaseAutoLock wiped the explicit lock")
+		}
+
+		if state.Auto != nil {
+			t.Error("auto lock still present after releaseAutoLock")
+		}
+	})
+
+	t.Run("missing_auto_lock_is_tolerated", func(t *testing.T) {
+		locker := dutagent.NewLocker()
+		args := runCmdArgs{cmdMsg: cmdMsg, locker: locker, user: "alice"}
+
+		_, _, err := releaseAutoLock(context.Background(), args)
+		if err != nil {
+			t.Errorf("releaseAutoLock on empty slot: %v", err)
+		}
+	})
 }
 
 // dummyModule is a lightweight test double implementing module.Module behavior needed for executeModules tests.
@@ -532,8 +675,8 @@ func TestWaitModules(t *testing.T) {
 				if err != nil {
 					t.Fatalf("expected success, got error: %v", err)
 				}
-				if next != nil {
-					t.Fatalf("expected no next state, got %p", next)
+				if !stateEqual(next, releaseAutoLock) {
+					t.Fatalf("expected next state releaseAutoLock, got %p", next)
 				}
 				return
 			}
