@@ -112,10 +112,29 @@ func formatDataValue(data interface{}, separator string) string {
 		return formatQuotedString(joined, separator)
 	case []byte:
 		return formatQuotedString(string(dataValue), separator)
+	case []DeviceEntry:
+		entries := make([]string, 0, len(dataValue))
+		for _, d := range dataValue {
+			entries = append(entries, deviceEntryString(d))
+		}
+
+		return formatQuotedString(strings.Join(entries, "|"), separator)
+	case DeviceEntry:
+		return formatQuotedString(deviceEntryString(dataValue), separator)
 	default:
 		// Convert anything else to string
 		return formatQuotedString(fmt.Sprintf("%v", dataValue), separator)
 	}
+}
+
+// deviceEntryString renders a DeviceEntry as a compact "name" or
+// "name=locked:owner" token for single-line output.
+func deviceEntryString(d DeviceEntry) string {
+	if !d.Locked {
+		return d.Name
+	}
+
+	return fmt.Sprintf("%s=locked:%s", d.Name, d.Owner)
 }
 
 // output writes the formatted line to the appropriate destination.

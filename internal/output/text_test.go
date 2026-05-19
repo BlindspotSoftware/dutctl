@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestWriteMetadata(t *testing.T) {
@@ -306,5 +307,68 @@ func TestMetadataCaching(t *testing.T) {
 	// Verify test case 6: Fifth output includes metadata due to cache clear (with # prefix)
 	if !strings.Contains(fifthOutput, "# ") || !strings.Contains(fifthOutput, "different-server") {
 		t.Errorf("Fifth output should include metadata (with # prefix) due to cache clear. Got: %q", fifthOutput)
+	}
+}
+
+func TestWriteDeviceList(t *testing.T) {
+	stdout := &bytes.Buffer{}
+	formatter := newTextFormatter(Config{Stdout: stdout, Stderr: &bytes.Buffer{}})
+
+	formatter.WriteContent(Content{
+		Type: TypeDeviceList,
+		Data: []DeviceEntry{
+			{Name: "my-board", Locked: true, Owner: "alice@host", ExpiresAt: time.Now().Add(25 * time.Minute).Unix()},
+			{Name: "auto-board", Locked: true, Owner: "bob@host"},
+			{Name: "free-board"},
+		},
+	})
+
+	got := stdout.String()
+
+	for _, want := range []string{
+		`- my-board [locked by "alice@host" for 25m]`,
+		`- auto-board [locked by "bob@host"]`,
+		"- free-board\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("device list output missing %q.\nGot:\n%s", want, got)
+		}
+	}
+}
+
+func TestWriteLockResult(t *testing.T) {
+	tests := []struct {
+		name string
+		data DeviceEntry
+		want string
+	}{
+		{
+			name: "timed lock",
+			data: DeviceEntry{Name: "my-board", Locked: true, Owner: "alice@host", ExpiresAt: time.Now().Add(30 * time.Minute).Unix()},
+			want: `Device "my-board" locked by "alice@host" for 30m`,
+		},
+		{
+			name: "auto lock without expiry",
+			data: DeviceEntry{Name: "my-board", Locked: true, Owner: "alice@host"},
+			want: `Device "my-board" locked by "alice@host"` + "\n",
+		},
+		{
+			name: "unlock",
+			data: DeviceEntry{Name: "my-board"},
+			want: `Device "my-board" unlocked`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stdout := &bytes.Buffer{}
+			formatter := newTextFormatter(Config{Stdout: stdout, Stderr: &bytes.Buffer{}})
+
+			formatter.WriteContent(Content{Type: TypeLockResult, Data: tt.data})
+
+			if got := stdout.String(); !strings.Contains(got, tt.want) {
+				t.Errorf("lock result output = %q, want substring %q", got, tt.want)
+			}
+		})
 	}
 }

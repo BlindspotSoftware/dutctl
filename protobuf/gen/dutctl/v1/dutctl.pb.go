@@ -61,7 +61,7 @@ func (*ListRequest) Descriptor() ([]byte, []int) {
 // ListResponse is sent by the agent in response to a ListRequest.
 type ListResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Devices       []string               `protobuf:"bytes,1,rep,name=devices,proto3" json:"devices,omitempty"`
+	Devices       []*DeviceInfo          `protobuf:"bytes,1,rep,name=devices,proto3" json:"devices,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -96,11 +96,127 @@ func (*ListResponse) Descriptor() ([]byte, []int) {
 	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{1}
 }
 
-func (x *ListResponse) GetDevices() []string {
+func (x *ListResponse) GetDevices() []*DeviceInfo {
 	if x != nil {
 		return x.Devices
 	}
 	return nil
+}
+
+// DeviceInfo describes a single device and its current lock state.
+type DeviceInfo struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Lock          *LockInfo              `protobuf:"bytes,2,opt,name=lock,proto3" json:"lock,omitempty"` // Unset when the device is not locked.
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeviceInfo) Reset() {
+	*x = DeviceInfo{}
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeviceInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeviceInfo) ProtoMessage() {}
+
+func (x *DeviceInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeviceInfo.ProtoReflect.Descriptor instead.
+func (*DeviceInfo) Descriptor() ([]byte, []int) {
+	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *DeviceInfo) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *DeviceInfo) GetLock() *LockInfo {
+	if x != nil {
+		return x.Lock
+	}
+	return nil
+}
+
+// LockInfo describes the lock state of a device. The enclosing DeviceInfo
+// leaves its lock field unset when the device is not locked, so this message
+// does not repeat that signal as a separate boolean.
+type LockInfo struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Owner         string                 `protobuf:"bytes,1,opt,name=owner,proto3" json:"owner,omitempty"`
+	LockedAt      int64                  `protobuf:"varint,2,opt,name=locked_at,json=lockedAt,proto3" json:"locked_at,omitempty"`    // Unix seconds.
+	ExpiresAt     int64                  `protobuf:"varint,3,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"` // Unix seconds, 0 means no expiry.
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LockInfo) Reset() {
+	*x = LockInfo{}
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LockInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LockInfo) ProtoMessage() {}
+
+func (x *LockInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LockInfo.ProtoReflect.Descriptor instead.
+func (*LockInfo) Descriptor() ([]byte, []int) {
+	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *LockInfo) GetOwner() string {
+	if x != nil {
+		return x.Owner
+	}
+	return ""
+}
+
+func (x *LockInfo) GetLockedAt() int64 {
+	if x != nil {
+		return x.LockedAt
+	}
+	return 0
+}
+
+func (x *LockInfo) GetExpiresAt() int64 {
+	if x != nil {
+		return x.ExpiresAt
+	}
+	return 0
 }
 
 // CommandsRequest is sent by the client to request a list of commands available for
@@ -114,7 +230,7 @@ type CommandsRequest struct {
 
 func (x *CommandsRequest) Reset() {
 	*x = CommandsRequest{}
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[2]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -126,7 +242,7 @@ func (x *CommandsRequest) String() string {
 func (*CommandsRequest) ProtoMessage() {}
 
 func (x *CommandsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[2]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -139,7 +255,7 @@ func (x *CommandsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CommandsRequest.ProtoReflect.Descriptor instead.
 func (*CommandsRequest) Descriptor() ([]byte, []int) {
-	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{2}
+	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *CommandsRequest) GetDevice() string {
@@ -159,7 +275,7 @@ type CommandsResponse struct {
 
 func (x *CommandsResponse) Reset() {
 	*x = CommandsResponse{}
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[3]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -171,7 +287,7 @@ func (x *CommandsResponse) String() string {
 func (*CommandsResponse) ProtoMessage() {}
 
 func (x *CommandsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[3]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -184,7 +300,7 @@ func (x *CommandsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CommandsResponse.ProtoReflect.Descriptor instead.
 func (*CommandsResponse) Descriptor() ([]byte, []int) {
-	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{3}
+	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *CommandsResponse) GetCommands() []string {
@@ -207,7 +323,7 @@ type DetailsRequest struct {
 
 func (x *DetailsRequest) Reset() {
 	*x = DetailsRequest{}
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[4]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -219,7 +335,7 @@ func (x *DetailsRequest) String() string {
 func (*DetailsRequest) ProtoMessage() {}
 
 func (x *DetailsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[4]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -232,7 +348,7 @@ func (x *DetailsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetailsRequest.ProtoReflect.Descriptor instead.
 func (*DetailsRequest) Descriptor() ([]byte, []int) {
-	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{4}
+	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *DetailsRequest) GetDevice() string {
@@ -266,7 +382,7 @@ type DetailsResponse struct {
 
 func (x *DetailsResponse) Reset() {
 	*x = DetailsResponse{}
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[5]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -278,7 +394,7 @@ func (x *DetailsResponse) String() string {
 func (*DetailsResponse) ProtoMessage() {}
 
 func (x *DetailsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[5]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -291,7 +407,7 @@ func (x *DetailsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetailsResponse.ProtoReflect.Descriptor instead.
 func (*DetailsResponse) Descriptor() ([]byte, []int) {
-	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{5}
+	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *DetailsResponse) GetDetails() string {
@@ -318,7 +434,7 @@ type RunRequest struct {
 
 func (x *RunRequest) Reset() {
 	*x = RunRequest{}
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[6]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -330,7 +446,7 @@ func (x *RunRequest) String() string {
 func (*RunRequest) ProtoMessage() {}
 
 func (x *RunRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[6]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -343,7 +459,7 @@ func (x *RunRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunRequest.ProtoReflect.Descriptor instead.
 func (*RunRequest) Descriptor() ([]byte, []int) {
-	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{6}
+	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *RunRequest) GetMsg() isRunRequest_Msg {
@@ -419,7 +535,7 @@ type RunResponse struct {
 
 func (x *RunResponse) Reset() {
 	*x = RunResponse{}
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[7]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -431,7 +547,7 @@ func (x *RunResponse) String() string {
 func (*RunResponse) ProtoMessage() {}
 
 func (x *RunResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[7]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -444,7 +560,7 @@ func (x *RunResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunResponse.ProtoReflect.Descriptor instead.
 func (*RunResponse) Descriptor() ([]byte, []int) {
-	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{7}
+	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *RunResponse) GetMsg() isRunResponse_Msg {
@@ -530,7 +646,7 @@ type Command struct {
 
 func (x *Command) Reset() {
 	*x = Command{}
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[8]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -542,7 +658,7 @@ func (x *Command) String() string {
 func (*Command) ProtoMessage() {}
 
 func (x *Command) ProtoReflect() protoreflect.Message {
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[8]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -555,7 +671,7 @@ func (x *Command) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Command.ProtoReflect.Descriptor instead.
 func (*Command) Descriptor() ([]byte, []int) {
-	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{8}
+	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *Command) GetDevice() string {
@@ -589,7 +705,7 @@ type Print struct {
 
 func (x *Print) Reset() {
 	*x = Print{}
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[9]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -601,7 +717,7 @@ func (x *Print) String() string {
 func (*Print) ProtoMessage() {}
 
 func (x *Print) ProtoReflect() protoreflect.Message {
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[9]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -614,7 +730,7 @@ func (x *Print) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Print.ProtoReflect.Descriptor instead.
 func (*Print) Descriptor() ([]byte, []int) {
-	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{9}
+	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *Print) GetText() []byte {
@@ -640,7 +756,7 @@ type Console struct {
 
 func (x *Console) Reset() {
 	*x = Console{}
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[10]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -652,7 +768,7 @@ func (x *Console) String() string {
 func (*Console) ProtoMessage() {}
 
 func (x *Console) ProtoReflect() protoreflect.Message {
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[10]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -665,7 +781,7 @@ func (x *Console) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Console.ProtoReflect.Descriptor instead.
 func (*Console) Descriptor() ([]byte, []int) {
-	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{10}
+	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *Console) GetData() isConsole_Data {
@@ -734,7 +850,7 @@ type FileRequest struct {
 
 func (x *FileRequest) Reset() {
 	*x = FileRequest{}
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[11]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -746,7 +862,7 @@ func (x *FileRequest) String() string {
 func (*FileRequest) ProtoMessage() {}
 
 func (x *FileRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[11]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -759,7 +875,7 @@ func (x *FileRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FileRequest.ProtoReflect.Descriptor instead.
 func (*FileRequest) Descriptor() ([]byte, []int) {
-	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{11}
+	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *FileRequest) GetPath() string {
@@ -780,7 +896,7 @@ type File struct {
 
 func (x *File) Reset() {
 	*x = File{}
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[12]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -792,7 +908,7 @@ func (x *File) String() string {
 func (*File) ProtoMessage() {}
 
 func (x *File) ProtoReflect() protoreflect.Message {
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[12]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -805,7 +921,7 @@ func (x *File) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use File.ProtoReflect.Descriptor instead.
 func (*File) Descriptor() ([]byte, []int) {
-	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{12}
+	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *File) GetPath() string {
@@ -834,7 +950,7 @@ type LockRequest struct {
 
 func (x *LockRequest) Reset() {
 	*x = LockRequest{}
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[13]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -846,7 +962,7 @@ func (x *LockRequest) String() string {
 func (*LockRequest) ProtoMessage() {}
 
 func (x *LockRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[13]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -859,7 +975,7 @@ func (x *LockRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LockRequest.ProtoReflect.Descriptor instead.
 func (*LockRequest) Descriptor() ([]byte, []int) {
-	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{13}
+	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *LockRequest) GetDevice() string {
@@ -889,7 +1005,7 @@ type LockResponse struct {
 
 func (x *LockResponse) Reset() {
 	*x = LockResponse{}
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[14]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -901,7 +1017,7 @@ func (x *LockResponse) String() string {
 func (*LockResponse) ProtoMessage() {}
 
 func (x *LockResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[14]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -914,7 +1030,7 @@ func (x *LockResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LockResponse.ProtoReflect.Descriptor instead.
 func (*LockResponse) Descriptor() ([]byte, []int) {
-	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{14}
+	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *LockResponse) GetDevice() string {
@@ -957,7 +1073,7 @@ type UnlockRequest struct {
 
 func (x *UnlockRequest) Reset() {
 	*x = UnlockRequest{}
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[15]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -969,7 +1085,7 @@ func (x *UnlockRequest) String() string {
 func (*UnlockRequest) ProtoMessage() {}
 
 func (x *UnlockRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[15]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -982,7 +1098,7 @@ func (x *UnlockRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnlockRequest.ProtoReflect.Descriptor instead.
 func (*UnlockRequest) Descriptor() ([]byte, []int) {
-	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{15}
+	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *UnlockRequest) GetDevice() string {
@@ -1008,7 +1124,7 @@ type UnlockResponse struct {
 
 func (x *UnlockResponse) Reset() {
 	*x = UnlockResponse{}
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[16]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1020,7 +1136,7 @@ func (x *UnlockResponse) String() string {
 func (*UnlockResponse) ProtoMessage() {}
 
 func (x *UnlockResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[16]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1033,7 +1149,7 @@ func (x *UnlockResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnlockResponse.ProtoReflect.Descriptor instead.
 func (*UnlockResponse) Descriptor() ([]byte, []int) {
-	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{16}
+	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{18}
 }
 
 // RegisterRequest is sent by a device agent to register with the relay server.
@@ -1048,7 +1164,7 @@ type RegisterRequest struct {
 
 func (x *RegisterRequest) Reset() {
 	*x = RegisterRequest{}
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[17]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1060,7 +1176,7 @@ func (x *RegisterRequest) String() string {
 func (*RegisterRequest) ProtoMessage() {}
 
 func (x *RegisterRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[17]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1073,7 +1189,7 @@ func (x *RegisterRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterRequest.ProtoReflect.Descriptor instead.
 func (*RegisterRequest) Descriptor() ([]byte, []int) {
-	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{17}
+	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *RegisterRequest) GetDevices() []string {
@@ -1100,7 +1216,7 @@ type RegisterResponse struct {
 
 func (x *RegisterResponse) Reset() {
 	*x = RegisterResponse{}
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[18]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1112,7 +1228,7 @@ func (x *RegisterResponse) String() string {
 func (*RegisterResponse) ProtoMessage() {}
 
 func (x *RegisterResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[18]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1125,7 +1241,7 @@ func (x *RegisterResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterResponse.ProtoReflect.Descriptor instead.
 func (*RegisterResponse) Descriptor() ([]byte, []int) {
-	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{18}
+	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{20}
 }
 
 var File_dutctl_v1_dutctl_proto protoreflect.FileDescriptor
@@ -1133,9 +1249,18 @@ var File_dutctl_v1_dutctl_proto protoreflect.FileDescriptor
 const file_dutctl_v1_dutctl_proto_rawDesc = "" +
 	"\n" +
 	"\x16dutctl/v1/dutctl.proto\x12\tdutctl.v1\"\r\n" +
-	"\vListRequest\"(\n" +
-	"\fListResponse\x12\x18\n" +
-	"\adevices\x18\x01 \x03(\tR\adevices\")\n" +
+	"\vListRequest\"?\n" +
+	"\fListResponse\x12/\n" +
+	"\adevices\x18\x01 \x03(\v2\x15.dutctl.v1.DeviceInfoR\adevices\"I\n" +
+	"\n" +
+	"DeviceInfo\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12'\n" +
+	"\x04lock\x18\x02 \x01(\v2\x13.dutctl.v1.LockInfoR\x04lock\"\\\n" +
+	"\bLockInfo\x12\x14\n" +
+	"\x05owner\x18\x01 \x01(\tR\x05owner\x12\x1b\n" +
+	"\tlocked_at\x18\x02 \x01(\x03R\blockedAt\x12\x1d\n" +
+	"\n" +
+	"expires_at\x18\x03 \x01(\x03R\texpiresAt\")\n" +
 	"\x0fCommandsRequest\x12\x16\n" +
 	"\x06device\x18\x01 \x01(\tR\x06device\".\n" +
 	"\x10CommandsResponse\x12\x1a\n" +
@@ -1213,55 +1338,59 @@ func file_dutctl_v1_dutctl_proto_rawDescGZIP() []byte {
 	return file_dutctl_v1_dutctl_proto_rawDescData
 }
 
-var file_dutctl_v1_dutctl_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
+var file_dutctl_v1_dutctl_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
 var file_dutctl_v1_dutctl_proto_goTypes = []any{
 	(*ListRequest)(nil),      // 0: dutctl.v1.ListRequest
 	(*ListResponse)(nil),     // 1: dutctl.v1.ListResponse
-	(*CommandsRequest)(nil),  // 2: dutctl.v1.CommandsRequest
-	(*CommandsResponse)(nil), // 3: dutctl.v1.CommandsResponse
-	(*DetailsRequest)(nil),   // 4: dutctl.v1.DetailsRequest
-	(*DetailsResponse)(nil),  // 5: dutctl.v1.DetailsResponse
-	(*RunRequest)(nil),       // 6: dutctl.v1.RunRequest
-	(*RunResponse)(nil),      // 7: dutctl.v1.RunResponse
-	(*Command)(nil),          // 8: dutctl.v1.Command
-	(*Print)(nil),            // 9: dutctl.v1.Print
-	(*Console)(nil),          // 10: dutctl.v1.Console
-	(*FileRequest)(nil),      // 11: dutctl.v1.FileRequest
-	(*File)(nil),             // 12: dutctl.v1.File
-	(*LockRequest)(nil),      // 13: dutctl.v1.LockRequest
-	(*LockResponse)(nil),     // 14: dutctl.v1.LockResponse
-	(*UnlockRequest)(nil),    // 15: dutctl.v1.UnlockRequest
-	(*UnlockResponse)(nil),   // 16: dutctl.v1.UnlockResponse
-	(*RegisterRequest)(nil),  // 17: dutctl.v1.RegisterRequest
-	(*RegisterResponse)(nil), // 18: dutctl.v1.RegisterResponse
+	(*DeviceInfo)(nil),       // 2: dutctl.v1.DeviceInfo
+	(*LockInfo)(nil),         // 3: dutctl.v1.LockInfo
+	(*CommandsRequest)(nil),  // 4: dutctl.v1.CommandsRequest
+	(*CommandsResponse)(nil), // 5: dutctl.v1.CommandsResponse
+	(*DetailsRequest)(nil),   // 6: dutctl.v1.DetailsRequest
+	(*DetailsResponse)(nil),  // 7: dutctl.v1.DetailsResponse
+	(*RunRequest)(nil),       // 8: dutctl.v1.RunRequest
+	(*RunResponse)(nil),      // 9: dutctl.v1.RunResponse
+	(*Command)(nil),          // 10: dutctl.v1.Command
+	(*Print)(nil),            // 11: dutctl.v1.Print
+	(*Console)(nil),          // 12: dutctl.v1.Console
+	(*FileRequest)(nil),      // 13: dutctl.v1.FileRequest
+	(*File)(nil),             // 14: dutctl.v1.File
+	(*LockRequest)(nil),      // 15: dutctl.v1.LockRequest
+	(*LockResponse)(nil),     // 16: dutctl.v1.LockResponse
+	(*UnlockRequest)(nil),    // 17: dutctl.v1.UnlockRequest
+	(*UnlockResponse)(nil),   // 18: dutctl.v1.UnlockResponse
+	(*RegisterRequest)(nil),  // 19: dutctl.v1.RegisterRequest
+	(*RegisterResponse)(nil), // 20: dutctl.v1.RegisterResponse
 }
 var file_dutctl_v1_dutctl_proto_depIdxs = []int32{
-	8,  // 0: dutctl.v1.RunRequest.command:type_name -> dutctl.v1.Command
-	10, // 1: dutctl.v1.RunRequest.console:type_name -> dutctl.v1.Console
-	12, // 2: dutctl.v1.RunRequest.file:type_name -> dutctl.v1.File
-	9,  // 3: dutctl.v1.RunResponse.print:type_name -> dutctl.v1.Print
-	10, // 4: dutctl.v1.RunResponse.console:type_name -> dutctl.v1.Console
-	11, // 5: dutctl.v1.RunResponse.file_request:type_name -> dutctl.v1.FileRequest
-	12, // 6: dutctl.v1.RunResponse.file:type_name -> dutctl.v1.File
-	0,  // 7: dutctl.v1.DeviceService.List:input_type -> dutctl.v1.ListRequest
-	2,  // 8: dutctl.v1.DeviceService.Commands:input_type -> dutctl.v1.CommandsRequest
-	4,  // 9: dutctl.v1.DeviceService.Details:input_type -> dutctl.v1.DetailsRequest
-	6,  // 10: dutctl.v1.DeviceService.Run:input_type -> dutctl.v1.RunRequest
-	13, // 11: dutctl.v1.DeviceService.Lock:input_type -> dutctl.v1.LockRequest
-	15, // 12: dutctl.v1.DeviceService.Unlock:input_type -> dutctl.v1.UnlockRequest
-	17, // 13: dutctl.v1.RelayService.Register:input_type -> dutctl.v1.RegisterRequest
-	1,  // 14: dutctl.v1.DeviceService.List:output_type -> dutctl.v1.ListResponse
-	3,  // 15: dutctl.v1.DeviceService.Commands:output_type -> dutctl.v1.CommandsResponse
-	5,  // 16: dutctl.v1.DeviceService.Details:output_type -> dutctl.v1.DetailsResponse
-	7,  // 17: dutctl.v1.DeviceService.Run:output_type -> dutctl.v1.RunResponse
-	14, // 18: dutctl.v1.DeviceService.Lock:output_type -> dutctl.v1.LockResponse
-	16, // 19: dutctl.v1.DeviceService.Unlock:output_type -> dutctl.v1.UnlockResponse
-	18, // 20: dutctl.v1.RelayService.Register:output_type -> dutctl.v1.RegisterResponse
-	14, // [14:21] is the sub-list for method output_type
-	7,  // [7:14] is the sub-list for method input_type
-	7,  // [7:7] is the sub-list for extension type_name
-	7,  // [7:7] is the sub-list for extension extendee
-	0,  // [0:7] is the sub-list for field type_name
+	2,  // 0: dutctl.v1.ListResponse.devices:type_name -> dutctl.v1.DeviceInfo
+	3,  // 1: dutctl.v1.DeviceInfo.lock:type_name -> dutctl.v1.LockInfo
+	10, // 2: dutctl.v1.RunRequest.command:type_name -> dutctl.v1.Command
+	12, // 3: dutctl.v1.RunRequest.console:type_name -> dutctl.v1.Console
+	14, // 4: dutctl.v1.RunRequest.file:type_name -> dutctl.v1.File
+	11, // 5: dutctl.v1.RunResponse.print:type_name -> dutctl.v1.Print
+	12, // 6: dutctl.v1.RunResponse.console:type_name -> dutctl.v1.Console
+	13, // 7: dutctl.v1.RunResponse.file_request:type_name -> dutctl.v1.FileRequest
+	14, // 8: dutctl.v1.RunResponse.file:type_name -> dutctl.v1.File
+	0,  // 9: dutctl.v1.DeviceService.List:input_type -> dutctl.v1.ListRequest
+	4,  // 10: dutctl.v1.DeviceService.Commands:input_type -> dutctl.v1.CommandsRequest
+	6,  // 11: dutctl.v1.DeviceService.Details:input_type -> dutctl.v1.DetailsRequest
+	8,  // 12: dutctl.v1.DeviceService.Run:input_type -> dutctl.v1.RunRequest
+	15, // 13: dutctl.v1.DeviceService.Lock:input_type -> dutctl.v1.LockRequest
+	17, // 14: dutctl.v1.DeviceService.Unlock:input_type -> dutctl.v1.UnlockRequest
+	19, // 15: dutctl.v1.RelayService.Register:input_type -> dutctl.v1.RegisterRequest
+	1,  // 16: dutctl.v1.DeviceService.List:output_type -> dutctl.v1.ListResponse
+	5,  // 17: dutctl.v1.DeviceService.Commands:output_type -> dutctl.v1.CommandsResponse
+	7,  // 18: dutctl.v1.DeviceService.Details:output_type -> dutctl.v1.DetailsResponse
+	9,  // 19: dutctl.v1.DeviceService.Run:output_type -> dutctl.v1.RunResponse
+	16, // 20: dutctl.v1.DeviceService.Lock:output_type -> dutctl.v1.LockResponse
+	18, // 21: dutctl.v1.DeviceService.Unlock:output_type -> dutctl.v1.UnlockResponse
+	20, // 22: dutctl.v1.RelayService.Register:output_type -> dutctl.v1.RegisterResponse
+	16, // [16:23] is the sub-list for method output_type
+	9,  // [9:16] is the sub-list for method input_type
+	9,  // [9:9] is the sub-list for extension type_name
+	9,  // [9:9] is the sub-list for extension extendee
+	0,  // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_dutctl_v1_dutctl_proto_init() }
@@ -1269,18 +1398,18 @@ func file_dutctl_v1_dutctl_proto_init() {
 	if File_dutctl_v1_dutctl_proto != nil {
 		return
 	}
-	file_dutctl_v1_dutctl_proto_msgTypes[6].OneofWrappers = []any{
+	file_dutctl_v1_dutctl_proto_msgTypes[8].OneofWrappers = []any{
 		(*RunRequest_Command)(nil),
 		(*RunRequest_Console)(nil),
 		(*RunRequest_File)(nil),
 	}
-	file_dutctl_v1_dutctl_proto_msgTypes[7].OneofWrappers = []any{
+	file_dutctl_v1_dutctl_proto_msgTypes[9].OneofWrappers = []any{
 		(*RunResponse_Print)(nil),
 		(*RunResponse_Console)(nil),
 		(*RunResponse_FileRequest)(nil),
 		(*RunResponse_File)(nil),
 	}
-	file_dutctl_v1_dutctl_proto_msgTypes[10].OneofWrappers = []any{
+	file_dutctl_v1_dutctl_proto_msgTypes[12].OneofWrappers = []any{
 		(*Console_Stdin)(nil),
 		(*Console_Stdout)(nil),
 		(*Console_Stderr)(nil),
@@ -1291,7 +1420,7 @@ func file_dutctl_v1_dutctl_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_dutctl_v1_dutctl_proto_rawDesc), len(file_dutctl_v1_dutctl_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   19,
+			NumMessages:   21,
 			NumExtensions: 0,
 			NumServices:   2,
 		},

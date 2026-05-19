@@ -30,9 +30,23 @@ func (app *application) listRPC() error {
 		return err
 	}
 
+	devices := make([]output.DeviceEntry, 0, len(res.Msg.GetDevices()))
+
+	for _, info := range res.Msg.GetDevices() {
+		entry := output.DeviceEntry{Name: info.GetName()}
+
+		if lock := info.GetLock(); lock != nil {
+			entry.Locked = true
+			entry.Owner = lock.GetOwner()
+			entry.ExpiresAt = lock.GetExpiresAt()
+		}
+
+		devices = append(devices, entry)
+	}
+
 	app.formatter.WriteContent(output.Content{
 		Type: output.TypeDeviceList,
-		Data: res.Msg.GetDevices(),
+		Data: devices,
 		Metadata: map[string]string{
 			"server": app.serverAddr,
 			"msg":    "List Response",

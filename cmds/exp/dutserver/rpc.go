@@ -100,8 +100,16 @@ func (s *rpcService) List(
 ) (*connect.Response[pb.ListResponse], error) {
 	log.Println("Server received List request")
 
+	names := slices.Sorted(maps.Keys(s.agents))
+	infos := make([]*pb.DeviceInfo, 0, len(names))
+
+	// dutserver does not track lock state; Lock is left unset.
+	for _, name := range names {
+		infos = append(infos, &pb.DeviceInfo{Name: name})
+	}
+
 	res := connect.NewResponse(&pb.ListResponse{
-		Devices: slices.Sorted(maps.Keys(s.agents)),
+		Devices: infos,
 	})
 
 	log.Print("List-RPC finished")

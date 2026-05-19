@@ -19,7 +19,22 @@ message ListRequest {}
 
 // ListResponse is sent by the agent in response to a ListRequest.
 message ListResponse {
-  repeated string devices = 1;
+  repeated DeviceInfo devices = 1;
+}
+
+// DeviceInfo describes a single device and its current lock state.
+message DeviceInfo {
+  string name = 1;
+  LockInfo lock = 2; // Unset when the device is not locked.
+}
+
+// LockInfo describes the lock state of a device. The enclosing DeviceInfo
+// leaves its lock field unset when the device is not locked, so this message
+// does not repeat that signal as a separate boolean.
+message LockInfo {
+  string owner = 1;
+  int64 locked_at = 2; // Unix seconds.
+  int64 expires_at = 3; // Unix seconds, 0 means no expiry.
 }
 
 // CommandsRequest is sent by the client to request a list of commands available for

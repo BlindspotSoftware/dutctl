@@ -7,6 +7,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"connectrpc.com/connect"
 	"github.com/BlindspotSoftware/dutctl/internal/dutagent"
@@ -158,5 +159,59 @@ func TestLockRPCZeroDurationRejected(t *testing.T) {
 		if connect.CodeOf(err) != connect.CodeInvalidArgument {
 			t.Errorf("dur=%d: code = %v, want InvalidArgument", dur, connect.CodeOf(err))
 		}
+	}
+}
+
+func TestListRPCHidesAutoOnlyLock(t *testing.T) {
+	svc := newTestService()
+
+	if _, err := svc.locker.AutoLock("devA", "alice"); err != nil {
+		t.Fatalf("AutoLock: %v", err)
+	}
+
+	res, err := svc.List(context.Background(), connect.NewRequest(&pb.ListRequest{}))
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+
+	var got *pb.LockInfo
+
+	for _, info := range res.Msg.GetDevices() {
+		if info.GetName() == "devA" {
+			got = info.GetLock()
+		}
+	}
+
+	if got != nil {
+		t.Errorf("auto-only lock surfaced in List: %+v, want no lock info", got)
+	}
+}
+
+func TestListRPCExplicitShadowsAuto(t *testing.T) {
+	svc := newTestService()
+
+	if _, err := svc.locker.AutoLock("devA", "alice"); err != nil {
+		t.Fatalf("AutoLock: %v", err)
+	}
+
+	if _, err := svc.locker.Lock("devA", "alice", time.Minute); err != nil {
+		t.Fatalf("Lock: %v", err)
+	}
+
+	res, err := svc.List(context.Background(), connect.NewRequest(&pb.ListRequest{}))
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+
+	var got *pb.LockInfo
+
+	for _, info := range res.Msg.GetDevices() {
+		if info.GetName() == "devA" {
+			got = info.GetLock()
+		}
+	}
+
+	if got.GetExpiresAt() == 0 {
+		t.Error("expected explicit-slot expires_at to win, got 0")
 	}
 }

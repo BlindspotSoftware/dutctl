@@ -11,6 +11,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"time"
 )
 
 // TextFormatter implements Formatter with plain text formatting capabilities.
@@ -53,9 +54,9 @@ func newTextFormatter(config Config) *TextFormatter {
 	}
 }
 
-// WriteContent formats and outputs structured content.
-func (f *TextFormatter) WriteContent(content Content) {
-	// Get appropriate writer based on buffering mode and error state
+// selectWriter returns the writer for content based on buffering mode and
+// error state.
+func (f *TextFormatter) selectWriter(content Content) io.Writer {
 	var writer io.Writer
 
 	if f.buffering {
@@ -72,6 +73,13 @@ func (f *TextFormatter) WriteContent(content Content) {
 		}
 	}
 
+	return writer
+}
+
+// WriteContent formats and outputs structured content.
+func (f *TextFormatter) WriteContent(content Content) {
+	writer := f.selectWriter(content)
+
 	// Format and write content based on type, regardless of error state
 	switch content.Type {
 	case TypeDeviceList:
@@ -84,6 +92,8 @@ func (f *TextFormatter) WriteContent(content Content) {
 		f.writeDetailTo(content, writer)
 	case TypeModuleOutput:
 		f.writeModuleOutputTo(content, writer)
+	case TypeLockResult:
+		f.writeLockResultTo(content, writer)
 	default:
 		// For general text or unrecognized types
 		f.writeGeneralTo(content, writer)
@@ -148,17 +158,79 @@ func (f *TextFormatter) Flush() error {
 
 // Helper methods for different content types
 
+// humanDuration renders dur as a compact "1h30m"-style string, rounded to the
+// minute. A non-positive duration renders as "0m".
+func humanDuration(dur time.Duration) string {
+	dur = dur.Round(time.Minute)
+	if dur <= 0 {
+		return "0m"
+	}
+
+	hours := dur / time.Hour
+	minutes := (dur % time.Hour) / time.Minute
+
+	switch {
+	case hours > 0 && minutes > 0:
+		return fmt.Sprintf("%dh%dm", hours, minutes)
+	case hours > 0:
+		return fmt.Sprintf("%dh", hours)
+	default:
+		return fmt.Sprintf("%dm", minutes)
+	}
+}
+
+// lockAnnotation renders the bracketed lock note for a locked device, e.g.
+// ` [locked by "alice@host" for 25m]`. ExpiresAt of 0 omits the duration.
+func lockAnnotation(entry DeviceEntry) string {
+	if entry.ExpiresAt == 0 {
+		return fmt.Sprintf(" [locked by %q]", entry.Owner)
+	}
+
+	remaining := humanDuration(time.Until(time.Unix(entry.ExpiresAt, 0)))
+
+	return fmt.Sprintf(" [locked by %q for %s]", entry.Owner, remaining)
+}
+
 // writeDeviceListTo formats and writes a list of devices with bullet points.
 func (f *TextFormatter) writeDeviceListTo(content Content, writer io.Writer) {
-	if devices, ok := content.Data.([]string); ok {
-		// Print metadata before content
-		f.writeMetadata(content, writer)
-
-		for _, device := range devices {
-			fmt.Fprintf(writer, "- %s\n", device)
-		}
-	} else {
+	devices, ok := content.Data.([]DeviceEntry)
+	if !ok {
 		f.writeGeneralTo(content, writer)
+
+		return
+	}
+
+	// Print metadata before content
+	f.writeMetadata(content, writer)
+
+	for _, device := range devices {
+		if device.Locked {
+			fmt.Fprintf(writer, "- %s%s\n", device.Name, lockAnnotation(device))
+		} else {
+			fmt.Fprintf(writer, "- %s\n", device.Name)
+		}
+	}
+}
+
+// writeLockResultTo formats and writes the result of a lock or unlock operation.
+func (f *TextFormatter) writeLockResultTo(content Content, writer io.Writer) {
+	entry, ok := content.Data.(DeviceEntry)
+	if !ok {
+		f.writeGeneralTo(content, writer)
+
+		return
+	}
+
+	f.writeMetadata(content, writer)
+
+	switch {
+	case !entry.Locked:
+		fmt.Fprintf(writer, "Device %q unlocked\n", entry.Name)
+	case entry.ExpiresAt == 0:
+		fmt.Fprintf(writer, "Device %q locked by %q\n", entry.Name, entry.Owner)
+	default:
+		remaining := humanDuration(time.Until(time.Unix(entry.ExpiresAt, 0)))
+		fmt.Fprintf(writer, "Device %q locked by %q for %s\n", entry.Name, entry.Owner, remaining)
 	}
 }
 
