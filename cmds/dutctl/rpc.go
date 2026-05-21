@@ -21,6 +21,37 @@ import (
 	pb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1"
 )
 
+// maybeResolveSingleDevice prepends the device name to args when the
+// dutagent advertises exactly one device and the first arg is not that
+// device. It allows `dutctl <command>` to work on single-device dutagents
+// without requiring the user to repeat the device name on every call.
+//
+// On any RPC failure or ambiguity (zero or multiple devices) it returns
+// args unchanged so the caller falls through to normal dispatch and lets
+// the subsequent RPC produce a meaningful error.
+func (app *application) maybeResolveSingleDevice(args []string) []string {
+	if len(args) == 0 {
+		return args
+	}
+
+	res, err := app.rpcClient.List(context.Background(), connect.NewRequest(&pb.ListRequest{}))
+	if err != nil {
+		return args
+	}
+
+	devs := res.Msg.GetDevices()
+	if len(devs) != 1 {
+		return args
+	}
+
+	only := devs[0]
+	if args[0] == only {
+		return args
+	}
+
+	return append([]string{only}, args...)
+}
+
 func (app *application) listRPC() error {
 	ctx := context.Background()
 	req := connect.NewRequest(&pb.ListRequest{})
