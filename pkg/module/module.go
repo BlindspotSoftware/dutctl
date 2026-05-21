@@ -24,6 +24,14 @@ var (
 
 // Module is a building block of a command running on a device-under-test (DUT).
 // Implementations of this interface are the actual steps that are executed on a DUT.
+//
+// Reserved keywords: certain names are reserved for dutctl client-side dispatch
+// (see [github.com/BlindspotSoftware/dutctl/pkg/dut.CommandKeywords] and
+// [github.com/BlindspotSoftware/dutctl/pkg/dut.DeviceKeywords]). A module command
+// must not be configured with a name from those lists; the dutagent refuses such
+// configs at startup. Furthermore, modules MUST NOT expect a reserved keyword as
+// the first argument to Run: the dutctl client intercepts these and never invokes
+// Run with them.
 type Module interface {
 	// Help provides usage information.
 	// The returned string should contain a description of the module the supported

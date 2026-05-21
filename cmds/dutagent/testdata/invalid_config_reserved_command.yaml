@@ -1,0 +1,9 @@
+version: 0
+devices:
+  device1:
+    desc: "Device 1"
+    cmds:
+      help:
+        desc: "Reserved command name"
+        uses:
+          - module: dummy-status

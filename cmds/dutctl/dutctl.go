@@ -168,22 +168,26 @@ func (app *application) start() {
 	}
 
 	if len(app.args) == 1 {
-		device := app.args[0]
-		err := app.commandsRPC(device)
-		app.exit(err)
+		name := app.args[0]
+
+		if handler, ok := deviceKeywordHandlers[name]; ok {
+			app.exit(handler(app, name))
+		}
+
+		app.exit(app.commandsRPC(name))
 	}
 
 	device := app.args[0]
 	command := app.args[1]
 	cmdArgs := app.args[2:]
 
-	if len(cmdArgs) > 0 && cmdArgs[0] == "help" {
-		err := app.detailsRPC(device, command, "help")
-		app.exit(err)
+	if len(cmdArgs) > 0 {
+		if handler, ok := commandKeywordHandlers[cmdArgs[0]]; ok {
+			app.exit(handler(app, device, command))
+		}
 	}
 
-	err := app.runRPC(device, command, cmdArgs)
-	app.exit(err)
+	app.exit(app.runRPC(device, command, cmdArgs))
 }
 
 // exit terminates the application. If the provided error is not nil, it is printed to

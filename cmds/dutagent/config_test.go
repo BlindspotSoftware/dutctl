@@ -58,3 +58,20 @@ func TestInvalidConfigEmptyDevices(t *testing.T) {
 		t.Errorf("errors.Is: want %v, got %v", dut.ErrEmptyDevices, err)
 	}
 }
+
+func TestInvalidConfigReservedCommandName(t *testing.T) {
+	data := loadTestdata(t, "invalid_config_reserved_command.yaml")
+
+	var cfg config
+
+	err := yaml.Unmarshal(data, &cfg)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	t.Logf("error message: %s", err)
+
+	if !errors.Is(err, dut.ErrReservedName) {
+		t.Errorf("errors.Is: want %v, got %v", dut.ErrReservedName, err)
+	}
+}
