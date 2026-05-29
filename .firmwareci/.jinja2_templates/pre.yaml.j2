@@ -1,0 +1,76 @@
+pre-stage:
+  # Fix permissions
+  - cmd: cmd
+    name: chmod dutctl
+    transport:
+      proto: local
+    parameters:
+      executable: chmod
+      args: ["755", "[[input.DUTCTL]]"]
+
+  # ========================
+  #  Copy files over to RPI
+  # ========================
+  - cmd: copy
+    name: Copy over {{ defaults.PKG_NAME }} debian package
+    transport: *transport_root
+    parameters:
+      source: "[[input.REMOTE_PKG]]"
+      destination: "{{ defaults.PKG_NAME }}.deb"
+
+  - cmd: cmd
+    name: Install {{ defaults.PKG_NAME }} package
+    transport: *transport_root
+    parameters:
+      executable: dpkg
+      args: ["-i", "{{ defaults.PKG_NAME }}.deb"]
+
+  - cmd: copy
+    name: Copy over test config file
+    transport: *transport_root
+    parameters:
+      source: "[[input.CONFIG]]"
+      destination: {{ defaults.DUTCTL_CONFIG_FILE }}
+
+  - cmd: cmd
+    name: chmod config file
+    transport: *transport_root
+    parameters:
+      executable: chmod
+      args: ["644", {{ defaults.DUTCTL_CONFIG_FILE }}]
+
+  # ==============
+  #  Start server
+  # ==============
+  - cmd: cmd
+    name: Reload systemctl daemon
+    transport: *transport_root
+    parameters:
+      executable: systemctl
+      args: ["daemon-reload"]
+
+  - cmd: cmd
+    name: Start systemd service
+    transport: *transport_root
+    parameters:
+      executable: systemctl
+      args: ["start", {{ defaults.SYSTEMD_FILE }}]
+
+  - cmd: shell
+    name: Status systemd service
+    transport: *transport_root
+    parameters:
+      command: "systemctl status --no-pager {{ defaults.SYSTEMD_FILE }}"
+      expect:
+        - regex: "Active: active \\(running\\)"
+
+  # ==========================
+  #  Test dutctl help command
+  # ==========================
+  - cmd: cmd
+    name: dutctl help
+    transport:
+      proto: local
+    parameters:
+      executable: "[[input.DUTCTL]]"
+      args: ["--help"]

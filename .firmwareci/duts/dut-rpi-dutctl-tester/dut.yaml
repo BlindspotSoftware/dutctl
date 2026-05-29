@@ -1,0 +1,6 @@
+---
+# Device-under-Test Configuration for RaspberryPi acting as dutctl tester
+name: fwci-dutctl-tester
+label: fwci-dutctl-tester
+attributes:
+  Host: "fwci-dutctl-tester.sec.9e.network"
