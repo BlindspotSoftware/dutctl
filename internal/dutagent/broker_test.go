@@ -32,9 +32,8 @@ func (s *testStream) Send(_ *pb.RunResponse) error {
 
 func (s *testStream) Receive() (*pb.RunRequest, error) {
 	if s.recvBlock {
-		if s.unblockCh == nil {
-			s.unblockCh = make(chan struct{})
-		}
+		// unblockCh must be created by the test before Start so this goroutine
+		// only reads it, never writes it (a write here would race the test).
 		<-s.unblockCh // will block until closed; simulates a long receive
 	}
 
@@ -132,7 +131,8 @@ func TestBroker_StdinForwarding(t *testing.T) {
 	b := &Broker{}
 	stdinPayload := []byte("user input")
 	req := &pb.RunRequest{Msg: &pb.RunRequest_Console{Console: &pb.Console{Data: &pb.Console_Stdin{Stdin: stdinPayload}}}}
-	stream := &testStream{recvReqs: []*pb.RunRequest{req}, recvErrs: []error{nil}} // after first req, EOF
+	// No recvErrs: testStream returns reqs in order then EOF by default.
+	stream := &testStream{recvReqs: []*pb.RunRequest{req}}
 	ctx, cancel := context.WithCancel(context.Background())
 	sess, errCh := b.Start(ctx, stream)
 
@@ -144,8 +144,7 @@ func TestBroker_StdinForwarding(t *testing.T) {
 			t.Fatalf("stdin mismatch: got %q want %q", string(data), string(stdinPayload))
 		}
 	case <-time.After(200 * time.Millisecond):
-		// Expected to fail until refactor ensures proper sequencing / closure.
-		// (Current code may work but channel closure semantics will still fail later.)
+		t.Fatal("timeout: stdin payload was not forwarded to stdinCh")
 	}
 
 	cancel() // simulate module completion
@@ -156,15 +155,13 @@ func TestBroker_StdinForwarding(t *testing.T) {
 // Cancellation during a blocked receive should terminate fromClientWorker without producing errors.
 func TestBroker_CancelDuringBlockedReceive(t *testing.T) {
 	b := &Broker{}
-	stream := &testStream{recvBlock: true}
+	stream := &testStream{recvBlock: true, unblockCh: make(chan struct{})}
 	ctx, cancel := context.WithCancel(context.Background())
 	_, errCh := b.Start(ctx, stream)
 
 	// Cancel promptly, then unblock the fake receive so worker goroutine does not leak.
 	cancel()
-	if stream.unblockCh != nil {
-		close(stream.unblockCh)
-	}
+	close(stream.unblockCh)
 
 	errs := collectErrors(t, errCh, 200*time.Millisecond)
 	if len(errs) != 0 {
