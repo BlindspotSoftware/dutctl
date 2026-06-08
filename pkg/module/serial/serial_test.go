@@ -238,14 +238,19 @@ func TestSerialRunFiltersEscapes(t *testing.T) {
 }
 
 func TestSerialRunKeepEscapes(t *testing.T) {
-	// With -keep-escapes the colour reset is kept, so "# " is not contiguous and
-	// the expect cannot match before the timeout.
+	// With -keep-escapes the colour reset reaches the client and stays in the
+	// matched text, so "# " is not contiguous and the expect times out.
 	fp := &fakePort{reads: [][]byte{[]byte("#\x1b[0m ")}} // then quiet
 	s := newSerialWithPort(fp)
+	rec := &recordingSession{}
 
-	err := s.Run(context.Background(), &mock.Session{}, "-keep-escapes", "-t", "30ms", "--", "expect", "# ")
-	if err == nil {
-		t.Fatal("Run = nil, want timeout (-keep-escapes keeps the escape so '# ' is not contiguous)")
+	err := s.Run(context.Background(), rec, "-keep-escapes", "-t", "30ms", "--", "expect", "# ")
+	if err == nil || !strings.Contains(err.Error(), "timeout of 30ms reached") {
+		t.Fatalf("Run = %v, want the expect timeout (-keep-escapes keeps the escape so '# ' is not contiguous)", err)
+	}
+
+	if got := rec.out.String(); !strings.Contains(got, "#\x1b[0m ") {
+		t.Errorf("output = %q, want the colour reset kept", got)
 	}
 }
 
