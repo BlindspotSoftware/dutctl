@@ -6,15 +6,14 @@
 package serial
 
 import (
-	"bytes"
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"log"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/BlindspotSoftware/dutctl/pkg/module"
@@ -31,14 +30,47 @@ func init() {
 // DefaultBaudRate is the default baud rate for the serial connection.
 const DefaultBaudRate = 115200
 
-// Serial is a module that forwards the serial output of a connected DUT to the dutctl client.
-// It is non-interactive and does not support stdin yet.
+// pairsDrain is the time the module continues reading serial output after
+// sending the last response in expect-send mode, so the output of the
+// triggered command is visible before the connection closes.
+const pairsDrain = 1 * time.Second
+
+// reconnectInterval is the delay between attempts to reopen the serial device
+// after it has disappeared (e.g. an FTDI chip that powers down with the DUT).
+const reconnectInterval = 500 * time.Millisecond
+
+// maxMatchWindow bounds the buffer of recent serial output kept for regex
+// matching. Matching is always done against the tail of the output, so old
+// bytes can be discarded; the cap keeps memory and regex cost bounded while
+// staying far larger than any realistic prompt or expect pattern.
+const maxMatchWindow = 64 * 1024
+
+// expectSendPair holds a compiled regex pattern and the bytes to send when it matches.
+// A nil or empty response means the module exits on match without sending anything.
+type expectSendPair struct {
+	pattern  *regexp.Regexp
+	response []byte
+}
+
+// serialPort is the subset of the serial device used by Run. It is satisfied by
+// *serial.Port and allows a fake to be injected in tests via Serial.dialPort.
+type serialPort interface {
+	io.ReadWriteCloser
+	Flush() error
+}
+
+// Serial is a module that provides an interactive serial connection to a DUT.
 type Serial struct {
 	Port string // Port is the path to the serial device on the dutagent.
-	Baud int    // Baud is the baud rate of the serial device. Is unset, DefaultBaudRate is used.
+	Baud int    // Baud is the baud rate of the serial device. If unset, DefaultBaudRate is used.
 
-	expect  *regexp.Regexp // expect is a pattern to match against the serial output.
-	timeout time.Duration  // timeout is the maximum time to wait for the expect pattern to match.
+	expect  *regexp.Regexp   // expect is a pattern to match against the serial output (single-expect mode).
+	pairs   []expectSendPair // pairs are the expect-send pairs (expect-send mode).
+	timeout time.Duration    // timeout is the maximum time to wait for the expect pattern to match.
+
+	// dialPort opens the serial port. It defaults to openPort and is overridden
+	// in tests to inject a fake. Set lazily in Run so the zero value works.
+	dialPort func() (serialPort, error)
 }
 
 // Ensure implementing the Module interface.
@@ -49,18 +81,31 @@ const abstract = `Serial connection to the DUT
 
 const usage = `
 ARGUMENTS:
-	[-t <duration>] [<expect>]
+	[-t <duration>] [<expect> [<response> <expect> <response> ...]]
 
 `
 
 const description = `
-The serial connection is read-only and does not support stdin yet.
-If a regex is provided, the module will wait for the regex to match on the serial output, 
-then exit with success. If no expect string is provided, the module will read from the serial port
-until it is terminated by a signal (e.g. Ctrl-C).
-The  expect string supports regular expressions according to [1].
-The optional -t flag specifies the maximum time to wait for the regex to match.
-Quote the expect string if it contains spaces or special characters. E.g.: "(?i)hello\s+world!? dutctl"
+The serial module provides an interactive connection to the DUT's serial port.
+Input from the client is forwarded to the serial port, and output from the serial port is displayed.
+
+Modes of operation:
+  - Interactive (no arguments): read and write until terminated by a signal (e.g. Ctrl-C).
+  - Expect (1 argument): wait for the regex to match on the serial output, then exit.
+  - Expect-send (even number of arguments >= 2): pass pattern/response pairs.
+    For each pair, the module waits for the pattern to match and then sends the
+    response to the serial port. Pairs are processed in order; after the last
+    pair matches the module reads serial output for 1 more second so the output
+    of the triggered command is visible, then exits.
+
+If the serial device disappears mid-session (e.g. an FTDI chip that powers down
+when the DUT loses power), the module waits for it to reappear and reconnects
+automatically instead of ending the session.
+
+The expect string supports regular expressions according to [1].
+The optional -t flag specifies the maximum time to wait.
+Quote strings containing spaces or special characters. E.g.: "(?i)hello\s+world"
+Response strings support C-style escape sequences: \n, \r, \t, \\, \xHH.
 
 [1] https://golang.org/s/re2syntax.
 `
@@ -71,7 +116,7 @@ func (s *Serial) Help() string {
 	help := strings.Builder{}
 	help.WriteString(abstract)
 	help.WriteString(usage)
-	help.WriteString(fmt.Sprintf("Configured COM port is  %q with baud rate %d.\n", s.Port, s.Baud))
+	fmt.Fprintf(&help, "Configured COM port is  %q with baud rate %d.\n", s.Port, s.Baud)
 	help.WriteString(description)
 
 	return help.String()
@@ -101,7 +146,25 @@ func (s *Serial) Deinit() error {
 	return nil
 }
 
-//nolint:cyclop,funlen,gocognit
+// Run bridges the DUT's serial port to the client console.
+//
+// Concurrency model (deliberately minimal to be race- and deadlock-free):
+//
+//   - The main loop is the sole owner of all match state (expect/pairs/draining,
+//     the match window, and the CSI remainder). Nothing else touches it, so no
+//     lock is needed to protect it.
+//   - One "stdin pump" goroutine forwards client keystrokes to the port. It is
+//     the only goroutine that may briefly outlive Run; it never reads or writes
+//     match state. It unblocks via stdin EOF, which the agent guarantees by
+//     closing the stdin channel during session teardown.
+//   - One "stdout pump" goroutine performs every client write, so the main loop
+//     can keep matching and draining without blocking on a slow client, and so
+//     a vanished client can never wedge the main loop (writes abort on context
+//     cancellation).
+//   - Port writes (stdin forwarding + auto-responses) are serialised by portMu,
+//     which is never held across a channel operation, so it cannot deadlock.
+//
+//nolint:gocognit,cyclop,funlen,gocyclo,maintidx
 func (s *Serial) Run(ctx context.Context, session module.Session, args ...string) error {
 	log.Println("serial module: Run called")
 
@@ -110,93 +173,350 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 		return err
 	}
 
-	port, err := s.openPort()
+	dial := s.dialPort
+	if dial == nil {
+		dial = s.openPort
+	}
+
+	port, err := dial()
 	if err != nil {
 		return err
 	}
-	defer port.Close()
+
+	// done is closed when Run returns, signalling the stdin pump to stop writing
+	// to the (about to be closed) port.
+	done := make(chan struct{})
+	defer close(done)
+
+	// portMu guards the current port handle, which is replaced when the serial
+	// device disappears (e.g. an FTDI chip that powers down with the DUT) and is
+	// reopened once it reappears — see reconnect below. The main loop owns the
+	// handle and is its only writer, so it may read port directly; the stdin
+	// pump (another goroutine) goes through writeToPort under the lock.
+	var portMu sync.Mutex
+
+	storePort := func(next serialPort) {
+		portMu.Lock()
+		defer portMu.Unlock()
+
+		port = next
+	}
+
+	closePort := func() {
+		portMu.Lock()
+		defer portMu.Unlock()
+
+		if port != nil {
+			_ = port.Close()
+			port = nil
+		}
+	}
+
+	defer closePort()
 
 	// Discard any stale bytes left in the kernel/driver RX buffer from a
 	// previous session, otherwise the user sees data from the last boot.
-	err = port.Flush()
-	if err != nil {
-		log.Printf("serial module: flush failed: %v", err)
+	flushErr := port.Flush()
+	if flushErr != nil {
+		log.Printf("serial module: flush failed: %v", flushErr)
 	}
 
-	log.Printf("serial module: connected to %s at %d baud", s.Port, s.Baud)
-	session.Print(fmt.Sprintf("--- Connected to %s at %d baud ---\n", s.Port, s.Baud))
+	stdin, stdout, _ := session.Console() // stderr intentionally unused: serial output goes to stdout only
 
-	var cancel context.CancelFunc
+	log.Printf("serial module: connected to %s at %d baud", s.Port, s.Baud)
+	fmt.Fprintf(stdout, "--- Connected to %s at %d baud ---\n", s.Port, s.Baud)
+
+	// baseCtx tracks external cancellation (client disconnect / agent teardown).
+	// It is never replaced, so the stdout pump keeps flushing even while a
+	// derived deadline (expect timeout or post-match drain) is counting down.
+	baseCtx := ctx
+
+	writeToPort := func(data []byte) {
+		portMu.Lock()
+		defer portMu.Unlock()
+
+		if port == nil {
+			return // device is gone; drop input until it reconnects
+		}
+
+		_, werr := port.Write(data)
+		if werr != nil {
+			select {
+			case <-done: // port closed on Run exit — not an error.
+			default:
+				log.Printf("serial module: error writing to serial port: %v", werr)
+			}
+		}
+	}
+
+	s.startStdinPump(stdin, done, writeToPort)
+
+	emit, flushAndWait := newStdoutPump(baseCtx, stdout)
+	defer flushAndWait(false) // ensure the pump goroutine is released on every exit path
+
+	// loopCtx carries the active deadline: the expect timeout first, then the
+	// post-match drain. It is always derived from baseCtx, so external
+	// cancellation still propagates through it.
+	loopCtx := baseCtx
+
+	var loopCancel context.CancelFunc
 
 	if s.timeout > 0 {
 		log.Printf("serial module: setting timeout of %s", s.timeout)
-		ctx, cancel = context.WithTimeout(ctx, s.timeout)
+		loopCtx, loopCancel = context.WithTimeout(baseCtx, s.timeout)
+	}
 
-		defer cancel()
+	defer func() {
+		if loopCancel != nil {
+			loopCancel()
+		}
+	}()
+
+	var (
+		remainder   []byte // partial CSI sequence carried across reads
+		matchWindow []byte // bounded window of recent output for regex matching
+		currentPair int
+		draining    bool
+	)
+
+	//nolint:fatcontext // intentional: the post-match drain replaces the loop deadline
+	startDrain := func() {
+		if loopCancel != nil {
+			loopCancel()
+		}
+
+		loopCtx, loopCancel = context.WithTimeout(baseCtx, pairsDrain)
+		draining = true
+
+		log.Printf("serial module: draining serial output for %s before closing", pairsDrain)
+	}
+
+	// reconnect closes the vanished port and retries opening it until the device
+	// reappears, the deadline (watchCtx) fires, or the session is cancelled.
+	// It returns true once a fresh port is in place. Mirrors tio's auto-reconnect
+	// so a DUT power-cycle that drops the FTDI device does not end the session.
+	reconnect := func(watchCtx context.Context) bool {
+		closePort()
+
+		emit([]byte("\n--- Serial device disconnected, waiting to reconnect ---\n"))
+		log.Printf("serial module: device %s disconnected, waiting to reconnect", s.Port)
+
+		for {
+			fresh, dialErr := dial()
+			if dialErr == nil {
+				flushErr := fresh.Flush()
+				if flushErr != nil {
+					log.Printf("serial module: flush after reconnect failed: %v", flushErr)
+				}
+
+				storePort(fresh)
+
+				emit([]byte("\n--- Serial device reconnected ---\n"))
+				log.Printf("serial module: device %s reconnected", s.Port)
+
+				return true
+			}
+
+			select {
+			case <-watchCtx.Done():
+				return false
+			case <-time.After(reconnectInterval):
+			}
+		}
 	}
 
 	const bufferSize = 4096
 
 	readBuffer := make([]byte, bufferSize)
-	lineBuffer := &bytes.Buffer{}
 
 	for {
 		select {
-		case <-ctx.Done():
-			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-				session.Print("\n--- Timeout reached, no match found ---\n")
+		case <-loopCtx.Done():
+			if baseCtx.Err() != nil {
+				// External cancellation: client disconnect or agent teardown.
+				// The client may no longer be reading, so do not wait on a flush.
+				log.Println("serial module: context cancelled, closing")
 
+				return baseCtx.Err()
+			}
+
+			// One of our own deadlines fired.
+			if draining {
+				emit([]byte("\n--- Pattern matched, connection closed ---"))
+				flushAndWait(true)
+
+				return nil
+			}
+
+			emit([]byte("\n--- Timeout reached, no match found ---"))
+			flushAndWait(true)
+
+			if s.expect != nil {
 				return fmt.Errorf("timeout of %s reached, pattern %q not found", s.timeout, s.expect)
 			}
 
-			session.Print("\n--- Connection closed ---\n")
-
-			return ctx.Err()
+			return fmt.Errorf("timeout of %s reached, expect-send sequence not completed", s.timeout)
 		default:
-			sbytes, err := port.Read(readBuffer)
-			if err != nil {
-				// Ignore timeout errors as these are expected with the read timeout config
-				if err != io.EOF && !strings.Contains(err.Error(), "timeout") {
-					return fmt.Errorf("error reading from serial port: %w", err)
-				}
+		}
 
+		nRead, readErr := port.Read(readBuffer)
+		if readErr != nil {
+			// Read timeouts are expected: they keep the loop responsive to ctx.
+			if readErr == io.EOF || strings.Contains(readErr.Error(), "timeout") {
 				continue
 			}
 
-			if sbytes == 0 {
-				continue
+			// Any other error means the device vanished — wait for it to come
+			// back instead of ending the session. reconnect returns false only
+			// when the deadline or an external cancellation fired; the next
+			// loop iteration's select then handles it.
+			reconnect(loopCtx)
+
+			continue
+		}
+
+		if nRead == 0 {
+			continue
+		}
+
+		// Filter cursor/query CSI sequences (SGR colour is preserved),
+		// reconstructing sequences split across reads via remainder.
+		chunk := readBuffer[:nRead]
+		if len(remainder) > 0 {
+			chunk = append(remainder, chunk...)
+			remainder = nil
+		}
+
+		out := filterOutputCSI(chunk, &remainder)
+		if len(out) == 0 {
+			continue
+		}
+
+		// Display everything immediately, including partial lines (e.g. prompts
+		// without a trailing newline). out is a fresh slice owned by the pump.
+		emit(out)
+
+		// Matching is skipped while draining and in interactive mode.
+		if draining || (s.expect == nil && len(s.pairs) == 0) {
+			continue
+		}
+
+		matchWindow = append(matchWindow, out...)
+		if len(matchWindow) > maxMatchWindow {
+			matchWindow = matchWindow[len(matchWindow)-maxMatchWindow:]
+		}
+
+		if s.expect != nil {
+			if s.expect.Match(matchWindow) {
+				emit([]byte("\n--- Pattern matched, connection closed ---"))
+				flushAndWait(true)
+
+				return nil
 			}
 
-			// Forward bytes to the client immediately so partial lines are
-			// not held back waiting for a newline from the DUT.
-			session.Print(string(readBuffer[:sbytes]))
+			continue
+		}
 
-			if s.expect == nil {
-				continue
+		// Expect-send: fire every pair already satisfied by the current window.
+		for currentPair < len(s.pairs) {
+			loc := s.pairs[currentPair].pattern.FindIndex(matchWindow)
+			if loc == nil {
+				break
 			}
 
-			// Process the data read character by character
-			for i := range sbytes {
-				b := readBuffer[i]
-				lineBuffer.WriteByte(b)
+			response := s.pairs[currentPair].response
+			matchWindow = matchWindow[loc[1]:] // consume through the match
+			currentPair++
 
-				// If we reach a newline or a buffer limit, process the line
-				if b == '\n' || lineBuffer.Len() >= 1024 {
-					line := lineBuffer.String()
+			if len(response) > 0 {
+				writeToPort(response)
+			}
 
-					// Check for regex match if we have one
-					if s.expect.MatchString(line) {
-						session.Print("\n--- Pattern matched, connection closed ---\n")
+			if currentPair >= len(s.pairs) {
+				startDrain()
 
-						return nil // Success - pattern found
-					}
-
-					lineBuffer.Reset()
-				}
+				break
 			}
 		}
 	}
 }
+
+const stdinBufSize = 256
+
+// startStdinPump forwards client keystrokes to the serial port until stdin
+// reaches EOF. It is the only goroutine that may outlive Run; it touches no
+// match state, so it cannot race with the main loop.
+func (s *Serial) startStdinPump(stdin io.Reader, done <-chan struct{}, writeToPort func([]byte)) {
+	go func() {
+		buf := make([]byte, stdinBufSize)
+
+		for {
+			nRead, err := stdin.Read(buf)
+			if nRead > 0 {
+				select {
+				case <-done:
+					return // Run exited — do not write to the closing port.
+				default:
+					writeToPort(buf[:nRead])
+				}
+			}
+
+			if err != nil {
+				return // EOF on session teardown, or a read error.
+			}
+		}
+	}()
+}
+
+const stdoutQueueLen = 256
+
+// newStdoutPump starts a single goroutine that performs every client write and
+// returns two closures:
+//
+//   - emit(data) queues data for the client. It never blocks the caller
+//     indefinitely: if baseCtx is cancelled (client gone) the data is dropped
+//     rather than wedging the main loop. The caller must not reuse data
+//     afterwards; pass a fresh slice.
+//   - flushAndWait(deliver) shuts the pump down. With deliver=true it waits for
+//     all queued data to be written (safe only while the client is still
+//     reading, i.e. on graceful completion). With deliver=false it just releases
+//     the pump without waiting; it is idempotent and safe to defer on every path.
+func newStdoutPump(baseCtx context.Context, stdout io.Writer) (func([]byte), func(bool)) {
+	outCh := make(chan []byte, stdoutQueueLen)
+	pumpDone := make(chan struct{})
+
+	go func() {
+		defer close(pumpDone)
+
+		for data := range outCh {
+			_, _ = stdout.Write(data) // ChanWriter.Write only fails on misuse
+		}
+	}()
+
+	var closeOnce sync.Once
+
+	closeOut := func() { closeOnce.Do(func() { close(outCh) }) }
+
+	emit := func(data []byte) {
+		select {
+		case outCh <- data:
+		case <-baseCtx.Done(): // client gone — drop rather than block forever.
+		}
+	}
+
+	flushAndWait := func(deliver bool) {
+		closeOut()
+
+		if deliver {
+			<-pumpDone
+		}
+	}
+
+	return emit, flushAndWait
+}
+
+// pairStride is the number of positional arguments per expect-send pair.
+const pairStride = 2
 
 func (s *Serial) evalArgs(args []string) error {
 	fs := flag.NewFlagSet("serial", flag.ContinueOnError)
@@ -208,17 +528,41 @@ func (s *Serial) evalArgs(args []string) error {
 		return fmt.Errorf("failed to parse arguments: %w", err)
 	}
 
-	// Reset expect so a previous pattern does not carry over into the next run.
-	s.expect = nil
+	positional := fs.Args()
 
-	// Get the expect string if provided (args after flags)
-	if fs.NArg() > 0 {
-		expectPattern := fs.Arg(0)
-		log.Printf("serial module: Will wait for pattern: %q", expectPattern)
+	switch len(positional) {
+	case 0:
+		// Interactive mode: no expect pattern, no pairs.
+	case 1:
+		// Single-expect mode (backward compatible).
+		log.Printf("serial module: Will wait for pattern: %q", positional[0])
 
-		s.expect, err = regexp.Compile(expectPattern)
-		if err != nil {
-			return fmt.Errorf("invalid regular expression: %w", err)
+		pattern, compileErr := regexp.Compile(positional[0])
+		if compileErr != nil {
+			return fmt.Errorf("invalid regular expression: %w", compileErr)
+		}
+
+		s.expect = pattern
+	default:
+		// Expect-send pairs mode.
+		if len(positional)%pairStride != 0 {
+			return fmt.Errorf("expect-send requires an even number of arguments, got %d", len(positional))
+		}
+
+		s.pairs = make([]expectSendPair, 0, len(positional)/pairStride)
+
+		for idx := 0; idx < len(positional); idx += pairStride {
+			pattern, compileErr := regexp.Compile(positional[idx])
+			if compileErr != nil {
+				return fmt.Errorf("invalid regular expression %q: %w", positional[idx], compileErr)
+			}
+
+			log.Printf("serial module: Pair %d: pattern=%q response=%q", idx/pairStride+1, positional[idx], positional[idx+1])
+
+			s.pairs = append(s.pairs, expectSendPair{
+				pattern:  pattern,
+				response: unescape(positional[idx+1]),
+			})
 		}
 	}
 
@@ -227,7 +571,8 @@ func (s *Serial) evalArgs(args []string) error {
 
 const readTimeout = 100 * time.Millisecond
 
-func (s *Serial) openPort() (*serial.Port, error) {
+//nolint:ireturn // intentional: returns the serialPort interface so a fake can be injected in tests
+func (s *Serial) openPort() (serialPort, error) {
 	config := &serial.Config{
 		Name:        s.Port,
 		Baud:        s.Baud,
@@ -240,4 +585,150 @@ func (s *Serial) openPort() (*serial.Port, error) {
 	}
 
 	return port, nil
+}
+
+// escByte is the ASCII escape character that starts ANSI/VT escape sequences.
+const escByte = 0x1b
+
+// csiPrefixLen is the length of the CSI prefix "ESC[".
+const csiPrefixLen = 2
+
+// filterOutputCSI removes CSI sequences from serial output data, except for
+// SGR (Select Graphic Rendition, final byte 'm') which handles colors and styles.
+// This prevents cursor positioning, screen clearing, and terminal query sequences
+// from affecting the client terminal, while preserving colored output.
+//
+// Incomplete CSI sequences at the end of data are stored in remainder so they
+// can be prepended to the next buffer read and reconstituted correctly.
+//
+//nolint:cyclop,varnamelen
+func filterOutputCSI(data []byte, remainder *[]byte) []byte {
+	result := make([]byte, 0, len(data))
+	*remainder = nil
+
+	for i := 0; i < len(data); i++ {
+		if data[i] != escByte {
+			result = append(result, data[i])
+
+			continue
+		}
+
+		// ESC at end of buffer: might be the start of a CSI sequence split across reads.
+		if i+1 >= len(data) {
+			*remainder = []byte{escByte}
+
+			break
+		}
+
+		if data[i+1] != '[' {
+			// ESC not followed by '[' — not a CSI sequence, emit as-is.
+			result = append(result, data[i])
+
+			continue
+		}
+
+		// CSI sequence: ESC [
+		// Find the extent of this CSI sequence.
+		j := i + csiPrefixLen
+
+		for j < len(data) && data[j] >= 0x30 && data[j] <= 0x3f {
+			j++ // parameter bytes
+		}
+
+		for j < len(data) && data[j] >= 0x20 && data[j] <= 0x2f {
+			j++ // intermediate bytes
+		}
+
+		if j >= len(data) {
+			// Incomplete sequence at end of buffer — carry it over to the next read.
+			*remainder = make([]byte, len(data)-i)
+			copy(*remainder, data[i:])
+
+			break
+		}
+
+		if data[j] == 'm' {
+			// SGR (colors/styles) — keep it.
+			result = append(result, data[i:j+1]...)
+		}
+
+		// All other CSI sequences are dropped, including malformed ones where
+		// data[j] is not a valid final byte (0x40–0x7E). The byte at data[j]
+		// is consumed by setting i = j; the outer loop's i++ then advances past
+		// it. Silently dropping malformed sequences is safer than emitting
+		// partial escape bytes which could corrupt the terminal display.
+		i = j
+	}
+
+	return result
+}
+
+// unescape converts C-style escape sequences in s to their byte equivalents.
+// Supported sequences: \n (newline), \r (carriage return), \t (tab),
+// \\ (backslash), \xHH (hex byte). Unrecognised sequences are emitted as-is.
+//
+//nolint:cyclop // a flat switch over the supported escapes; splitting it would not help readability
+func unescape(s string) []byte {
+	out := make([]byte, 0, len(s))
+
+	for idx := 0; idx < len(s); idx++ {
+		if s[idx] != '\\' || idx+1 >= len(s) {
+			out = append(out, s[idx])
+
+			continue
+		}
+
+		idx++
+
+		switch s[idx] {
+		case 'n':
+			out = append(out, '\n')
+		case 'r':
+			out = append(out, '\r')
+		case 't':
+			out = append(out, '\t')
+		case '\\':
+			out = append(out, '\\')
+		case 'x':
+			if idx+hexDigits < len(s) {
+				hi, hiOK := fromHex(s[idx+1])
+				lo, loOK := fromHex(s[idx+hexDigits])
+
+				if hiOK && loOK {
+					out = append(out, hi<<nibbleBits|lo)
+					idx += hexDigits
+
+					continue
+				}
+			}
+
+			out = append(out, '\\', 'x')
+		default:
+			out = append(out, '\\', s[idx])
+		}
+	}
+
+	return out
+}
+
+// Constants for \xHH hex-escape decoding.
+const (
+	hexDigits       = 2  // number of hex digits in a \xHH escape
+	nibbleBits      = 4  // bit width of one hex nibble
+	hexLetterOffset = 10 // value of hex digit 'a'/'A'
+)
+
+// fromHex converts a single ASCII hex digit to its nibble value.
+// Returns (value, true) on success or (0, false) if digit is not a hex character.
+func fromHex(digit byte) (byte, bool) {
+	switch {
+	case digit >= '0' && digit <= '9':
+		return digit - '0', true
+	case digit >= 'a' && digit <= 'f':
+		return digit - 'a' + hexLetterOffset, true
+	case digit >= 'A' && digit <= 'F':
+		return digit - 'A' + hexLetterOffset, true
+	default:
+		return 0, false
+	}
 }

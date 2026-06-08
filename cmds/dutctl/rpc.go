@@ -5,7 +5,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -188,9 +187,73 @@ func (app *application) detailsRPC(device, command, keyword string) error {
 	return nil
 }
 
-//nolint:funlen,cyclop,gocognit
+// Interactive escape sequence. Ctrl-A is the prefix; the following key decides:
+//   - 'x'/'X'/Ctrl-X: quit dutctl.
+//   - Ctrl-A: send a single literal Ctrl-A to the DUT.
+//   - anything else: forward both the prefix and the key unchanged.
+//
+// Every other byte (Ctrl-C, Ctrl-D, Ctrl-Z, ...) is forwarded to the DUT.
+const (
+	escapePrefix   = 0x01 // Ctrl-A
+	escapeQuitCtrl = 0x18 // Ctrl-X
+)
+
+// filterEscape applies the interactive escape state machine to in. It returns
+// the bytes to forward to the DUT and whether the quit sequence was seen.
+// escapePending carries the "prefix seen" state across reads, so the prefix and
+// its following key may arrive in separate stdin reads.
+func filterEscape(in []byte, escapePending *bool) ([]byte, bool) {
+	out := make([]byte, 0, len(in))
+
+	for _, char := range in {
+		if *escapePending {
+			*escapePending = false
+
+			switch char {
+			case 'x', 'X', escapeQuitCtrl:
+				return out, true
+			case escapePrefix: // prefix pressed twice -> send one literal Ctrl-A
+				out = append(out, escapePrefix)
+			default: // not an escape; forward the prefix and this byte
+				out = append(out, escapePrefix, char)
+			}
+
+			continue
+		}
+
+		if char == escapePrefix {
+			*escapePending = true
+
+			continue
+		}
+
+		out = append(out, char)
+	}
+
+	return out, false
+}
+
+//nolint:funlen,cyclop,gocognit,maintidx
 func (app *application) runRPC(device, command string, cmdArgs []string) error {
 	const numWorkers = 2 // The send and receive worker goroutines
+
+	// Set raw input mode: disable local echo, canonical mode and signal
+	// generation so each keystroke — including control characters like Ctrl-C —
+	// is forwarded to the DUT immediately. Interactive modules like serial rely
+	// on the remote side to echo input. Only a real terminal is switched to raw
+	// mode; piped/scripted stdin stays untouched so it is forwarded verbatim.
+	interactive := false
+
+	if f, ok := app.stdin.(*os.File); ok {
+		if restore := setRawInput(int(f.Fd())); restore != nil {
+			interactive = true
+
+			defer restore()
+
+			// The escape sequence is the only way to quit while raw mode is on.
+			fmt.Fprint(os.Stderr, "\r\n[dutctl] interactive session — press Ctrl-A then x to quit\r\n")
+		}
+	}
 
 	runCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -324,18 +387,22 @@ func (app *application) runRPC(device, command string, cmdArgs []string) error {
 		}
 	}()
 
-	// Send routine — reads lines from stdin and forwards them to the server.
+	// Send routine — reads raw bytes from stdin and forwards them to the server.
 	//
 	// Unlike the receive routine this goroutine intentionally does NOT defer
-	// cancel(). When stdin reaches EOF (e.g. /dev/null in non-interactive
-	// runs) this goroutine returns immediately. If it cancelled the context
-	// on exit, the receive routine would be torn down before it could read
-	// and print the server's response.
+	// cancel() for the EOF case. When stdin reaches EOF (e.g. /dev/null in
+	// non-interactive runs) this goroutine returns immediately; if it cancelled
+	// the context on exit, the receive routine would be torn down before it
+	// could read and print the server's response.
 	//
-	// Only the receive routine drives context cancellation so that all
-	// server output is processed before the RPC terminates.
+	// It DOES cancel when the user types the interactive escape sequence
+	// (Ctrl-A x): that is an explicit request to end the session.
 	go func() {
-		reader := bufio.NewReader(app.stdin)
+		const stdinBufSize = 256
+
+		buf := make([]byte, stdinBufSize)
+
+		var escapePending bool
 
 		for {
 			select {
@@ -346,7 +413,7 @@ func (app *application) runRPC(device, command string, cmdArgs []string) error {
 			default:
 			}
 
-			text, err := reader.ReadString('\n')
+			nRead, err := app.stdin.Read(buf)
 			if err != nil {
 				if !errors.Is(err, io.EOF) {
 					errChan <- fmt.Errorf("reading stdin: %w", err)
@@ -355,17 +422,35 @@ func (app *application) runRPC(device, command string, cmdArgs []string) error {
 				return
 			}
 
-			err = stream.Send(&pb.RunRequest{
-				Msg: &pb.RunRequest_Console{
-					Console: &pb.Console{
-						Data: &pb.Console_Stdin{
-							Stdin: []byte(text),
+			payload := buf[:nRead]
+
+			quit := false
+			if interactive {
+				// Intercept the escape sequence; forward everything else
+				// (including Ctrl-C) untouched.
+				payload, quit = filterEscape(payload, &escapePending)
+			}
+
+			if len(payload) > 0 {
+				sendErr := stream.Send(&pb.RunRequest{
+					Msg: &pb.RunRequest_Console{
+						Console: &pb.Console{
+							Data: &pb.Console_Stdin{
+								Stdin: payload,
+							},
 						},
 					},
-				},
-			})
-			if err != nil {
-				errChan <- fmt.Errorf("sending RPC message: %w", err)
+				})
+				if sendErr != nil {
+					errChan <- fmt.Errorf("sending RPC message: %w", sendErr)
+
+					return
+				}
+			}
+
+			if quit {
+				log.Println("Send routine terminating: escape sequence")
+				cancel()
 
 				return
 			}
