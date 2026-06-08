@@ -119,6 +119,10 @@ func toClientWorker(ctx context.Context, stream Stream, s *backend) error {
 func fromClientWorker(ctx context.Context, stream Stream, s *backend) error {
 	l := log.FromContext(ctx)
 
+	// Close stdinCh on exit so ChanReader.Read returns io.EOF and any module
+	// goroutine blocked on stdin (e.g. the serial inner goroutine) unblocks cleanly.
+	defer close(s.stdinCh)
+
 	type recvResult struct {
 		req *pb.RunRequest
 		err error
@@ -202,6 +206,10 @@ func fromClientWorker(ctx context.Context, stream Stream, s *backend) error {
 
 					l.Debug("received stdin from client", "bytes", len(stdin))
 
+					// This is the only writer to stdinCh, which is why fromClientWorker
+					// may close it on return (see the deferred close above) without
+					// risking a send on a closed channel. Keep it that way: a second
+					// writer would turn that close into a panic.
 					select {
 					case <-ctx.Done():
 						return nil
