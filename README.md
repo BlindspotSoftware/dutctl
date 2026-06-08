@@ -91,6 +91,7 @@ DUT agent on it. Below you can find the currently supported modules with example
 | [GPIO Button](./pkg/module/gpio/README.md)                         | :white_check_mark:       |
 | [GPIO Switch](./pkg/module/gpio/README.md)                         | :white_check_mark:       |
 | [IPMI Power Control](./pkg/module/ipmi/README.md)                  | :white_check_mark:       |
+| [PiKVM](./pkg/module/pikvm/README.md)                              | :white_check_mark:       |
 | [Power Distribution Unit (Intellinet)](./pkg/module/pdu/README.md) | :white_check_mark:       |
 | Power Distribution Unit (Delock)                                   | :hourglass_flowing_sand: |
 | [SPI Flash Emulator](./pkg/module/flash-emulate/README.md)         | :white_check_mark:       |
