@@ -1,0 +1,50 @@
+---
+version: "3"
+
+tasks:
+  jinja2:templates:
+    desc: Run jinja2 on template files
+    cmds:
+      - task: jinja2:find-and-process-all-tempaltes
+
+  fwci:validate:
+    desc: Validate FWCI files
+    cmds:
+      - fwci validate
+
+  #================
+  # Internal tasks
+  #================
+
+  jinja2:find-and-process-all-tempaltes:
+    desc: Run jinja2 on jinja2 templates
+    internal: true
+    label: 'jinja2-tests-{{.REPO}}'
+    vars:
+      WORKFLOWS:
+        sh: find './workflows/' './duts/' -type f -name '*.yaml.j2'
+    sources:
+      - .jinja2_templates/*
+      - duts/**/*.yaml.j2
+      - workflows/workflow-*/defaults.j2
+      - workflows/workflow-*/**/*.yaml.j2
+    cmds:
+      - for:
+          var: WORKFLOWS
+        task: jinja2:run-on-file
+        vars:
+          INPUTFILE:
+            sh: echo "{{.ITEM}}"
+          OUTPUTFILE:
+            sh: echo "{{.ITEM}}" | sed -E 's/\.j2$//g'
+
+  jinja2:run-on-file:
+    desc: Run jinja2 on a file
+    internal: true
+    cmds:
+      - pwd
+      - echo 'INPUTFILE = {{.INPUTFILE}}'
+      - echo 'OUTPUTFILE = {{.OUTPUTFILE}}'
+      - j2 --format env -o '{{.OUTPUTFILE}}' '{{.INPUTFILE}}'
+    requires:
+      vars: ["INPUTFILE", "OUTPUTFILE"]
