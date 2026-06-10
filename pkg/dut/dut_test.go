@@ -191,7 +191,7 @@ func TestModuleArgs(t *testing.T) {
 			}},
 			runtimeArgs: []string{"a"},
 			want:        nil,
-			err:         ErrNoPassthroughForArgs,
+			err:         ErrNoReceiverForArgs,
 		},
 		{
 			name: "mixed passthrough and non-passthrough",
@@ -222,7 +222,7 @@ func TestModuleArgs(t *testing.T) {
 			cmd:         Command{},
 			runtimeArgs: []string{"a"},
 			want:        nil,
-			err:         ErrNoPassthroughForArgs,
+			err:         ErrNoReceiverForArgs,
 		},
 		{
 			name: "error when runtime args provided but no passthrough module",
@@ -231,7 +231,7 @@ func TestModuleArgs(t *testing.T) {
 			}},
 			runtimeArgs: []string{"a"},
 			want:        nil,
-			err:         ErrNoPassthroughForArgs,
+			err:         ErrNoReceiverForArgs,
 		},
 		{
 			name: "passthrough module with no runtime args",
