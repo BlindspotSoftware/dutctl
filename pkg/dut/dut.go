@@ -15,9 +15,9 @@ import (
 )
 
 var (
-	ErrDeviceNotFound       = errors.New("no such device")
-	ErrCommandNotFound      = errors.New("no such command")
-	ErrNoPassthroughForArgs = errors.New("arguments provided but command has no passthrough module to receive them")
+	ErrDeviceNotFound    = errors.New("no such device")
+	ErrCommandNotFound   = errors.New("no such command")
+	ErrNoReceiverForArgs = errors.New("arguments provided but command has neither a passthrough module nor declared arguments to receive them")
 )
 
 // Devlist is a list of devices-under-test.
@@ -124,8 +124,11 @@ func (c *Command) countPassthrough() int {
 // receive their statically configured Args with template references substituted
 // using runtimeArgs. The returned slice has the same length and ordering as c.Modules.
 func (c *Command) ModuleArgs(runtimeArgs []string) ([][]string, error) {
-	if len(runtimeArgs) > 0 && !c.HasPassthrough() {
-		return nil, ErrNoPassthroughForArgs
+	// Runtime args may be consumed either by a passthrough module or by
+	// command-level templating (declared c.Args substituted via ${name}).
+	// Only reject when neither can receive them.
+	if len(runtimeArgs) > 0 && !c.HasPassthrough() && len(c.Args) == 0 {
+		return nil, ErrNoReceiverForArgs
 	}
 
 	result := make([][]string, len(c.Modules))
