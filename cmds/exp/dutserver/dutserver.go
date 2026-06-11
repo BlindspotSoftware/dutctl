@@ -14,10 +14,9 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1/dutctlv1connect"
-	"golang.org/x/net/http2"
-	"golang.org/x/net/http2/h2c"
 )
 
 const (
@@ -76,6 +75,9 @@ func (svr *server) watchInterrupt() {
 	}()
 }
 
+// readHeaderTimeout bounds how long the server waits to read request headers.
+const readHeaderTimeout = 10 * time.Second
+
 // startRPCService starts the RPC service, that ideally listens for incoming
 // connections forever. It always returns an non-nil error.
 func (svr *server) startRPCService() error {
@@ -94,12 +96,17 @@ func (svr *server) startRPCService() error {
 	path, handler = dutctlv1connect.NewRelayServiceHandler(service)
 	mux.Handle(path, handler)
 
-	//nolint:gosec
-	return http.ListenAndServe(
-		svr.address,
-		// Use h2c so we can serve HTTP/2 without TLS.
-		h2c.NewHandler(mux, &http2.Server{}),
-	)
+	// Serve HTTP/2 without TLS (h2c)
+	srv := &http.Server{
+		Addr:              svr.address,
+		Handler:           mux,
+		ReadHeaderTimeout: readHeaderTimeout,
+	}
+	srv.Protocols = new(http.Protocols)
+	srv.Protocols.SetHTTP1(true)
+	srv.Protocols.SetUnencryptedHTTP2(true)
+
+	return srv.ListenAndServe()
 }
 
 // start orchestrates the dutagent execution.

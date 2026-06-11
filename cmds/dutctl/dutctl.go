@@ -7,13 +7,11 @@
 package main
 
 import (
-	"crypto/tls"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"log"
-	"net"
 	"net/http"
 	"os"
 
@@ -22,7 +20,6 @@ import (
 	"github.com/BlindspotSoftware/dutctl/internal/output"
 	"github.com/BlindspotSoftware/dutctl/pkg/lock"
 	"github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1/dutctlv1connect"
-	"golang.org/x/net/http2"
 )
 
 const usageAbstract = `dutctl - The client application of the DUT Control system.
@@ -128,7 +125,6 @@ type application struct {
 
 func (app *application) setupRPCClient() {
 	client := dutctlv1connect.NewDeviceServiceClient(
-		// Instead of http.DefaultClient, use the HTTP/2 protocol without TLS
 		newInsecureClient(),
 		fmt.Sprintf("http://%s", app.serverAddr),
 		connect.WithGRPC(),
@@ -138,19 +134,18 @@ func (app *application) setupRPCClient() {
 }
 
 func newInsecureClient() *http.Client {
-	return &http.Client{
-		Transport: &http2.Transport{
-			AllowHTTP: true,
-			DialTLS: func(network, addr string, _ *tls.Config) (net.Conn, error) {
-				// If you're also using this client for non-h2c traffic, you may want
-				// to delegate to tls.Dial if the network isn't TCP or the addr isn't
-				// in an allowlist.
+	// Use the HTTP/2 protocol without TLS (h2c)
+	transport := &http.Transport{}
+	transport.Protocols = new(http.Protocols)
+	transport.Protocols.SetUnencryptedHTTP2(true)
 
-				//nolint:noctx
-				return net.Dial(network, addr)
-			},
-			// Don't forget timeouts!
-		},
+	return &http.Client{
+		Transport: transport,
+		// TODO: Don't forget timeouts! http.Client.Timeout must not be used here:
+		// it bounds the entire exchange including the response body, which would
+		// abort long-lived streaming RPCs. Instead use per-RPC context deadlines
+		// on unary calls and/or transport timeouts (DialContext,
+		// TLSHandshakeTimeout, ResponseHeaderTimeout, IdleConnTimeout).
 	}
 }
 
