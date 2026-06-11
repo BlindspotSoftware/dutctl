@@ -9,25 +9,22 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"log"
-	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"connectrpc.com/connect"
 	"github.com/BlindspotSoftware/dutctl/internal/buildinfo"
 	"github.com/BlindspotSoftware/dutctl/internal/dutagent"
 	"github.com/BlindspotSoftware/dutctl/pkg/dut"
 	"github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1/dutctlv1connect"
-	"golang.org/x/net/http2"
-	"golang.org/x/net/http2/h2c"
 	"gopkg.in/yaml.v3"
 
 	pb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1"
@@ -155,6 +152,9 @@ func printInitErr(err error) {
 	log.Print(err)
 }
 
+// readHeaderTimeout bounds how long the server waits to read request headers.
+const readHeaderTimeout = 10 * time.Second
+
 // startRPCService starts the RPC service, that ideally listens for incoming
 // connections forever. It always returns an non-nil error.
 func (agt *agent) startRPCService() error {
@@ -167,12 +167,17 @@ func (agt *agent) startRPCService() error {
 	path, handler := dutctlv1connect.NewDeviceServiceHandler(service)
 	mux.Handle(path, handler)
 
-	//nolint:gosec
-	return http.ListenAndServe(
-		agt.address,
-		// Use h2c so we can serve HTTP/2 without TLS.
-		h2c.NewHandler(mux, &http2.Server{}),
-	)
+	// Serve HTTP/2 without TLS (h2c)
+	srv := &http.Server{
+		Addr:              agt.address,
+		Handler:           mux,
+		ReadHeaderTimeout: readHeaderTimeout,
+	}
+	srv.Protocols = new(http.Protocols)
+	srv.Protocols.SetHTTP1(true)
+	srv.Protocols.SetUnencryptedHTTP2(true)
+
+	return srv.ListenAndServe()
 }
 
 func (agt *agent) registerWithServer() error {
@@ -211,19 +216,17 @@ func spawnClient(agendURL string) dutctlv1connect.RelayServiceClient {
 
 // TODO: refactor into pkg and reuse in dutctl and dutserver.
 func newInsecureClient() *http.Client {
-	return &http.Client{
-		Transport: &http2.Transport{
-			AllowHTTP: true,
-			DialTLS: func(network, addr string, _ *tls.Config) (net.Conn, error) {
-				// If you're also using this client for non-h2c traffic, you may want
-				// to delegate to tls.Dial if the network isn't TCP or the addr isn't
-				// in an allowlist.
+	transport := &http.Transport{}
+	transport.Protocols = new(http.Protocols)
+	transport.Protocols.SetUnencryptedHTTP2(true)
 
-				//nolint:noctx
-				return net.Dial(network, addr)
-			},
-			// TODO: Don't forget timeouts!
-		},
+	return &http.Client{
+		Transport: transport,
+		// TODO: Don't forget timeouts! http.Client.Timeout must not be used here:
+		// it bounds the entire exchange including the response body, which would
+		// abort long-lived streaming RPCs. Instead use per-RPC context deadlines
+		// on unary calls and/or transport timeouts (DialContext,
+		// TLSHandshakeTimeout, ResponseHeaderTimeout, IdleConnTimeout).
 	}
 }
 
