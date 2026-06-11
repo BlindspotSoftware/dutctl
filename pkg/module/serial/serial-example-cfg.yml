@@ -1,12 +1,15 @@
-version: 1.0.0-alpha.1 # x-release-please-version
+version: 2.0.0-alpha.1
 devices:
   server:
-    desc: "A server that needs to be observed during boot"
+    desc: A server that needs to be observed during boot
     cmds:
       serial:
-        desc: |
-          Basic demo of the Serial module: After the DUT is powered on, use Serial
-          as the passthrough module to wait for magic strings in the DUT's boot log.
+        desc: >
+          Basic demo of the Serial module: After the DUT is powered on, use
+          Serial
+
+          as the passthrough module to wait for magic strings in the DUT's boot
+          log.
         uses:
           - module: serial
             passthrough: true
