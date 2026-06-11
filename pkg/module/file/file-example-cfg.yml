@@ -1,64 +1,38 @@
-# Example configuration for the file module
-# This file demonstrates various use cases for file transfers between client and dutagent
-# $WD is a placeholder of the working directory on both the client and dutagent
-
-version: 1.0.0-alpha.1 # x-release-please-version
+version: 2.0.0-alpha.1
 devices:
   example-device:
     cmds:
-      # Upload any file - preserves directory structure
       upload:
-        desc: "Upload file to device"
+        desc: Upload file to device
         uses:
           - module: file
             passthrough: true
             with:
-              operation: "upload"
-        # Usage:
-        #   dutctl example-device upload ./build/firmware.bin
-        #   → uploads to $WD/firmware.bin (preserves structure)
-        #
-        #   dutctl example-device upload ./firmware.bin:custom/firmware.bin
-        #   → uploads to $WD/custom/firmware.bin (custom destination via colon syntax)
-
-      # Upload with destination configured - arg becomes source
+              operation: upload
       upload-script:
-        desc: "Upload and install a script"
+        desc: Upload and install a script
         uses:
           - module: file
             passthrough: true
             with:
-              operation: "upload"
-              destination: "/opt/scripts/install.sh"
-              permission: "0755" # Make it executable
-        # Usage:
-        #   dutctl example-device upload-script ./scripts/init.sh
-        #   → uploads to: /opt/scripts/install.sh on device
-
-      # Download with source configured - arg becomes destination
+              operation: upload
+              destination: /opt/scripts/install.sh
+              permission: '0755'
       fetch-logs:
-        desc: "Download logs from device"
+        desc: Download logs from device
         uses:
           - module: file
             passthrough: true
             with:
-              operation: "download"
-              source: "/var/log.txt"
-        # Usage:
-        #   dutctl example-device fetch-logs ./local-log.txt
-        #   → downloads /var/log.txt to ./local-log.txt on client
-
-      # Upload with both paths configured - no arg allowed
+              operation: download
+              source: /var/log.txt
       upload-config:
-        desc: "Upload configuration file with fixed paths"
+        desc: Upload configuration file with fixed paths
         uses:
           - module: file
             passthrough: true
             with:
-              operation: "upload"
-              source: "./configs/device.conf"
-              destination: "/etc/device/device.conf"
-              permission: "0644"
-        # Usage:
-        #   dutctl example-device upload-config
-        #   → uploads ./configs/device.conf to /etc/device/device.conf
+              operation: upload
+              source: ./configs/device.conf
+              destination: /etc/device/device.conf
+              permission: '0644'
