@@ -1,4 +1,4 @@
-// Copyright 2025 Blindspot Software
+// Copyright 2026 Blindspot Software
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -340,13 +340,10 @@ func TestGudeParseOutletStatus(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			g := &gude{
-				pdu: &PDU{
-					Outlet: tt.outlet,
-				},
-			}
+			g := gude{}
+			p := &PDU{Outlet: tt.outlet}
 
-			result, err := g.parseOutletStatus([]byte(tt.jsonBody))
+			result, err := g.parseOutletStatus(p, []byte(tt.jsonBody))
 
 			if tt.err {
 				if err == nil {
@@ -397,13 +394,10 @@ func TestGudeGetOutletAPIParameter(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			g := &gude{
-				pdu: &PDU{
-					Outlet: tt.outlet,
-				},
-			}
+			g := gude{}
+			p := &PDU{Outlet: tt.outlet}
 
-			result := g.getOutletAPIParameter()
+			result := g.getOutletAPIParameter(p)
 			if result != tt.expected {
 				t.Errorf("getOutletAPIParameter() = %v, expected %v", result, tt.expected)
 			}

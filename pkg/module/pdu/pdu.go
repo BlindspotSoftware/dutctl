@@ -1,4 +1,4 @@
-// Copyright 2025-2026 Blindspot Software
+// Copyright 2025 Blindspot Software
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -55,7 +55,7 @@ type pdu interface {
 }
 
 // PDU is a module that provides basic power management functions for a PDU (Power Distribution Unit).
-// NOTE: This implementation currently supports only Intellinet ATM PDUs.
+// NOTE: This implementation currently supports Intellinet style (e.g. Intellinet 163682, LogiLink PDU8P01) and Gude PDUs.
 type PDU struct {
 	Host     string // Host is the address of the PDU
 	User     string // User is used for authentication, if supported by the PDU
@@ -97,8 +97,6 @@ const (
 	off            = "off"
 	toggle         = "toggle"
 	status         = "status"
-	intellinetPDU  = "intellinet"
-	gudePDU        = "gude"
 )
 
 func (p *PDU) Init() error {
