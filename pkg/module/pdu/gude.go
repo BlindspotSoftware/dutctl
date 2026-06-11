@@ -1,8 +1,7 @@
-// Copyright 2025 Blindspot Software
+// Copyright 2026 Blindspot Software
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package pdu provides a dutagent module that allows power control of a PDU via HTTP requests.
 package pdu
 
 import (
@@ -25,39 +24,46 @@ const (
 	gudeResetCommand
 )
 
-var gudecommandString = map[gudeCommands]string{
-	gudeSwitchCommand:    "1",
-	gudeBatchModeCommand: "2",
-	gudeResetCommand:     "12",
-}
-
 func (g gudeCommands) String() string {
-	return gudecommandString[g]
+	switch g {
+	case gudeSwitchCommand:
+		return "1"
+	case gudeBatchModeCommand:
+		return "2"
+	case gudeResetCommand:
+		return "12"
+	default:
+		return ""
+	}
 }
 
 type gudeState int
 
 const (
-	gudeStateOff gudeState = 0
-	gudeStateOn  gudeState = 1
+	gudeStateOff gudeState = iota
+	gudeStateOn
 )
 
-var gudeStateString = map[gudeState]string{
-	gudeStateOff: off,
-	gudeStateOn:  on,
-}
-
 func (g gudeState) String() string {
-	return gudeStateString[g]
-}
-
-var gudeStateParameter = map[gudeState]string{
-	gudeStateOff: "0",
-	gudeStateOn:  "1",
+	switch g {
+	case gudeStateOff:
+		return off
+	case gudeStateOn:
+		return on
+	default:
+		return ""
+	}
 }
 
 func (g gudeState) getAPIParameter() string {
-	return gudeStateParameter[g]
+	switch g {
+	case gudeStateOff:
+		return "0"
+	case gudeStateOn:
+		return "1"
+	default:
+		return ""
+	}
 }
 
 func newGudeStateFromInt(state int) (gudeState, error) {
@@ -82,16 +88,16 @@ func newGudeStateFromString(state string) (gudeState, error) {
 	}
 }
 
-// gudeStateResponse represents the JSON response from Gude PDU status endpoint
+// gudeStateResponse represents the JSON response from Gude PDU status endpoint.
 type gudeStateResponse struct {
 	Outputs []gudeOutput `json:"outputs"`
 }
 
-// gudeOutput represents a single power output in the Gude PDU
+// gudeOutput represents a single power output in the Gude PDU.
 type gudeOutput struct {
 	Name  string `json:"name"`
-	State int    `json:"state"` // 0 = off, 1 = on
-	SwCnt int    `json:"sw_cnt"`
+	State int    `json:"state"`  // 0 = off, 1 = on.
+	SwCnt int    `json:"sw_cnt"` //nolint:revive // JSON field name is defined by device API.
 	Type  int    `json:"type"`
 	Batch []int  `json:"batch"`
 	Wdog  []any  `json:"wdog"`
