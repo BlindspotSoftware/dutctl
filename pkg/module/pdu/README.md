@@ -9,7 +9,7 @@ This module is intended to be used as part of `dutagent`, allowing automated pow
 ## Usage
 
 ```
-power [on|off|toggle|status]
+pdu [on|off|toggle|status]
 ```
 
 ### Commands
@@ -27,10 +27,10 @@ See [pdu-example-cfg.yml](./pdu-example-cfg.yml) for examples.
 
 ## Configuration Options
 
-| Option     | Type   | Description                                    |
-| ---------- | ------ | ---------------------------------------------- |
-| `pdutype`  | string | Type     of PDU either `gude` or `logilink`    |
-| `host`     | string | Base URL of the PDU (e.g. `10.0.0.5`)          |
-| `user`     | string | (Optional) Username for HTTP Basic Auth        |
-| `password` | string | (Optional) Password for HTTP Basic Auth        |
-| `outlet`   | int    | Outlet number to control (0-15, defaults to 0) |
+| Option     | Type   | Description                                                         |
+| ---------- | ------ | -----------------------------------------------------------         |
+| `apistyle` | string | apiStyle of PDU either `gude` or `intellinet` default: 'intellinet' |
+| `host`     | string | Base URL of the PDU (e.g. `10.0.0.5`)                               |
+| `user`     | string | (Optional) Username for HTTP Basic Auth                             |
+| `password` | string | (Optional) Password for HTTP Basic Auth                             |
+| `outlet`   | int    | Outlet number to control (0-15, defaults to 0)                      |

@@ -27,10 +27,31 @@ func init() {
 	})
 }
 
-type switchable interface {
-	setPower(ctx context.Context, s module.Session, state string) error
-	getState(ctx context.Context, s module.Session) error
-	init() error
+type apiStyle string
+
+const (
+	intellinetAPI apiStyle = "intellinet"
+	gudeAPI       apiStyle = "gude"
+)
+
+func newPDUBackend(style apiStyle) pdu {
+	switch style {
+	case gudeAPI:
+		return gude{}
+	case intellinetAPI:
+		return intellinet{}
+	default: // Legacy configs dont contain PDUType and are meant for Intillinet (style) PDUs
+		return intellinet{}
+	}
+}
+
+// This interface allows flexibility across different PDU API styles.
+// Any PDU that exposes an HTTP interface for power switching and outlet
+// status can be adapted to work with this module by implementing it.
+type pdu interface {
+	setPower(ctx context.Context, s module.Session, p *PDU, state string) error
+	fetchState(ctx context.Context, s module.Session, p *PDU) error
+	init(p *PDU) error
 }
 
 // PDU is a module that provides basic power management functions for a PDU (Power Distribution Unit).
@@ -40,7 +61,7 @@ type PDU struct {
 	User     string // User is used for authentication, if supported by the PDU
 	Password string // Password is used for authentication, if supported by the PDU
 	Outlet   int    // Outlet is the outlet to control, if the PDU supports multiple outlets. Defaults to 0 (first outlet).
-	PDUType  string // Type, Currently `intellinet` is the only supportet type
+	apiStyle        // Flavor of pdu used, currently `intellinet` and 'gude' are supported api styles.
 
 	client     *http.Client // internal HTTP client for request to the PDU
 	controlURL *url.URL     // controlURL is the URL for controlling the PDU outlet
@@ -81,22 +102,14 @@ const (
 )
 
 func (p *PDU) Init() error {
-	log.Printf("pdu module: Init called - Host: %s, User: %s, Outlet: %d, Type: %s", p.Host, p.User, p.Outlet, p.PDUType)
+	log.Printf("pdu module: Init called - Host: %s, User: %s, Outlet: %d, Type: %s", p.Host, p.User, p.Outlet, p.apiStyle)
 
 	if p.Outlet < 0 {
 		return fmt.Errorf("invalid outlet number %d: outlet must be 0 or greater", p.Outlet)
 	}
 
 	p.client = &http.Client{Timeout: defaultTimeout}
-
-	switch p.PDUType {
-	case gudePDU:
-		p.pduInterface = &gude{pdu: p}
-	case intellinetPDU:
-		p.pduInterface = &intellinet{pdu: p}
-	default: // Legacy configs dont contain PDUType and are meant for Intillinet (style) PDUs
-		p.pduInterface = &intellinet{pdu: p}
-	}
+	p.pdu = newPDUBackend(p.apiStyle)
 
 	err := p.pduInterface.init()
 	if err != nil {
