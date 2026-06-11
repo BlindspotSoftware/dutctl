@@ -6,13 +6,11 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
 	"log"
 	"maps"
-	"net"
 	"net/http"
 	"slices"
 	"sync"
@@ -20,7 +18,6 @@ import (
 	"connectrpc.com/connect"
 	"github.com/BlindspotSoftware/dutctl/pkg/lock"
 	"github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1/dutctlv1connect"
-	"golang.org/x/net/http2"
 
 	pb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1"
 )
@@ -390,19 +387,18 @@ func spawnClient(agendURL string) dutctlv1connect.DeviceServiceClient {
 
 // TODO: refactor into pkg and reuse in dutctl and dutserver.
 func newInsecureClient() *http.Client {
-	return &http.Client{
-		Transport: &http2.Transport{
-			AllowHTTP: true,
-			DialTLS: func(network, addr string, _ *tls.Config) (net.Conn, error) {
-				// If you're also using this client for non-h2c traffic, you may want
-				// to delegate to tls.Dial if the network isn't TCP or the addr isn't
-				// in an allowlist.
+	// Use the HTTP/2 protocol without TLS (h2c).
+	transport := &http.Transport{}
+	transport.Protocols = new(http.Protocols)
+	transport.Protocols.SetUnencryptedHTTP2(true)
 
-				//nolint:noctx
-				return net.Dial(network, addr)
-			},
-			// TODO: Don't forget timeouts!
-		},
+	return &http.Client{
+		Transport: transport,
+		// TODO: Don't forget timeouts! http.Client.Timeout must not be used here:
+		// it bounds the entire exchange including the response body, which would
+		// abort long-lived streaming RPCs. Instead use per-RPC context deadlines
+		// on unary calls and/or transport timeouts (DialContext,
+		// TLSHandshakeTimeout, ResponseHeaderTimeout, IdleConnTimeout).
 	}
 }
 
