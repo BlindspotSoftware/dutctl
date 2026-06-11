@@ -67,7 +67,7 @@ type PDU struct {
 	controlURL *url.URL     // controlURL is the URL for controlling the PDU outlet
 	statusURL  *url.URL     // statusURL is the URL for getting the PDU status
 
-	pduInterface switchable
+	pdu
 }
 
 func (p *PDU) Help() string {
@@ -111,7 +111,7 @@ func (p *PDU) Init() error {
 	p.client = &http.Client{Timeout: defaultTimeout}
 	p.pdu = newPDUBackend(p.apiStyle)
 
-	err := p.pduInterface.init()
+	err := p.pdu.init(p)
 	if err != nil {
 		return err
 	}
@@ -146,9 +146,9 @@ func (p *PDU) Run(ctx context.Context, s module.Session, args ...string) error {
 
 	switch cmd {
 	case on, off, toggle:
-		return p.setPower(ctx, s, cmd)
+		return p.pdu.setPower(ctx, s, p, cmd)
 	case status:
-		return p.status(ctx, s)
+		return p.pdu.fetchState(ctx, s, p)
 	default:
 		s.Println("Unknown command: " + cmd)
 		s.Println("Available commands: on, off, toggle, status")
@@ -158,7 +158,7 @@ func (p *PDU) Run(ctx context.Context, s module.Session, args ...string) error {
 }
 
 // doRequest creates and executes an HTTP request with authentication and validates the response.
-func doRequest(p *PDU, ctx context.Context, url string) (*http.Response, error) {
+func (p *PDU) doRequest(ctx context.Context, url string) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
@@ -183,21 +183,14 @@ func doRequest(p *PDU, ctx context.Context, url string) (*http.Response, error) 
 	return resp, nil
 }
 
-func (p *PDU) setPower(ctx context.Context, s module.Session, state string) error {
-	err := p.pduInterface.setPower(ctx, s, state)
-	if err != nil {
-		return err
-	}
-
-	return nil
+func (p *PDU) outletLabel() string {
+	return fmt.Sprintf("outlet%d", p.Outlet)
 }
 
-func (p *PDU) status(ctx context.Context, s module.Session) error {
-	err := p.pduInterface.getState(ctx, s)
+func (p *PDU) printPowerSet(s module.Session, state string) {
+	s.Printf("PDU %s power set to '%s' successfully\n", p.outletLabel(), state)
+}
 
-	if err != nil {
-		return err
-	}
-
-	return nil
+func (p *PDU) printState(s module.Session, state string) {
+	s.Printf("PDU %s state: %s\n", p.outletLabel(), state)
 }

@@ -15,13 +15,9 @@ import (
 	"github.com/BlindspotSoftware/dutctl/pkg/module"
 )
 
-type intellinet struct {
-	pdu *PDU
-}
+type intellinet struct{}
 
-func (i *intellinet) init() error {
-	p := i.pdu
-
+func (i intellinet) init(p *PDU) error {
 	controlURL, err := url.Parse(strings.TrimRight(p.Host, "/") + "/control_outlet.htm")
 	if err != nil {
 		return err
@@ -39,9 +35,7 @@ func (i *intellinet) init() error {
 	return nil
 }
 
-func (i *intellinet) setPower(ctx context.Context, s module.Session, state string) error {
-	p := i.pdu
-
+func (i intellinet) setPower(ctx context.Context, s module.Session, p *PDU, state string) error {
 	opState, err := parseOp(state)
 	if err != nil {
 		return err
@@ -52,21 +46,19 @@ func (i *intellinet) setPower(ctx context.Context, s module.Session, state strin
 	q.Set("op", opState.String())
 	p.controlURL.RawQuery = q.Encode()
 
-	resp, err := doRequest(p, ctx, p.controlURL.String())
+	resp, err := p.doRequest(ctx, p.controlURL.String())
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
 
-	s.Printf("PDU outlet%d power set to '%s' successfully\n", p.Outlet, state)
+	p.printPowerSet(s, state)
 
 	return nil
 }
 
-func (i *intellinet) getState(ctx context.Context, s module.Session) error {
-	p := i.pdu
-
-	resp, err := doRequest(p, ctx, p.statusURL.String())
+func (i intellinet) fetchState(ctx context.Context, s module.Session, p *PDU) error {
+	resp, err := p.doRequest(ctx, p.statusURL.String())
 	if err != nil {
 		return err
 	}
@@ -77,20 +69,18 @@ func (i *intellinet) getState(ctx context.Context, s module.Session) error {
 		return err
 	}
 
-	outletValue, err := i.parseOutletStatus(body)
+	outletValue, err := i.parseOutletStatus(p, body)
 	if err != nil {
 		return err
 	}
 
-	s.Printf("PDU outlet%d state: %s\n", p.Outlet, outletValue)
+	p.printState(s, outletValue)
 
 	return nil
 }
 
 // parseOutletStatus extracts the outlet status from XML response body.
-func (i *intellinet) parseOutletStatus(body []byte) (string, error) {
-	p := i.pdu
-
+func (i intellinet) parseOutletStatus(p *PDU, body []byte) (string, error) {
 	bodyStr := string(body)
 
 	outletTag := fmt.Sprintf("<outletStat%d>", p.Outlet)

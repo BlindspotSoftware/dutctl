@@ -97,18 +97,14 @@ type gudeOutput struct {
 	Wdog  []any  `json:"wdog"`
 }
 
-type gude struct {
-	pdu *PDU
-}
+type gude struct{}
 
-func (g *gude) getOutletAPIParameter() string {
-	outlet := g.pdu.Outlet + 1
+func (g gude) getOutletAPIParameter(p *PDU) string {
+	outlet := p.Outlet + 1
 	return strconv.Itoa(outlet)
 }
 
-func (g *gude) init() error {
-	p := g.pdu
-
+func (g gude) init(p *PDU) error {
 	controlURL, err := url.Parse(strings.TrimRight(p.Host, "/") + "/ov.html")
 	if err != nil {
 		return err
@@ -126,43 +122,37 @@ func (g *gude) init() error {
 	return nil
 }
 
-func (g *gude) setPower(ctx context.Context, s module.Session, state string) error {
-	p := g.pdu
-
+func (g gude) setPower(ctx context.Context, s module.Session, p *PDU, state string) error {
 	var err error
 
 	switch state {
 	case on, off:
-		err = g.switchPower(ctx, s, state)
+		err = g.switchPower(ctx, p, state)
 	case toggle:
-		err = g.togglePower(ctx, s, state)
+		err = g.togglePower(ctx, p)
 	}
 
 	if err != nil {
 		return err
 	}
 
-	s.Printf("PDU outlet%d power set to '%s' successfully\n", p.Outlet, state)
+	p.printPowerSet(s, state)
 
 	return nil
 }
 
-func (g *gude) getState(ctx context.Context, s module.Session) error {
-	p := g.pdu
-
-	state, err := g.fetchOutletState(ctx)
+func (g gude) fetchState(ctx context.Context, s module.Session, p *PDU) error {
+	state, err := g.fetchOutletState(ctx, p)
 	if err != nil {
 		return err
 	}
 
-	s.Printf("PDU outlet %d state: %s\n", p.Outlet, state.String())
+	p.printState(s, state.String())
 
 	return nil
 }
 
-func (g *gude) switchPower(ctx context.Context, s module.Session, newState string) error {
-	p := g.pdu
-
+func (g gude) switchPower(ctx context.Context, p *PDU, newState string) error {
 	state, err := newGudeStateFromString(newState)
 	if err != nil {
 		return err
@@ -170,12 +160,12 @@ func (g *gude) switchPower(ctx context.Context, s module.Session, newState strin
 
 	q := p.controlURL.Query()
 	q.Set("cmd", gudeSwitchCommand.String())
-	q.Set("p", g.getOutletAPIParameter())
+	q.Set("p", g.getOutletAPIParameter(p))
 	q.Set("s", state.getAPIParameter())
 
 	p.controlURL.RawQuery = q.Encode()
 
-	resp, err := doRequest(p, ctx, p.controlURL.String())
+	resp, err := p.doRequest(ctx, p.controlURL.String())
 	if err != nil {
 		return err
 	}
@@ -184,10 +174,8 @@ func (g *gude) switchPower(ctx context.Context, s module.Session, newState strin
 	return nil
 }
 
-func (g *gude) togglePower(ctx context.Context, s module.Session, state string) error {
-	p := g.pdu
-
-	currentState, err := g.fetchOutletState(ctx)
+func (g gude) togglePower(ctx context.Context, p *PDU) error {
+	currentState, err := g.fetchOutletState(ctx, p)
 	if err != nil {
 		return err
 	}
@@ -197,12 +185,12 @@ func (g *gude) togglePower(ctx context.Context, s module.Session, state string) 
 
 	q := p.controlURL.Query()
 	q.Set("cmd", gudeSwitchCommand.String())
-	q.Set("p", g.getOutletAPIParameter())
+	q.Set("p", g.getOutletAPIParameter(p))
 	q.Set("s", nextState.getAPIParameter())
 
 	p.controlURL.RawQuery = q.Encode()
 
-	resp, err := doRequest(p, ctx, p.controlURL.String())
+	resp, err := p.doRequest(ctx, p.controlURL.String())
 	if err != nil {
 		return err
 	}
@@ -211,8 +199,8 @@ func (g *gude) togglePower(ctx context.Context, s module.Session, state string) 
 	return nil
 }
 
-func (g *gude) fetchOutletState(ctx context.Context) (gudeState, error) {
-	resp, err := doRequest(g.pdu, ctx, g.pdu.statusURL.String())
+func (g gude) fetchOutletState(ctx context.Context, p *PDU) (gudeState, error) {
+	resp, err := p.doRequest(ctx, p.statusURL.String())
 	if err != nil {
 		return -1, err
 	}
@@ -223,7 +211,7 @@ func (g *gude) fetchOutletState(ctx context.Context) (gudeState, error) {
 		return -1, err
 	}
 
-	value, err := g.parseOutletStatus(body)
+	value, err := g.parseOutletStatus(p, body)
 	if err != nil {
 		return -1, err
 	}
@@ -237,9 +225,7 @@ func (g *gude) fetchOutletState(ctx context.Context) (gudeState, error) {
 }
 
 // extract the outlet status from JSON response body.
-func (g *gude) parseOutletStatus(body []byte) (int, error) {
-	p := g.pdu
-
+func (g gude) parseOutletStatus(p *PDU, body []byte) (int, error) {
 	var status gudeStateResponse
 	if err := json.Unmarshal(body, &status); err != nil {
 		return -1, fmt.Errorf("failed to parse JSON response: %w", err)
