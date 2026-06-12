@@ -27,17 +27,47 @@ func init() {
 	})
 }
 
+type apiStyle string
+
+const (
+	intellinetAPI apiStyle = "intellinet"
+	gudeAPI       apiStyle = "gude"
+)
+
+func newPDUBackend(style apiStyle) pdu {
+	switch style {
+	case gudeAPI:
+		return gude{}
+	case intellinetAPI:
+		return intellinet{}
+	default: // Legacy configs dont contain PDUType and are meant for Intillinet (style) PDUs
+		return intellinet{}
+	}
+}
+
+// This interface allows flexibility across different PDU API styles.
+// Any PDU that exposes an HTTP interface for power switching and outlet
+// status can be adapted to work with this module by implementing it.
+type pdu interface {
+	setPower(ctx context.Context, s module.Session, p *PDU, state string) error
+	fetchState(ctx context.Context, s module.Session, p *PDU) error
+	init(p *PDU) error
+}
+
 // PDU is a module that provides basic power management functions for a PDU (Power Distribution Unit).
-// NOTE: This implementation currently supports only Intellinet ATM PDUs.
+// NOTE: This implementation currently supports Intellinet style (e.g. Intellinet 163682, LogiLink PDU8P01) and Gude PDUs.
 type PDU struct {
 	Host     string // Host is the address of the PDU
 	User     string // User is used for authentication, if supported by the PDU
 	Password string // Password is used for authentication, if supported by the PDU
 	Outlet   int    // Outlet is the outlet to control, if the PDU supports multiple outlets. Defaults to 0 (first outlet).
+	apiStyle        // Flavor of pdu used, currently `intellinet` and 'gude' are supported api styles.
 
 	client     *http.Client // internal HTTP client for request to the PDU
 	controlURL *url.URL     // controlURL is the URL for controlling the PDU outlet
 	statusURL  *url.URL     // statusURL is the URL for getting the PDU status
+
+	pdu
 }
 
 func (p *PDU) Help() string {
@@ -70,27 +100,19 @@ const (
 )
 
 func (p *PDU) Init() error {
-	log.Printf("pdu module: Init called - Host: %s, User: %s, Outlet: %d", p.Host, p.User, p.Outlet)
+	log.Printf("pdu module: Init called - Host: %s, User: %s, Outlet: %d, Type: %s", p.Host, p.User, p.Outlet, p.apiStyle)
 
 	if p.Outlet < 0 {
 		return fmt.Errorf("invalid outlet number %d: outlet must be 0 or greater", p.Outlet)
 	}
 
 	p.client = &http.Client{Timeout: defaultTimeout}
+	p.pdu = newPDUBackend(p.apiStyle)
 
-	controlURL, err := url.Parse(strings.TrimRight(p.Host, "/") + "/control_outlet.htm")
+	err := p.pdu.init(p)
 	if err != nil {
 		return err
 	}
-
-	p.controlURL = controlURL
-
-	statusURL, err := url.Parse(strings.TrimRight(p.Host, "/") + "/status.xml")
-	if err != nil {
-		return err
-	}
-
-	p.statusURL = statusURL
 
 	log.Printf("pdu module: Init completed - controlURL: %s, statusURL: %s", p.controlURL.String(), p.statusURL.String())
 
@@ -122,9 +144,9 @@ func (p *PDU) Run(ctx context.Context, s module.Session, args ...string) error {
 
 	switch cmd {
 	case on, off, toggle:
-		return p.setPower(ctx, s, cmd)
+		return p.pdu.setPower(ctx, s, p, cmd)
 	case status:
-		return p.status(ctx, s)
+		return p.pdu.fetchState(ctx, s, p)
 	default:
 		s.Println("Unknown command: " + cmd)
 		s.Println("Available commands: on, off, toggle, status")
@@ -159,99 +181,14 @@ func (p *PDU) doRequest(ctx context.Context, url string) (*http.Response, error)
 	return resp, nil
 }
 
-func (p *PDU) setPower(ctx context.Context, s module.Session, state string) error {
-	opState, err := parseOp(state)
-	if err != nil {
-		return err
-	}
-
-	q := p.controlURL.Query()
-	q.Set(fmt.Sprintf("outlet%d", p.Outlet), "1")
-	q.Set("op", opState.String())
-	p.controlURL.RawQuery = q.Encode()
-
-	resp, err := p.doRequest(ctx, p.controlURL.String())
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	s.Printf("PDU outlet%d power set to '%s' successfully\n", p.Outlet, state)
-
-	return nil
+func (p *PDU) outletLabel() string {
+	return fmt.Sprintf("outlet%d", p.Outlet)
 }
 
-func (p *PDU) status(ctx context.Context, s module.Session) error {
-	resp, err := p.doRequest(ctx, p.statusURL.String())
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return err
-	}
-
-	outletValue, err := p.parseOutletStatus(body)
-	if err != nil {
-		return err
-	}
-
-	s.Printf("PDU outlet%d state: %s\n", p.Outlet, outletValue)
-
-	return nil
+func (p *PDU) printPowerSet(s module.Session, state string) {
+	s.Printf("PDU %s power set to '%s' successfully\n", p.outletLabel(), state)
 }
 
-// parseOutletStatus extracts the outlet status from XML response body.
-func (p *PDU) parseOutletStatus(body []byte) (string, error) {
-	bodyStr := string(body)
-
-	outletTag := fmt.Sprintf("<outletStat%d>", p.Outlet)
-	outletEndTag := fmt.Sprintf("</outletStat%d>", p.Outlet)
-
-	startIdx := strings.Index(bodyStr, outletTag)
-	if startIdx == -1 {
-		return "", fmt.Errorf("outlet %d not found in PDU status", p.Outlet)
-	}
-
-	startIdx += len(outletTag)
-
-	endIdx := strings.Index(bodyStr[startIdx:], outletEndTag)
-	if endIdx == -1 {
-		return "", fmt.Errorf("malformed XML for outlet %d", p.Outlet)
-	}
-
-	outletValue := strings.TrimSpace(bodyStr[startIdx : startIdx+endIdx])
-
-	if outletValue != on && outletValue != off {
-		return "", fmt.Errorf("unexpected outlet state '%s' for outlet %d", outletValue, p.Outlet)
-	}
-
-	return outletValue, nil
-}
-
-type op string
-
-const (
-	opOn     op = "0"
-	opOff    op = "1"
-	opToggle op = "2"
-)
-
-func (o op) String() string {
-	return string(o)
-}
-
-func parseOp(state string) (op, error) {
-	switch state {
-	case on:
-		return opOn, nil
-	case off:
-		return opOff, nil
-	case toggle:
-		return opToggle, nil
-	default:
-		return "", fmt.Errorf("invalid PDU operation: %s", state)
-	}
+func (p *PDU) printState(s module.Session, state string) {
+	s.Printf("PDU %s state: %s\n", p.outletLabel(), state)
 }
