@@ -5,7 +5,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -14,6 +13,8 @@ import (
 	"log"
 	"os"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"connectrpc.com/connect"
@@ -22,6 +23,84 @@ import (
 
 	pb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1"
 )
+
+// rawConsole lazily switches the terminal to raw input mode, and prints the
+// interactive session banner, the first time the agent actually streams console
+// output. One-shot commands (power, flash) only ever send Print messages, so
+// they never arm it: the terminal is left untouched and no misleading banner is
+// shown. A serial session sends its "Connected" banner as console output within
+// milliseconds, which arms it just in time for keystroke forwarding.
+//
+// The zero value is not usable; build one with newRawConsole.
+type rawConsole struct {
+	fd      int         // stdin file descriptor (valid only when canRaw is true)
+	canRaw  bool        // stdin is an *os.File, so raw mode may be attempted
+	once    sync.Once   // guards the one-time arm
+	active  atomic.Bool // true once raw mode is on; read by the send goroutine
+	mu      sync.Mutex  // guards restore
+	restore func()      // set by arm, called by disarm; nil until/unless armed
+}
+
+// newRawConsole returns a console that may switch the terminal to raw mode only
+// when both: interactive is true (the command was invoked without arguments, so
+// it is a hand-driven session rather than a scripted one) and stdin is a real
+// *os.File. A pipe, /dev/null, or any argument-bearing (scripted) invocation
+// yields canRaw=false, so it never changes the terminal nor prints the banner.
+func newRawConsole(stdin io.Reader, interactive bool) *rawConsole {
+	console := &rawConsole{}
+
+	if f, ok := stdin.(*os.File); ok && interactive {
+		console.fd = int(f.Fd())
+		console.canRaw = true
+	}
+
+	return console
+}
+
+// arm switches the terminal to raw mode and prints the session banner on its
+// first call; later calls are no-ops. setRawInput returns nil for a non-terminal
+// fd, so arming is silently skipped when stdin is not a TTY. Safe to call from
+// any goroutine.
+func (rc *rawConsole) arm() {
+	rc.once.Do(func() {
+		if !rc.canRaw {
+			return
+		}
+
+		restore := setRawInput(rc.fd)
+		if restore == nil {
+			return // not a terminal — keep input line-buffered
+		}
+
+		rc.mu.Lock()
+		rc.restore = restore
+		rc.mu.Unlock()
+
+		rc.active.Store(true)
+
+		// The escape sequence is the only way to quit while raw mode is on.
+		fmt.Fprint(os.Stderr, "\r\n[dutctl] interactive session — press Ctrl-A then x to quit\r\n")
+	})
+}
+
+// isActive reports whether raw mode is currently engaged. The send goroutine
+// uses it to decide whether to apply the Ctrl-A escape filter to stdin.
+func (rc *rawConsole) isActive() bool {
+	return rc.active.Load()
+}
+
+// disarm restores the terminal if arm switched it to raw mode. It is safe to
+// defer unconditionally and safe to call when arm never fired.
+func (rc *rawConsole) disarm() {
+	rc.mu.Lock()
+	restore := rc.restore
+	rc.restore = nil
+	rc.mu.Unlock()
+
+	if restore != nil {
+		restore()
+	}
+}
 
 func (app *application) listRPC() error {
 	ctx := context.Background()
@@ -188,9 +267,71 @@ func (app *application) detailsRPC(device, command, keyword string) error {
 	return nil
 }
 
-//nolint:funlen,cyclop,gocognit
+// Interactive escape sequence. Ctrl-A is the prefix; the following key decides:
+//   - 'x'/'X'/Ctrl-X: quit dutctl.
+//   - Ctrl-A: send a single literal Ctrl-A to the DUT.
+//   - anything else: forward both the prefix and the key unchanged.
+//
+// Every other byte (Ctrl-C, Ctrl-D, Ctrl-Z, ...) is forwarded to the DUT.
+const (
+	escapePrefix   = 0x01 // Ctrl-A
+	escapeQuitCtrl = 0x18 // Ctrl-X
+)
+
+// filterEscape applies the interactive escape state machine to in. It returns
+// the bytes to forward to the DUT and whether the quit sequence was seen.
+// escapePending carries the "prefix seen" state across reads, so the prefix and
+// its following key may arrive in separate stdin reads.
+func filterEscape(in []byte, escapePending *bool) ([]byte, bool) {
+	out := make([]byte, 0, len(in))
+
+	for _, char := range in {
+		if *escapePending {
+			*escapePending = false
+
+			switch char {
+			case 'x', 'X', escapeQuitCtrl:
+				return out, true
+			case escapePrefix: // prefix pressed twice -> send one literal Ctrl-A
+				out = append(out, escapePrefix)
+			default: // not an escape; forward the prefix and this byte
+				out = append(out, escapePrefix, char)
+			}
+
+			continue
+		}
+
+		if char == escapePrefix {
+			*escapePending = true
+
+			continue
+		}
+
+		out = append(out, char)
+	}
+
+	return out, false
+}
+
+//nolint:funlen,cyclop,gocognit,maintidx
 func (app *application) runRPC(device, command string, cmdArgs []string) error {
 	const numWorkers = 2 // The send and receive worker goroutines
+
+	// Raw input mode (no echo, no canonical line buffering, no local signal
+	// generation) is needed only for a live, hand-driven console session, so that
+	// each keystroke — including Ctrl-C — is forwarded to the DUT immediately and
+	// echoed by the remote side. Two conditions must hold, so it is armed lazily:
+	//
+	//   - The invocation is interactive, i.e. the command was given no arguments.
+	//     A command with arguments is parameterised/scripted (e.g. a serial
+	//     expect/send sequence the agent drives on its own); raw mode there would
+	//     only mislead and would steal Ctrl-C from aborting the client.
+	//   - The agent actually streams console output, which one-shot commands
+	//     (power, flash) never do — so they leave the terminal untouched.
+	//
+	// Piped/scripted stdin is never switched to raw mode and is forwarded verbatim.
+	console := newRawConsole(app.stdin, len(cmdArgs) == 0)
+	defer console.disarm()
 
 	runCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -256,6 +397,11 @@ func (app *application) runRPC(device, command string, cmdArgs []string) error {
 					Metadata: metadata,
 				})
 			case *pb.RunResponse_Console:
+				// First console output means this is a live console session:
+				// switch the terminal to raw mode now (no-op for non-TTY stdin)
+				// so keystrokes forward correctly and the banner is truthful.
+				console.arm()
+
 				switch consoleData := msg.Console.Data.(type) {
 				case *pb.Console_Stdout:
 					app.formatter.WriteContent(output.Content{
@@ -324,18 +470,22 @@ func (app *application) runRPC(device, command string, cmdArgs []string) error {
 		}
 	}()
 
-	// Send routine — reads lines from stdin and forwards them to the server.
+	// Send routine — reads raw bytes from stdin and forwards them to the server.
 	//
 	// Unlike the receive routine this goroutine intentionally does NOT defer
-	// cancel(). When stdin reaches EOF (e.g. /dev/null in non-interactive
-	// runs) this goroutine returns immediately. If it cancelled the context
-	// on exit, the receive routine would be torn down before it could read
-	// and print the server's response.
+	// cancel() for the EOF case. When stdin reaches EOF (e.g. /dev/null in
+	// non-interactive runs) this goroutine returns immediately; if it cancelled
+	// the context on exit, the receive routine would be torn down before it
+	// could read and print the server's response.
 	//
-	// Only the receive routine drives context cancellation so that all
-	// server output is processed before the RPC terminates.
+	// It DOES cancel when the user types the interactive escape sequence
+	// (Ctrl-A x): that is an explicit request to end the session.
 	go func() {
-		reader := bufio.NewReader(app.stdin)
+		const stdinBufSize = 256
+
+		buf := make([]byte, stdinBufSize)
+
+		var escapePending bool
 
 		for {
 			select {
@@ -346,7 +496,7 @@ func (app *application) runRPC(device, command string, cmdArgs []string) error {
 			default:
 			}
 
-			text, err := reader.ReadString('\n')
+			nRead, err := app.stdin.Read(buf)
 			if err != nil {
 				if !errors.Is(err, io.EOF) {
 					errChan <- fmt.Errorf("reading stdin: %w", err)
@@ -355,17 +505,35 @@ func (app *application) runRPC(device, command string, cmdArgs []string) error {
 				return
 			}
 
-			err = stream.Send(&pb.RunRequest{
-				Msg: &pb.RunRequest_Console{
-					Console: &pb.Console{
-						Data: &pb.Console_Stdin{
-							Stdin: []byte(text),
+			payload := buf[:nRead]
+
+			quit := false
+			if console.isActive() {
+				// Intercept the escape sequence; forward everything else
+				// (including Ctrl-C) untouched.
+				payload, quit = filterEscape(payload, &escapePending)
+			}
+
+			if len(payload) > 0 {
+				sendErr := stream.Send(&pb.RunRequest{
+					Msg: &pb.RunRequest_Console{
+						Console: &pb.Console{
+							Data: &pb.Console_Stdin{
+								Stdin: payload,
+							},
 						},
 					},
-				},
-			})
-			if err != nil {
-				errChan <- fmt.Errorf("sending RPC message: %w", err)
+				})
+				if sendErr != nil {
+					errChan <- fmt.Errorf("sending RPC message: %w", sendErr)
+
+					return
+				}
+			}
+
+			if quit {
+				log.Println("Send routine terminating: escape sequence")
+				cancel()
 
 				return
 			}

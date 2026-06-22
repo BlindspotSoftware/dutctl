@@ -100,6 +100,10 @@ func toClientWorker(ctx context.Context, stream Stream, s *session) error {
 //
 //nolint:cyclop,funlen,gocognit
 func fromClientWorker(ctx context.Context, stream Stream, s *session) error {
+	// Close stdinCh on exit so ChanReader.Read returns io.EOF and any module
+	// goroutine blocked on stdin (e.g. the serial inner goroutine) unblocks cleanly.
+	defer close(s.stdinCh)
+
 	type recvResult struct {
 		req *pb.RunRequest
 		err error
