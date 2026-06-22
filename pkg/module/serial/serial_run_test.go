@@ -499,3 +499,94 @@ func TestRunReconnectsWhenDeviceNodeVanishes(t *testing.T) {
 		t.Errorf("expected reconnect to start after the device node vanished on idle EOF, got %q", got)
 	}
 }
+
+// TestRunSequenceLeadingSendThenExpect covers a tagged sequence that begins
+// with a send (impossible with expect-send pairs): the module writes the
+// leading input before any output arrives, then waits for the prompt and sends
+// the reply. It ends on a send, so it drains before exiting.
+func TestRunSequenceLeadingSendThenExpect(t *testing.T) {
+	port := &fakePort{}
+	port.queue([]byte("dut login: ")) // appears after the leading send goes out
+
+	s := &Serial{Port: "fake", Baud: DefaultBaudRate}
+	s.dialPort = func() (serialPort, error) { return port, nil }
+
+	sess, _, _ := newSession(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	start := time.Now()
+
+	err := s.Run(ctx, sess, `send:\n`, "expect:login:", `send:root\n`)
+	if err != nil {
+		t.Fatalf("Run returned error, want nil: %v", err)
+	}
+
+	if elapsed := time.Since(start); elapsed < pairsDrain {
+		t.Errorf("Run returned after %s, expected at least the %s drain", elapsed, pairsDrain)
+	}
+
+	if got := port.writtenString(); got != "\nroot\n" {
+		t.Errorf("written to port = %q, want %q", got, "\nroot\n")
+	}
+}
+
+// TestRunSequenceSendOnly covers a sequence with no expect step at all: the
+// module sends the input and drains briefly so the response is visible.
+func TestRunSequenceSendOnly(t *testing.T) {
+	port := &fakePort{}
+
+	s := &Serial{Port: "fake", Baud: DefaultBaudRate}
+	s.dialPort = func() (serialPort, error) { return port, nil }
+
+	sess, _, _ := newSession(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	err := s.Run(ctx, sess, `send:reboot\n`)
+	if err != nil {
+		t.Fatalf("Run returned error, want nil: %v", err)
+	}
+
+	if got := port.writtenString(); got != "reboot\n" {
+		t.Errorf("written to port = %q, want %q", got, "reboot\n")
+	}
+}
+
+// TestRunSequenceEndingOnExpectExitsWithoutDraining covers a sequence whose
+// final step is an expect: the match is the completion, so the module exits
+// immediately rather than draining.
+func TestRunSequenceEndingOnExpectExitsWithoutDraining(t *testing.T) {
+	port := &fakePort{}
+	port.queue([]byte("starting\n"))
+	port.queue([]byte("ready> "))
+
+	s := &Serial{Port: "fake", Baud: DefaultBaudRate}
+	s.dialPort = func() (serialPort, error) { return port, nil }
+
+	sess, stdout, _ := newSession(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	start := time.Now()
+
+	err := s.Run(ctx, sess, `send:\n`, "expect:ready>")
+	if err != nil {
+		t.Fatalf("Run returned error, want nil: %v", err)
+	}
+
+	if elapsed := time.Since(start); elapsed >= pairsDrain {
+		t.Errorf("Run took %s; a sequence ending on expect should exit without the %s drain", elapsed, pairsDrain)
+	}
+
+	if got := port.writtenString(); got != "\n" {
+		t.Errorf("written to port = %q, want %q", got, "\n")
+	}
+
+	if got := stdout.String(); !strings.Contains(got, "Pattern matched") {
+		t.Errorf("stdout missing match banner: %q", got)
+	}
+}

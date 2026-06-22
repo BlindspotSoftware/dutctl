@@ -55,11 +55,24 @@ const deviceLossGraceDefault = 2 * time.Second
 // staying far larger than any realistic prompt or expect pattern.
 const maxMatchWindow = 64 * 1024
 
-// expectSendPair holds a compiled regex pattern and the bytes to send when it matches.
-// A nil or empty response means the module exits on match without sending anything.
-type expectSendPair struct {
-	pattern  *regexp.Regexp
-	response []byte
+// stepKind distinguishes the two kinds of step in a serial sequence.
+type stepKind int
+
+const (
+	stepExpect stepKind = iota // wait until pattern matches the serial output
+	stepSend                   // write data to the serial port
+)
+
+// seqStep is one step of a serial automation sequence. The module walks the
+// steps in order: it waits for each expect-step's pattern to appear in the
+// output, and writes each send-step's data to the port. A single expect
+// pattern and the legacy expect-send pairs both compile down to a slice of
+// these, so the run loop has exactly one code path for all non-interactive
+// modes.
+type seqStep struct {
+	kind    stepKind
+	pattern *regexp.Regexp // set when kind == stepExpect
+	data    []byte         // set when kind == stepSend (empty = send nothing)
 }
 
 // serialPort is the subset of the serial device used by Run. It is satisfied by
@@ -74,9 +87,8 @@ type Serial struct {
 	Port string // Port is the path to the serial device on the dutagent.
 	Baud int    // Baud is the baud rate of the serial device. If unset, DefaultBaudRate is used.
 
-	expect  *regexp.Regexp   // expect is a pattern to match against the serial output (single-expect mode).
-	pairs   []expectSendPair // pairs are the expect-send pairs (expect-send mode).
-	timeout time.Duration    // timeout is the maximum time to wait for the expect pattern to match.
+	steps   []seqStep     // steps is the ordered expect/send sequence (empty = interactive mode).
+	timeout time.Duration // timeout is the maximum time to wait for the sequence to complete.
 
 	// dialPort opens the serial port. It defaults to openPort and is overridden
 	// in tests to inject a fake. Set lazily in Run so the zero value works.
@@ -101,6 +113,7 @@ const abstract = `Serial connection to the DUT
 const usage = `
 ARGUMENTS:
 	[-t <duration>] [<expect> [<response> <expect> <response> ...]]
+	[-t <duration>] expect:<regex>|send:<data> [expect:<regex>|send:<data> ...]
 
 `
 
@@ -116,6 +129,16 @@ Modes of operation:
     response to the serial port. Pairs are processed in order; after the last
     pair matches the module reads serial output for 1 more second so the output
     of the triggered command is visible, then exits.
+  - Sequence (every argument carries an "expect:" or "send:" tag): an ordered
+    list of steps run one after another. An expect-step waits for its regex to
+    match the serial output; a send-step writes its data to the port. Unlike
+    expect-send pairs, the steps may appear in any order, so a sequence can
+    begin with a send (e.g. an Enter to wake the console) or chain several
+    sends or expects in a row. The whole sequence shares the -t deadline. If
+    the last step is a send, the module drains output for 1 more second before
+    exiting; if it is an expect, it exits as soon as that pattern matches.
+
+      e.g.: send:"\n" expect:"login:" send:"root\n" expect:"# " send:"reboot\n"
 
 If the serial device disappears mid-session (e.g. an FTDI chip that powers down
 when the DUT loses power), the module waits for it to reappear and reconnects
@@ -124,7 +147,7 @@ automatically instead of ending the session.
 The expect string supports regular expressions according to [1].
 The optional -t flag specifies the maximum time to wait.
 Quote strings containing spaces or special characters. E.g.: "(?i)hello\s+world"
-Response strings support C-style escape sequences: \n, \r, \t, \\, \xHH.
+Response and send strings support C-style escape sequences: \n, \r, \t, \\, \xHH.
 
 [1] https://golang.org/s/re2syntax.
 `
@@ -308,7 +331,7 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 	var (
 		remainder   []byte // partial CSI sequence carried across reads
 		matchWindow []byte // bounded window of recent output for regex matching
-		currentPair int
+		currentStep int    // cursor into s.steps
 		draining    bool
 	)
 
@@ -326,6 +349,21 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 		draining = true
 
 		log.Printf("serial module: draining serial output for %s before closing", pairsDrain)
+	}
+
+	// advanceSends fires consecutive send-steps at the cursor, writing each to
+	// the port, until the cursor reaches an expect-step or the end of the
+	// sequence. It is called once before the first read (so a sequence may begin
+	// with a send) and again after every expect-step matches.
+	advanceSends := func() {
+		for currentStep < len(s.steps) && s.steps[currentStep].kind == stepSend {
+			data := s.steps[currentStep].data
+			currentStep++
+
+			if len(data) > 0 {
+				writeToPort(data)
+			}
+		}
 	}
 
 	// reconnect closes the vanished port and retries opening it until the device
@@ -367,6 +405,16 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 
 	readBuffer := make([]byte, bufferSize)
 
+	// Fire any leading send-steps before the first read, so a sequence may begin
+	// by sending (e.g. an Enter to wake the console) rather than expecting. If
+	// the sequence is sends only, drain briefly so the DUT's response to the
+	// final input is visible, then exit via the drain deadline below.
+	advanceSends()
+
+	if len(s.steps) > 0 && currentStep >= len(s.steps) {
+		startDrain()
+	}
+
 	for {
 		select {
 		case <-loopCtx.Done():
@@ -389,8 +437,8 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 			emit([]byte("\n--- Timeout reached, no match found ---"))
 			flushAndWait(true)
 
-			if s.expect != nil {
-				return fmt.Errorf("timeout of %s reached, pattern %q not found", s.timeout, s.expect)
+			if len(s.steps) == 1 && s.steps[0].kind == stepExpect {
+				return fmt.Errorf("timeout of %s reached, pattern %q not found", s.timeout, s.steps[0].pattern)
 			}
 
 			return fmt.Errorf("timeout of %s reached, expect-send sequence not completed", s.timeout)
@@ -446,8 +494,8 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 		// without a trailing newline). out is a fresh slice owned by the pump.
 		emit(out)
 
-		// Matching is skipped while draining and in interactive mode.
-		if draining || (s.expect == nil && len(s.pairs) == 0) {
+		// Matching is skipped while draining and in interactive mode (no steps).
+		if draining || len(s.steps) == 0 {
 			continue
 		}
 
@@ -456,37 +504,38 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 			matchWindow = matchWindow[len(matchWindow)-maxMatchWindow:]
 		}
 
-		if s.expect != nil {
-			if s.expect.Match(matchWindow) {
+		// Walk the sequence: satisfy every expect-step the current window already
+		// matches, firing the send-steps that follow each match. The cursor rests
+		// on an expect-step here, because advanceSends consumed any leading or
+		// trailing sends after the previous iteration.
+		for currentStep < len(s.steps) && s.steps[currentStep].kind == stepExpect {
+			loc := s.steps[currentStep].pattern.FindIndex(matchWindow)
+			if loc == nil {
+				break
+			}
+
+			matchWindow = matchWindow[loc[1]:] // consume through the match
+			currentStep++
+
+			advanceSends() // fire the send-steps that follow this match
+
+			if currentStep < len(s.steps) {
+				continue // more steps remain; keep matching the current window
+			}
+
+			// Sequence complete. If it ended on a send, drain so the DUT's
+			// response to the final input is visible; if it ended on an expect,
+			// the match itself is the completion, so exit immediately.
+			if s.steps[len(s.steps)-1].kind == stepSend {
+				startDrain()
+			} else {
 				emit([]byte("\n--- Pattern matched, connection closed ---"))
 				flushAndWait(true)
 
 				return nil
 			}
 
-			continue
-		}
-
-		// Expect-send: fire every pair already satisfied by the current window.
-		for currentPair < len(s.pairs) {
-			loc := s.pairs[currentPair].pattern.FindIndex(matchWindow)
-			if loc == nil {
-				break
-			}
-
-			response := s.pairs[currentPair].response
-			matchWindow = matchWindow[loc[1]:] // consume through the match
-			currentPair++
-
-			if len(response) > 0 {
-				writeToPort(response)
-			}
-
-			if currentPair >= len(s.pairs) {
-				startDrain()
-
-				break
-			}
+			break
 		}
 	}
 }
@@ -568,6 +617,12 @@ func newStdoutPump(baseCtx context.Context, stdout io.Writer) (func([]byte), fun
 // pairStride is the number of positional arguments per expect-send pair.
 const pairStride = 2
 
+// Tag prefixes that mark a tagged-sequence argument.
+const (
+	expectTag = "expect:"
+	sendTag   = "send:"
+)
+
 func (s *Serial) evalArgs(args []string) error {
 	fs := flag.NewFlagSet("serial", flag.ContinueOnError)
 	fs.SetOutput(io.Discard) // Suppress default error output
@@ -580,11 +635,24 @@ func (s *Serial) evalArgs(args []string) error {
 
 	positional := fs.Args()
 
+	// Tagged-sequence mode is selected when the first argument carries a tag.
+	// It allows arbitrarily ordered expect/send steps (e.g. a leading send).
+	if len(positional) > 0 && isTaggedStep(positional[0]) {
+		return s.evalSequenceArgs(positional)
+	}
+
+	return s.evalLegacyArgs(positional)
+}
+
+// evalLegacyArgs parses the backward-compatible positional argument forms into
+// s.steps: no args (interactive), one arg (single expect), or an even number of
+// args (expect-send pairs).
+func (s *Serial) evalLegacyArgs(positional []string) error {
 	switch len(positional) {
 	case 0:
-		// Interactive mode: no expect pattern, no pairs.
+		// Interactive mode: no steps.
 	case 1:
-		// Single-expect mode (backward compatible).
+		// Single-expect mode.
 		log.Printf("serial module: Will wait for pattern: %q", positional[0])
 
 		pattern, compileErr := regexp.Compile(positional[0])
@@ -592,14 +660,14 @@ func (s *Serial) evalArgs(args []string) error {
 			return fmt.Errorf("invalid regular expression: %w", compileErr)
 		}
 
-		s.expect = pattern
+		s.steps = []seqStep{{kind: stepExpect, pattern: pattern}}
 	default:
 		// Expect-send pairs mode.
 		if len(positional)%pairStride != 0 {
 			return fmt.Errorf("expect-send requires an even number of arguments, got %d", len(positional))
 		}
 
-		s.pairs = make([]expectSendPair, 0, len(positional)/pairStride)
+		s.steps = make([]seqStep, 0, len(positional))
 
 		for idx := 0; idx < len(positional); idx += pairStride {
 			pattern, compileErr := regexp.Compile(positional[idx])
@@ -609,10 +677,49 @@ func (s *Serial) evalArgs(args []string) error {
 
 			log.Printf("serial module: Pair %d: pattern=%q response=%q", idx/pairStride+1, positional[idx], positional[idx+1])
 
-			s.pairs = append(s.pairs, expectSendPair{
-				pattern:  pattern,
-				response: unescape(positional[idx+1]),
-			})
+			s.steps = append(s.steps,
+				seqStep{kind: stepExpect, pattern: pattern},
+				seqStep{kind: stepSend, data: unescape(positional[idx+1])},
+			)
+		}
+	}
+
+	return nil
+}
+
+// isTaggedStep reports whether arg carries an "expect:" or "send:" tag.
+func isTaggedStep(arg string) bool {
+	return strings.HasPrefix(arg, expectTag) || strings.HasPrefix(arg, sendTag)
+}
+
+// evalSequenceArgs parses tagged-sequence arguments into s.steps. Every
+// argument must carry a tag; mixing tagged and untagged arguments is rejected
+// so a malformed command fails loudly instead of being silently misread.
+func (s *Serial) evalSequenceArgs(args []string) error {
+	s.steps = make([]seqStep, 0, len(args))
+
+	for idx, arg := range args {
+		switch {
+		case strings.HasPrefix(arg, expectTag):
+			expr := arg[len(expectTag):]
+
+			pattern, compileErr := regexp.Compile(expr)
+			if compileErr != nil {
+				return fmt.Errorf("step %d: invalid regular expression %q: %w", idx+1, expr, compileErr)
+			}
+
+			log.Printf("serial module: Step %d: expect=%q", idx+1, expr)
+
+			s.steps = append(s.steps, seqStep{kind: stepExpect, pattern: pattern})
+		case strings.HasPrefix(arg, sendTag):
+			data := arg[len(sendTag):]
+
+			log.Printf("serial module: Step %d: send=%q", idx+1, data)
+
+			s.steps = append(s.steps, seqStep{kind: stepSend, data: unescape(data)})
+		default:
+			return fmt.Errorf("step %d %q: in sequence mode every argument must start with %q or %q",
+				idx+1, arg, expectTag, sendTag)
 		}
 	}
 

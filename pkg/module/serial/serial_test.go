@@ -359,16 +359,16 @@ func TestEvalArgs(t *testing.T) {
 			}
 
 			if tt.wantPattern == "" {
-				if s.expect != nil {
-					t.Errorf("expect = %v, want nil", s.expect)
+				if len(s.steps) != 0 {
+					t.Errorf("steps = %v, want none (interactive)", s.steps)
 				}
 			} else {
-				if s.expect == nil {
-					t.Fatalf("expect is nil, want pattern %q", tt.wantPattern)
+				if len(s.steps) != 1 || s.steps[0].kind != stepExpect {
+					t.Fatalf("steps = %v, want a single expect-step for %q", s.steps, tt.wantPattern)
 				}
 
-				if s.expect.String() != tt.wantPattern {
-					t.Errorf("expect pattern = %q, want %q", s.expect.String(), tt.wantPattern)
+				if s.steps[0].pattern.String() != tt.wantPattern {
+					t.Errorf("expect pattern = %q, want %q", s.steps[0].pattern.String(), tt.wantPattern)
 				}
 			}
 		})
@@ -620,28 +620,135 @@ func TestEvalArgsPairs(t *testing.T) {
 				return
 			}
 
-			if len(s.pairs) != tt.wantPairs {
-				t.Fatalf("len(pairs) = %d, want %d", len(s.pairs), tt.wantPairs)
+			// Each expect-send pair compiles to two steps: an expect-step
+			// followed by a send-step.
+			if len(s.steps) != tt.wantPairs*pairStride {
+				t.Fatalf("len(steps) = %d, want %d (%d pairs)", len(s.steps), tt.wantPairs*pairStride, tt.wantPairs)
 			}
 
-			if s.expect != nil {
-				t.Errorf("expect should be nil in pairs mode, got %v", s.expect)
+			if tt.wantPat0 != "" && s.steps[0].pattern.String() != tt.wantPat0 {
+				t.Errorf("steps[0].pattern = %q, want %q", s.steps[0].pattern.String(), tt.wantPat0)
 			}
 
-			if tt.wantPat0 != "" && s.pairs[0].pattern.String() != tt.wantPat0 {
-				t.Errorf("pairs[0].pattern = %q, want %q", s.pairs[0].pattern.String(), tt.wantPat0)
+			if tt.wantResp0 != "" && string(s.steps[1].data) != tt.wantResp0 {
+				t.Errorf("steps[1].data = %q, want %q", s.steps[1].data, tt.wantResp0)
 			}
 
-			if tt.wantResp0 != "" && string(s.pairs[0].response) != tt.wantResp0 {
-				t.Errorf("pairs[0].response = %q, want %q", s.pairs[0].response, tt.wantResp0)
+			if tt.wantPat1 != "" && len(s.steps) > 2 && s.steps[2].pattern.String() != tt.wantPat1 {
+				t.Errorf("steps[2].pattern = %q, want %q", s.steps[2].pattern.String(), tt.wantPat1)
 			}
 
-			if tt.wantPat1 != "" && len(s.pairs) > 1 && s.pairs[1].pattern.String() != tt.wantPat1 {
-				t.Errorf("pairs[1].pattern = %q, want %q", s.pairs[1].pattern.String(), tt.wantPat1)
+			if tt.wantResp1 != "" && len(s.steps) > 3 && string(s.steps[3].data) != tt.wantResp1 {
+				t.Errorf("steps[3].data = %q, want %q", s.steps[3].data, tt.wantResp1)
+			}
+		})
+	}
+}
+
+// wantStep is the expected kind and payload of a single parsed sequence step.
+type wantStep struct {
+	expect string // non-empty => stepExpect with this pattern
+	send   string // used when expect is empty => stepSend with this (unescaped) data
+}
+
+// TestEvalArgsSequence covers the tagged expect:/send: sequence parsing mode.
+//
+//nolint:funlen
+func TestEvalArgsSequence(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		want    []wantStep
+		wantErr bool
+	}{
+		{
+			name: "leading send then expect",
+			args: []string{`send:\n`, "expect:login:"},
+			want: []wantStep{{send: "\n"}, {expect: "login:"}},
+		},
+		{
+			name: "expect then send",
+			args: []string{"expect:login:", `send:root\n`},
+			want: []wantStep{{expect: "login:"}, {send: "root\n"}},
+		},
+		{
+			name: "two sends in a row",
+			args: []string{`send:a`, `send:b`},
+			want: []wantStep{{send: "a"}, {send: "b"}},
+		},
+		{
+			name: "full login-and-reboot sequence",
+			args: []string{`send:\n`, "expect:login:", `send:root\n`, "expect:# ", `send:reboot\n`},
+			want: []wantStep{
+				{send: "\n"}, {expect: "login:"}, {send: "root\n"}, {expect: "# "}, {send: "reboot\n"},
+			},
+		},
+		{
+			name: "send with hex escape",
+			args: []string{`send:\x03`}, // Ctrl-C
+			want: []wantStep{{send: "\x03"}},
+		},
+		{
+			name: "empty send is allowed",
+			args: []string{"expect:done", "send:"},
+			want: []wantStep{{expect: "done"}, {send: ""}},
+		},
+		{
+			name:    "invalid regex in expect step",
+			args:    []string{"expect:[invalid", `send:x`},
+			wantErr: true,
+		},
+		{
+			name:    "untagged argument mixed in is rejected",
+			args:    []string{"expect:login:", "root"},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &Serial{}
+
+			err := s.evalArgs(tt.args)
+
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("evalArgs() error = %v, wantErr %v", err, tt.wantErr)
 			}
 
-			if tt.wantResp1 != "" && len(s.pairs) > 1 && string(s.pairs[1].response) != tt.wantResp1 {
-				t.Errorf("pairs[1].response = %q, want %q", s.pairs[1].response, tt.wantResp1)
+			if tt.wantErr {
+				return
+			}
+
+			if len(s.steps) != len(tt.want) {
+				t.Fatalf("len(steps) = %d, want %d", len(s.steps), len(tt.want))
+			}
+
+			for i, w := range tt.want {
+				got := s.steps[i]
+
+				if w.expect != "" {
+					if got.kind != stepExpect {
+						t.Errorf("steps[%d] kind = send, want expect %q", i, w.expect)
+
+						continue
+					}
+
+					if got.pattern.String() != w.expect {
+						t.Errorf("steps[%d].pattern = %q, want %q", i, got.pattern.String(), w.expect)
+					}
+
+					continue
+				}
+
+				if got.kind != stepSend {
+					t.Errorf("steps[%d] kind = expect, want send %q", i, w.send)
+
+					continue
+				}
+
+				if string(got.data) != w.send {
+					t.Errorf("steps[%d].data = %q, want %q", i, got.data, w.send)
+				}
 			}
 		})
 	}
