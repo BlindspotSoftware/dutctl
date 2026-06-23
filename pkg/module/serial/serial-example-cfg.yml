@@ -5,11 +5,13 @@ devices:
     cmds:
       serial:
         desc: |
-          Basic demo of the Serial module: After the DUT is powered on, use Serial
-          as the passthrough module to wait for magic strings in the DUT's boot log.
+          Demo of the Serial module as a passthrough module: the client supplies
+          the send/expect script at runtime, e.g.
+            dutctl server serial -t 60s -- expect 'login:' send root expect '# '
         uses:
           - module: serial
             passthrough: true
             with:
               port: /tmp/ttyS0
-              baudrate: 115200
+              baud: 115200
+              delay: 50ms # optional: pause before each send (default 50ms; "0s" disables)
