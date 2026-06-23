@@ -152,6 +152,7 @@ linters:
         - DeviceServiceClient
         - Formatter
         - gpio
+        - port
 
     lll:
       line-length: 140

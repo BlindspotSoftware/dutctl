@@ -2,23 +2,20 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package serial provides a dutagent module that listens on a defined COM port.
+// Package serial provides a dutagent module that runs a scripted send/expect
+// sequence against a DUT's serial port.
 package serial
 
 import (
-	"bytes"
 	"context"
 	"errors"
-	"flag"
 	"fmt"
-	"io"
 	"log"
-	"regexp"
 	"strings"
 	"time"
 
 	"github.com/BlindspotSoftware/dutctl/pkg/module"
-	"github.com/tarm/serial"
+	"go.bug.st/serial"
 )
 
 func init() {
@@ -31,38 +28,110 @@ func init() {
 // DefaultBaudRate is the default baud rate for the serial connection.
 const DefaultBaudRate = 115200
 
-// Serial is a module that forwards the serial output of a connected DUT to the dutctl client.
-// It is non-interactive and does not support stdin yet.
-type Serial struct {
-	Port string // Port is the path to the serial device on the dutagent.
-	Baud int    // Baud is the baud rate of the serial device. Is unset, DefaultBaudRate is used.
+// readTimeout is how long a single port read blocks before returning so the
+// loop can re-check the context. It bounds how promptly the global timeout and
+// cancellation are honored.
+const readTimeout = 100 * time.Millisecond
 
-	expect  *regexp.Regexp // expect is a pattern to match against the serial output.
-	timeout time.Duration  // timeout is the maximum time to wait for the expect pattern to match.
+// defaultDelay is the pause applied before each send when no Delay is
+// configured. It makes sends robust against consoles that present a prompt
+// slightly before the tty is ready to read; configure delay "0s" to disable.
+const defaultDelay = 50 * time.Millisecond
+
+// sendDrain is how long the module keeps reading after a sequence whose last
+// step is a send, so the DUT's reply to that final input is visible before the
+// connection closes.
+const sendDrain = time.Second
+
+// portOpener opens a serial device. It is the injection point that lets tests
+// substitute a fake port for the real hardware.
+type portOpener func(name string, baud int) (port, error)
+
+// Serial observes the DUT's serial output and runs a scripted sequence of
+// send/expect steps against the serial port.
+//
+// The module is non-interactive: all input is supplied up front as arguments,
+// which makes it suitable for scripts and automated callers.
+type Serial struct {
+	Port  string // Port is the path to the serial device on the dutagent.
+	Baud  int    // Baud is the baud rate of the serial device. If unset, DefaultBaudRate is used.
+	Delay string // Delay is the pause before each send (e.g. "200ms") to pace input. Default 50ms; "0s" disables.
+
+	delay time.Duration // delay is the parsed Delay, applied before each send.
+
+	// drainTimeout overrides the post-send drain window; 0 uses sendDrain. It
+	// exists so tests can shorten the drain; production leaves it 0.
+	drainTimeout time.Duration
+
+	// open opens the serial port. It defaults to defaultOpenPort in Run; tests
+	// set it to a fake. Opening happens per Run, never on the struct.
+	open portOpener
 }
 
 // Ensure implementing the Module interface.
 var _ module.Module = &Serial{}
 
-const abstract = `Serial connection to the DUT
+const abstract = `Scripted serial connection to the DUT
 `
 
 const usage = `
 ARGUMENTS:
-	[-t <duration>] [<expect>]
+	[-t <duration>] [-eol cr|lf|crlf|none] [-keep-escapes]                 (monitor: stream output)
+	[-t <duration>] [-eol cr|lf|crlf|none] [-keep-escapes] [--] <step>...  (run a step sequence)
+
+	step := expect <regex> | send <data> | send-raw <data>
 
 `
 
 const description = `
-The serial connection is read-only and does not support stdin yet.
-If a regex is provided, the module will wait for the regex to match on the serial output, 
-then exit with success. If no expect string is provided, the module will read from the serial port
-until it is terminated by a signal (e.g. Ctrl-C).
-The  expect string supports regular expressions according to [1].
-The optional -t flag specifies the maximum time to wait for the regex to match.
-Quote the expect string if it contains spaces or special characters. E.g.: "(?i)hello\s+world!? dutctl"
+The serial module automates interaction with the DUT's serial console. All
+input is provided up front as arguments, so it suits scripts and automated
+callers.
 
-[1] https://golang.org/s/re2syntax.
+With no steps it runs in MONITOR mode: it streams the serial output to the
+client until the session is cancelled, or until -t elapses (a success). With
+one or more steps it runs them in order (see below). Serial output is forwarded
+to the client in monitor mode, while waiting for an expect, and (if the last
+step is a send) for a moment afterwards so its reply is visible.
+
+STEPS (executed in order; the run fails on the first expect that times out):
+	expect <regex>   Wait until the serial output matches the RE2 regular
+	                 expression [1]. A plain string is a valid regex that
+	                 matches itself; escape regex meta characters
+	                 (. $ * + ? ( ) [ ] { } ^ | \) to match them literally,
+	                 e.g. expect '192\.168\.0\.1'.
+	send <data>      Write <data> followed by the configured line ending
+	                 (see -eol) to the port.
+	send-raw <data>  Write <data> verbatim, with no line ending appended.
+
+send / send-raw data supports the escapes \r \n \t \\ and \xNN (e.g. \x03 for
+Ctrl-C). Each step value is one argument, so quote values containing spaces.
+
+If the last step is a send, the module keeps showing output for a moment
+afterwards so the DUT's reply to that final input is visible.
+
+FLAGS (before the steps):
+	-t <duration>          Global timeout for the whole run (e.g. 30s, 3m).
+	                       0 (default) means no timeout.
+	-eol cr|lf|crlf|none   Line ending appended by 'send'. Default: cr ('\r'),
+	                       which is what serial consoles expect on Enter.
+	-keep-escapes          Keep terminal escape sequences (cursor moves, colour,
+	                       queries) instead of stripping them from the output.
+
+Terminal escape sequences (cursor moves, colour, queries) are stripped from the
+output before it is shown or matched, unless -keep-escapes is given. Expect
+matching uses a rolling window of the most recent 64 KiB of output, so a single
+pattern cannot span more than that. Match on distinctive markers/prompts
+rather than '^'/'$' anchors. Note the DUT may echo what you send, so an expect
+right after a send can match your own input rather than the device's reply.
+
+EXAMPLES:
+	monitor the console:            (no arguments)
+	wait for a boot marker:         -- expect 'Welcome to'
+	login then run a command:       -- expect 'login:' send root expect '# ' send reboot
+	send Ctrl-C then expect shell:  -- send-raw '\x03' expect '$ '
+
+[1] https://golang.org/s/re2syntax
 `
 
 func (s *Serial) Help() string {
@@ -71,7 +140,7 @@ func (s *Serial) Help() string {
 	help := strings.Builder{}
 	help.WriteString(abstract)
 	help.WriteString(usage)
-	help.WriteString(fmt.Sprintf("Configured COM port is  %q with baud rate %d.\n", s.Port, s.Baud))
+	fmt.Fprintf(&help, "Configured COM port is %q with baud rate %d.\n", s.Port, s.Baud)
 	help.WriteString(description)
 
 	return help.String()
@@ -88,6 +157,17 @@ func (s *Serial) Init() error {
 		s.Baud = DefaultBaudRate
 	}
 
+	s.delay = defaultDelay
+
+	if s.Delay != "" {
+		parsed, err := time.ParseDuration(s.Delay)
+		if err != nil {
+			return fmt.Errorf("invalid delay %q: %w", s.Delay, err)
+		}
+
+		s.delay = parsed
+	}
+
 	// Note: We don't open the port here to allow dutagent to start
 	// even if the serial device is not yet available (e.g., powered off).
 	// The port will be opened when Run() is called.
@@ -98,146 +178,207 @@ func (s *Serial) Init() error {
 func (s *Serial) Deinit() error {
 	log.Println("serial module: Deinit called")
 
+	// Nothing to clean up: the port is opened and closed within each Run
+	// (see Run's defer), never held on the struct between runs.
 	return nil
 }
 
-//nolint:cyclop,funlen,gocognit
+// defaultOpenPort is the default portOpener; it opens a real serial device.
+func defaultOpenPort(name string, baud int) (port, error) {
+	serialPort, err := serial.Open(name, &serial.Mode{BaudRate: baud})
+	if err != nil {
+		return nil, fmt.Errorf("failed to open serial port %s: %w", name, err)
+	}
+
+	// Short read timeout so the read loop stays responsive to context
+	// cancellation; a timed-out read returns (0, nil), not an error.
+	err = serialPort.SetReadTimeout(readTimeout)
+	if err != nil {
+		_ = serialPort.Close()
+
+		return nil, fmt.Errorf("failed to set read timeout on %s: %w", name, err)
+	}
+
+	return serialPort, nil
+}
+
+//nolint:cyclop,funlen // monitor/sequence dispatch with pacing and drain; the branch count is inherent
 func (s *Serial) Run(ctx context.Context, session module.Session, args ...string) error {
 	log.Println("serial module: Run called")
 
-	err := s.evalArgs(args)
+	// Parse into LOCAL state every Run — the module instance is shared and
+	// reused across RPCs, so nothing per-run may live on the struct.
+	cfg, err := parseArgs(args)
 	if err != nil {
 		return err
 	}
 
-	port, err := s.openPort()
+	opener := s.open
+	if opener == nil {
+		opener = defaultOpenPort
+	}
+
+	serialPort, err := opener(s.Port, s.Baud)
 	if err != nil {
 		return err
 	}
-	defer port.Close()
+	defer serialPort.Close()
 
 	// Discard any stale bytes left in the kernel/driver RX buffer from a
-	// previous session, otherwise the user sees data from the last boot.
-	err = port.Flush()
+	// previous session, otherwise a step could match data from the last boot.
+	err = serialPort.ResetInputBuffer()
 	if err != nil {
-		log.Printf("serial module: flush failed: %v", err)
+		log.Printf("serial module: reset input buffer failed: %v", err)
 	}
 
 	log.Printf("serial module: connected to %s at %d baud", s.Port, s.Baud)
-	session.Print(fmt.Sprintf("--- Connected to %s at %d baud ---\n", s.Port, s.Baud))
 
-	var cancel context.CancelFunc
+	clientOut := newClientWriter(session)
+	clientOut.markerf("--- Connected to %s at %d baud ---\n", s.Port, s.Baud)
 
-	if s.timeout > 0 {
-		log.Printf("serial module: setting timeout of %s", s.timeout)
-		ctx, cancel = context.WithTimeout(ctx, s.timeout)
+	// loopCtx carries the per-sequence deadline (-t). The original ctx is kept
+	// for the post-send drain so the drain gets its own full window.
+	loopCtx := ctx
+
+	if cfg.timeout > 0 {
+		var cancel context.CancelFunc
+
+		log.Printf("serial module: setting global timeout of %s", cfg.timeout)
+		loopCtx, cancel = context.WithTimeout(ctx, cfg.timeout)
 
 		defer cancel()
 	}
 
-	const bufferSize = 4096
+	eng := newEngine(serialPort, clientOut, !cfg.keepEscapes)
 
-	readBuffer := make([]byte, bufferSize)
-	lineBuffer := &bytes.Buffer{}
+	// Monitor mode: no steps — stream the console until cancelled or -t elapses.
+	if len(cfg.steps) == 0 {
+		log.Println("serial module: monitor mode; streaming until cancelled")
 
-	for {
-		select {
-		case <-ctx.Done():
-			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-				session.Print("\n--- Timeout reached, no match found ---\n")
-
-				return fmt.Errorf("timeout of %s reached, pattern %q not found", s.timeout, s.expect)
-			}
-
-			session.Print("\n--- Connection closed ---\n")
-
-			return ctx.Err()
-		default:
-			sbytes, err := port.Read(readBuffer)
-			if err != nil {
-				// Ignore timeout errors as these are expected with the read timeout config
-				if err != io.EOF && !strings.Contains(err.Error(), "timeout") {
-					return fmt.Errorf("error reading from serial port: %w", err)
-				}
-
-				continue
-			}
-
-			if sbytes == 0 {
-				continue
-			}
-
-			// Forward bytes to the client immediately so partial lines are
-			// not held back waiting for a newline from the DUT.
-			session.Print(string(readBuffer[:sbytes]))
-
-			if s.expect == nil {
-				continue
-			}
-
-			// Process the data read character by character
-			for i := range sbytes {
-				b := readBuffer[i]
-				lineBuffer.WriteByte(b)
-
-				// If we reach a newline or a buffer limit, process the line
-				if b == '\n' || lineBuffer.Len() >= 1024 {
-					line := lineBuffer.String()
-
-					// Check for regex match if we have one
-					if s.expect.MatchString(line) {
-						session.Print("\n--- Pattern matched, connection closed ---\n")
-
-						return nil // Success - pattern found
-					}
-
-					lineBuffer.Reset()
-				}
-			}
-		}
-	}
-}
-
-func (s *Serial) evalArgs(args []string) error {
-	fs := flag.NewFlagSet("serial", flag.ContinueOnError)
-	fs.SetOutput(io.Discard) // Suppress default error output
-	fs.DurationVar(&s.timeout, "t", 0, "timeout duration (e.g. 3m, 30s)")
-
-	err := fs.Parse(args)
-	if err != nil {
-		return fmt.Errorf("failed to parse arguments: %w", err)
-	}
-
-	// Reset expect so a previous pattern does not carry over into the next run.
-	s.expect = nil
-
-	// Get the expect string if provided (args after flags)
-	if fs.NArg() > 0 {
-		expectPattern := fs.Arg(0)
-		log.Printf("serial module: Will wait for pattern: %q", expectPattern)
-
-		s.expect, err = regexp.Compile(expectPattern)
+		err = eng.monitor(loopCtx)
 		if err != nil {
-			return fmt.Errorf("invalid regular expression: %w", err)
+			return fmt.Errorf("monitor: %w", err)
+		}
+
+		clientOut.markerf("--- Connection closed ---\n")
+
+		return nil
+	}
+
+	total := len(cfg.steps)
+
+	for idx, curStep := range cfg.steps {
+		switch curStep.kind {
+		case stepExpect:
+			err = eng.readUntil(loopCtx, curStep.expect)
+			if err != nil {
+				return stepError(idx, curStep, cfg.timeout, err)
+			}
+
+			clientOut.markerf("--- [%d/%d] matched %q ---\n", idx+1, total, curStep.label())
+		case stepSend, stepSendRaw:
+			// Pace input: pause before each send (interruptible by the deadline).
+			err = sleepCtx(loopCtx, s.delay)
+			if err != nil {
+				return fmt.Errorf("step %d (send %q): %w", idx+1, curStep.label(), err)
+			}
+
+			err = eng.write(curStep.payload)
+			if err != nil {
+				return fmt.Errorf("step %d (send %q): %w", idx+1, curStep.label(), err)
+			}
+
+			clientOut.markerf("--- [%d/%d] sent %q ---\n", idx+1, total, curStep.label())
 		}
 	}
+
+	// If the sequence ended on a send, drain briefly so the DUT's reply to the
+	// final input is visible. Uses the original ctx (its own window).
+	if cfg.steps[total-1].kind != stepExpect {
+		drainFor := sendDrain
+		if s.drainTimeout > 0 {
+			drainFor = s.drainTimeout
+		}
+
+		err = eng.drain(ctx, drainFor)
+		if err != nil {
+			return fmt.Errorf("draining after final send: %w", err)
+		}
+	}
+
+	clientOut.markerf("--- Script completed ---\n")
 
 	return nil
 }
 
-const readTimeout = 100 * time.Millisecond
-
-func (s *Serial) openPort() (*serial.Port, error) {
-	config := &serial.Config{
-		Name:        s.Port,
-		Baud:        s.Baud,
-		ReadTimeout: readTimeout, // Short timeout for responsive context checking
+// sleepCtx pauses for d, returning ctx.Err() if ctx is done first. A
+// non-positive d returns nil immediately.
+func sleepCtx(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return nil
 	}
 
-	port, err := serial.OpenPort(config)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open serial port %s: %w", s.Port, err)
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// stepError annotates an expect failure with the step number and pattern, and
+// gives a clear message for the common timeout/cancellation cases.
+func stepError(idx int, failedStep step, timeout time.Duration, err error) error {
+	switch {
+	case errors.Is(err, context.DeadlineExceeded) && timeout > 0:
+		return fmt.Errorf("step %d (expect %q): timeout of %s reached without match", idx+1, failedStep.label(), timeout)
+	case errors.Is(err, context.DeadlineExceeded):
+		return fmt.Errorf("step %d (expect %q): deadline reached without match", idx+1, failedStep.label())
+	case errors.Is(err, context.Canceled):
+		return fmt.Errorf("step %d (expect %q): canceled", idx+1, failedStep.label())
+	default:
+		return fmt.Errorf("step %d (expect %q): %w", idx+1, failedStep.label(), err)
+	}
+}
+
+// clientWriter forwards serial output to the client (it is the engine's output
+// sink) and tracks whether the stream is at the start of a line. Status lines
+// go through markerf, which inserts a newline first when the preceding output
+// (e.g. a prompt with no trailing newline) did not end one — so every marker
+// lands on its own line.
+//
+// A future interactive mode would instead use the stdout writer from
+// session.Console().
+type clientWriter struct {
+	session     module.Session
+	atLineStart bool
+}
+
+func newClientWriter(session module.Session) *clientWriter {
+	return &clientWriter{session: session, atLineStart: true}
+}
+
+func (w *clientWriter) Write(p []byte) (int, error) {
+	if len(p) > 0 {
+		w.session.Print(string(p))
+		w.atLineStart = p[len(p)-1] == '\n'
 	}
 
-	return port, nil
+	return len(p), nil
+}
+
+// markerf writes a status line, prefixing a newline when the previous output
+// did not end one, then tracking whether this line left the stream at a line
+// start.
+func (w *clientWriter) markerf(format string, args ...any) {
+	if !w.atLineStart {
+		w.session.Print("\n")
+	}
+
+	msg := fmt.Sprintf(format, args...)
+	w.session.Print(msg)
+	w.atLineStart = len(msg) > 0 && msg[len(msg)-1] == '\n'
 }
