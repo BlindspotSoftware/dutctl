@@ -312,7 +312,9 @@ func TestMetadataCaching(t *testing.T) {
 
 func TestWriteDeviceList(t *testing.T) {
 	stdout := &bytes.Buffer{}
-	formatter := newTextFormatter(Config{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	// NoColor for deterministic output: the muted lock annotation is asserted
+	// without ANSI codes interleaving with the bracket text.
+	formatter := newTextFormatter(Config{Stdout: stdout, Stderr: &bytes.Buffer{}, NoColor: true})
 
 	formatter.WriteContent(Content{
 		Type: TypeDeviceList,
@@ -345,24 +347,26 @@ func TestWriteLockResult(t *testing.T) {
 		{
 			name: "timed lock",
 			data: DeviceEntry{Name: "my-board", Locked: true, Owner: "alice@host", ExpiresAt: time.Now().Add(30 * time.Minute).Unix()},
-			want: `Device "my-board" locked by "alice@host" for 30m`,
+			want: `✓ Device "my-board" locked by "alice@host" for 30m`,
 		},
 		{
 			name: "auto lock without expiry",
 			data: DeviceEntry{Name: "my-board", Locked: true, Owner: "alice@host"},
-			want: `Device "my-board" locked by "alice@host"` + "\n",
+			want: `✓ Device "my-board" locked by "alice@host"` + "\n",
 		},
 		{
 			name: "unlock",
 			data: DeviceEntry{Name: "my-board"},
-			want: `Device "my-board" unlocked`,
+			want: `✓ Device "my-board" unlocked`,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			stdout := &bytes.Buffer{}
-			formatter := newTextFormatter(Config{Stdout: stdout, Stderr: &bytes.Buffer{}})
+			// NoColor for deterministic output: the success marker and text are
+			// asserted without ANSI codes interleaving.
+			formatter := newTextFormatter(Config{Stdout: stdout, Stderr: &bytes.Buffer{}, NoColor: true})
 
 			formatter.WriteContent(Content{Type: TypeLockResult, Data: tt.data})
 
@@ -370,5 +374,94 @@ func TestWriteLockResult(t *testing.T) {
 				t.Errorf("lock result output = %q, want substring %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestWriteError(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+
+	f := newTextFormatter(Config{Stdout: &stdout, Stderr: &stderr, NoColor: true})
+	f.WriteContent(Content{Type: TypeGeneral, Data: "unavailable: connection refused", IsError: true})
+
+	// Errors carry the error marker, go to stderr, and never touch stdout.
+	if stdout.Len() != 0 {
+		t.Errorf("error leaked to stdout: %q", stdout.String())
+	}
+
+	if got, want := stderr.String(), "✗ unavailable: connection refused\n"; got != want {
+		t.Errorf("error output = %q, want %q", got, want)
+	}
+}
+
+func TestWriteFileTransfer(t *testing.T) {
+	tests := []struct {
+		name string
+		data FileTransfer
+		want string
+	}{
+		{
+			name: "sent",
+			data: FileTransfer{Direction: "sent", Path: "firmware.bin", Bytes: 1258291},
+			want: "↑ sent \"firmware.bin\" (1.2 MiB)\n",
+		},
+		{
+			name: "received",
+			data: FileTransfer{Direction: "received", Path: "result.log", Bytes: 4096},
+			want: "↓ received \"result.log\" (4.0 KiB)\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+
+			f := newTextFormatter(Config{Stdout: &stdout, Stderr: &stderr, NoColor: true})
+			f.WriteContent(Content{Type: TypeFileTransfer, Data: tt.data})
+
+			if got := stdout.String(); got != tt.want {
+				t.Errorf("file-transfer output = %q, want %q", got, tt.want)
+			}
+
+			if stderr.Len() != 0 {
+				t.Errorf("unexpected stderr output: %q", stderr.String())
+			}
+		})
+	}
+}
+
+func TestWriteFileTransferColored(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+
+	f := newTextFormatter(Config{Stdout: &stdout, Stderr: &stderr, NoColor: false})
+	f.WriteContent(Content{
+		Type: TypeFileTransfer,
+		Data: FileTransfer{Direction: "sent", Path: "fw.bin", Bytes: 1024},
+	})
+
+	out := stdout.String()
+	if !strings.Contains(out, "\033[36m") || !strings.Contains(out, "\033[0m") {
+		t.Errorf("expected ANSI colour codes when colour enabled, got %q", out)
+	}
+}
+
+func TestHumanBytes(t *testing.T) {
+	tests := []struct {
+		in   int
+		want string
+	}{
+		{0, "0 B"},
+		{512, "512 B"},
+		{1023, "1023 B"},
+		{1024, "1.0 KiB"},
+		{4096, "4.0 KiB"},
+		{1258291, "1.2 MiB"},
+		{1024 * 1024, "1.0 MiB"},
+		{1024 * 1024 * 1024, "1.0 GiB"},
+	}
+
+	for _, tt := range tests {
+		if got := humanBytes(tt.in); got != tt.want {
+			t.Errorf("humanBytes(%d) = %q, want %q", tt.in, got, tt.want)
+		}
 	}
 }

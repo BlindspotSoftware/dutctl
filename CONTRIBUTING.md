@@ -134,6 +134,24 @@ We recommend setting up your editor to run golangci-lint automatically. Most pop
 - **GoLand**: Install the Golangci-lint plugin
 - **Vim/Neovim**: Configure with ALE or similar linting engines
 
+### Logging
+
+The `dutctl` client keeps diagnostic logging separate from command output:
+
+- **stdout** carries results and agent/module output (the `output.Formatter`). Never log to stdout.
+- **stderr** carries client diagnostics via the standard `log/slog` package.
+
+Use only two levels:
+
+- `slog.Debug` — internal trace; hidden unless the user passes `--log debug`.
+- `slog.Warn` — non-fatal anomalies. By default (`--log warn`) warnings are collected and printed as a short summary when the command finishes, so they never interrupt streaming output.
+
+Other slog entry points (`slog.Info`, `slog.Error`, `slog.Log`, the `*Context` variants) are rejected by `forbidigo`. The handler still maps any level by severity (`>= Warn` → warn, else debug), but write `Debug`/`Warn` in code.
+
+Errors that should stop the command are **returned**, not logged — they bubble up to a single exit point and are rendered through the formatter (format-aware, on stderr). There is intentionally no error log level.
+
+The handler and the `--log` flag (`debug|warn|none`, default `warn`) live in [`cmds/dutctl/clilog.go`](cmds/dutctl/clilog.go).
+
 ### Documentation Style Guide
 
 - Use Markdown for documentation

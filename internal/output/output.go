@@ -33,6 +33,9 @@ const (
 
 	// TypeLockResult represents the result of a lock or unlock operation.
 	TypeLockResult ContentType = "lock-result"
+
+	// TypeFileTransfer represents a file transferred between client and agent.
+	TypeFileTransfer ContentType = "file-transfer"
 )
 
 // DeviceEntry describes a device and its lock state for TypeDeviceList output.
@@ -41,6 +44,14 @@ type DeviceEntry struct {
 	Locked    bool
 	Owner     string
 	ExpiresAt int64 // Unix seconds, 0 means no expiry.
+}
+
+// FileTransfer describes a file sent to or received from the agent for
+// TypeFileTransfer output. Direction is "sent" or "received".
+type FileTransfer struct {
+	Direction string `json:"direction" yaml:"direction"`
+	Path      string `json:"path"      yaml:"path"`
+	Bytes     int    `json:"bytes"     yaml:"bytes"`
 }
 
 // Content is a structured data unit to be formatted and displayed.
