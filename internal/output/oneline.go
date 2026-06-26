@@ -121,6 +121,13 @@ func formatDataValue(data interface{}, separator string) string {
 		return formatQuotedString(strings.Join(entries, "|"), separator)
 	case DeviceEntry:
 		return formatQuotedString(deviceEntryString(dataValue), separator)
+	case FileTransfer:
+		// Path goes last so it stays unambiguous even when it contains the
+		// separator or a colon (e.g. Windows paths like C:\...); the whole
+		// field is quoted by formatQuotedString.
+		token := fmt.Sprintf("%s %d %s", dataValue.Direction, dataValue.Bytes, dataValue.Path)
+
+		return formatQuotedString(token, separator)
 	default:
 		// Convert anything else to string
 		return formatQuotedString(fmt.Sprintf("%v", dataValue), separator)

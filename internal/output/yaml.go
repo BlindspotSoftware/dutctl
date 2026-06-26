@@ -7,7 +7,7 @@ package output
 import (
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -68,7 +68,7 @@ func (f *YAMLFormatter) WriteContent(content Content) {
 
 	bytes, err := yaml.Marshal(output)
 	if err != nil {
-		log.Printf("Error marshaling YAML: %v", err)
+		slog.Warn("failed to render output", "format", "yaml", "err", err)
 
 		return
 	}
@@ -108,7 +108,7 @@ func output(outputs []YAMLOutput, writer io.Writer) {
 	for _, output := range outputs {
 		bytes, err := yaml.Marshal(output)
 		if err != nil {
-			log.Printf("Error marshaling YAML during flush: %v", err)
+			slog.Warn("failed to render output", "format", "yaml", "err", err)
 
 			continue
 		}

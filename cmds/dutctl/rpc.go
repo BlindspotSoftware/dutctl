@@ -11,9 +11,11 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"log"
+	"log/slog"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"connectrpc.com/connect"
@@ -22,6 +24,11 @@ import (
 
 	pb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1"
 )
+
+// errInterrupted is returned by runRPC when the run is terminated by a signal
+// (Ctrl-C) rather than by the agent or an error. exit() reports it as an
+// "interrupted" status with exit code 130, not as a failure.
+var errInterrupted = errors.New("interrupted")
 
 func (app *application) listRPC() error {
 	ctx := context.Background()
@@ -188,12 +195,18 @@ func (app *application) detailsRPC(device, command, keyword string) error {
 	return nil
 }
 
-//nolint:funlen,cyclop,gocognit
+//nolint:funlen,cyclop,gocognit,maintidx // coordinates two streaming worker goroutines; inherently branchy
 func (app *application) runRPC(device, command string, cmdArgs []string) error {
 	const numWorkers = 2 // The send and receive worker goroutines
 
-	runCtx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	// appCtx is cancelled on SIGINT/SIGTERM so Ctrl-C terminates gracefully
+	// (running the normal teardown and flushing the warning summary) instead of
+	// killing the process. runCtx is the child the workers cancel on completion.
+	appCtx, cancelAppCtx := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancelAppCtx()
+
+	runCtx, cancelRunCtx := context.WithCancel(appCtx)
+	defer cancelRunCtx()
 
 	errChan := make(chan error, numWorkers)
 
@@ -225,23 +238,29 @@ func (app *application) runRPC(device, command string, cmdArgs []string) error {
 
 	// Receive routine
 	go func() {
-		defer cancel()
+		defer cancelRunCtx()
 
 		for {
 			select {
 			case <-runCtx.Done():
-				log.Println("Receive routine terminating: Run-Context cancelled")
+				slog.Debug("receive routine terminating", "reason", "run-context cancelled")
 
 				return
 			default: // Unblock select, continue with the forwarding logic.
 			}
 
 			res, err := stream.Receive()
-			if errors.Is(err, io.EOF) {
-				log.Println("Receive routine terminating: Stream closed by agent")
+
+			switch {
+			case errors.Is(err, io.EOF):
+				slog.Debug("receive routine terminating", "reason", "stream closed by agent")
 
 				return
-			} else if err != nil {
+			case err != nil && (errors.Is(err, context.Canceled) || connect.CodeOf(err) == connect.CodeCanceled):
+				slog.Debug("receive routine terminating", "reason", "context cancelled")
+
+				return
+			case err != nil:
 				errChan <- fmt.Errorf("receiving RPC message: %w", err)
 
 				return
@@ -271,11 +290,11 @@ func (app *application) runRPC(device, command string, cmdArgs []string) error {
 						Metadata: metadata,
 					})
 				case *pb.Console_Stdin:
-					log.Printf("Unexpected Console Stdin %q", string(consoleData.Stdin))
+					slog.Warn("unexpected console stdin from agent", "data", string(consoleData.Stdin))
 				}
 			case *pb.RunResponse_FileRequest:
 				path := msg.FileRequest.GetPath()
-				log.Printf("File request for: %q\n", path)
+				slog.Debug("file requested by agent", "path", path)
 
 				content, err := os.ReadFile(path)
 				if err != nil {
@@ -298,15 +317,17 @@ func (app *application) runRPC(device, command string, cmdArgs []string) error {
 					return
 				}
 
-				log.Printf("Sent file: %q\n", path)
+				app.formatter.WriteContent(output.Content{
+					Type:     output.TypeFileTransfer,
+					Data:     output.FileTransfer{Direction: "sent", Path: path, Bytes: len(content)},
+					Metadata: metadata,
+				})
 			case *pb.RunResponse_File:
 				path := msg.File.GetPath()
 				content := msg.File.GetContent()
 
-				log.Printf("Received file: %q\n", path)
-
 				if len(content) == 0 {
-					log.Println("Received empty file content")
+					slog.Warn("received empty file content", "path", path)
 				}
 
 				perm := 0600
@@ -318,8 +339,14 @@ func (app *application) runRPC(device, command string, cmdArgs []string) error {
 					return
 				}
 
+				app.formatter.WriteContent(output.Content{
+					Type:     output.TypeFileTransfer,
+					Data:     output.FileTransfer{Direction: "received", Path: path, Bytes: len(content)},
+					Metadata: metadata,
+				})
+
 			default:
-				log.Printf("Unexpected message type %T", msg)
+				slog.Warn("unexpected message type", "type", fmt.Sprintf("%T", msg))
 			}
 		}
 	}()
@@ -340,7 +367,7 @@ func (app *application) runRPC(device, command string, cmdArgs []string) error {
 		for {
 			select {
 			case <-runCtx.Done():
-				log.Println("Send routine terminating: Run-Context cancelled")
+				slog.Debug("send routine terminating", "reason", "run-context cancelled")
 
 				return
 			default:
@@ -375,6 +402,13 @@ func (app *application) runRPC(device, command string, cmdArgs []string) error {
 	// Wait for completion or error
 	select {
 	case <-runCtx.Done():
+		// appCtx.Err() is non-nil only if a signal fired (the deferred
+		// cancelAppCtx has not run yet), distinguishing Ctrl-C from a normal
+		// stream-closed teardown.
+		if appCtx.Err() != nil {
+			return errInterrupted
+		}
+
 		return nil
 	case err := <-errChan:
 		return err

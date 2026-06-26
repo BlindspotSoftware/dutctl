@@ -8,7 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"time"
 )
 
@@ -70,7 +70,7 @@ func (f *JSONFormatter) WriteContent(content Content) {
 
 	bytes, err := json.MarshalIndent(output, "", "  ")
 	if err != nil {
-		log.Printf("Error marshaling JSON: %v", err)
+		slog.Warn("failed to render output", "format", "json", "err", err)
 
 		return
 	}

@@ -12,6 +12,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/BlindspotSoftware/dutctl/internal/style"
 )
 
 // TextFormatter implements Formatter with plain text formatting capabilities.
@@ -29,7 +31,7 @@ type TextFormatter struct {
 	errBuffer           bytes.Buffer
 	metadataCache       map[string]string // Cache to remember last printed metadata
 	isLastWriteToStderr bool              // Tracks if the last metadata write was to stderr (true) or stdout (false)
-	invertedMetadata    bool              // Controls whether metadata is displayed with inverted colors
+	useColor            bool              // Whether colored output is enabled
 }
 
 // newTextFormatter creates a new TextFormatter instance configured according to the provided Config.
@@ -45,12 +47,12 @@ func newTextFormatter(config Config) *TextFormatter {
 	}
 
 	return &TextFormatter{
-		stdout:           config.Stdout,
-		stderr:           config.Stderr,
-		verbose:          config.Verbose,
-		buffering:        false,
-		metadataCache:    make(map[string]string),
-		invertedMetadata: !config.NoColor, // Enable inverted metadata by default unless NoColor is set
+		stdout:        config.Stdout,
+		stderr:        config.Stderr,
+		verbose:       config.Verbose,
+		buffering:     false,
+		metadataCache: make(map[string]string),
+		useColor:      !config.NoColor,
 	}
 }
 
@@ -94,6 +96,8 @@ func (f *TextFormatter) WriteContent(content Content) {
 		f.writeModuleOutputTo(content, writer)
 	case TypeLockResult:
 		f.writeLockResultTo(content, writer)
+	case TypeFileTransfer:
+		f.writeFileTransferTo(content, writer)
 	default:
 		// For general text or unrecognized types
 		f.writeGeneralTo(content, writer)
@@ -179,6 +183,24 @@ func humanDuration(dur time.Duration) string {
 	}
 }
 
+// humanBytes renders a byte count as a compact "1.2 MiB"-style string using
+// binary (1024) units. Counts below 1 KiB are shown as plain bytes.
+func humanBytes(byteCount int) string {
+	const unit = 1024
+
+	if byteCount < unit {
+		return fmt.Sprintf("%d B", byteCount)
+	}
+
+	div, exp := int64(unit), 0
+	for v := int64(byteCount) / unit; v >= unit; v /= unit {
+		div *= unit
+		exp++
+	}
+
+	return fmt.Sprintf("%.1f %ciB", float64(byteCount)/float64(div), "KMGTPE"[exp])
+}
+
 // lockAnnotation renders the bracketed lock note for a locked device, e.g.
 // ` [locked by "alice@host" for 25m]`. ExpiresAt of 0 omits the duration.
 func lockAnnotation(entry DeviceEntry) string {
@@ -205,7 +227,10 @@ func (f *TextFormatter) writeDeviceListTo(content Content, writer io.Writer) {
 
 	for _, device := range devices {
 		if device.Locked {
-			fmt.Fprintf(writer, "- %s%s\n", device.Name, lockAnnotation(device))
+			// The device name is the payload; the lock note is secondary context,
+			// so it is muted (gray).
+			annotation := style.Colorize(f.useColor, style.Gray, lockAnnotation(device))
+			fmt.Fprintf(writer, "- %s%s\n", device.Name, annotation)
 		} else {
 			fmt.Fprintf(writer, "- %s\n", device.Name)
 		}
@@ -223,15 +248,41 @@ func (f *TextFormatter) writeLockResultTo(content Content, writer io.Writer) {
 
 	f.writeMetadata(content, writer)
 
+	var msg string
+
 	switch {
 	case !entry.Locked:
-		fmt.Fprintf(writer, "Device %q unlocked\n", entry.Name)
+		msg = fmt.Sprintf("Device %q unlocked", entry.Name)
 	case entry.ExpiresAt == 0:
-		fmt.Fprintf(writer, "Device %q locked by %q\n", entry.Name, entry.Owner)
+		msg = fmt.Sprintf("Device %q locked by %q", entry.Name, entry.Owner)
 	default:
 		remaining := humanDuration(time.Until(time.Unix(entry.ExpiresAt, 0)))
-		fmt.Fprintf(writer, "Device %q locked by %q for %s\n", entry.Name, entry.Owner, remaining)
+		msg = fmt.Sprintf("Device %q locked by %q for %s", entry.Name, entry.Owner, remaining)
 	}
+
+	line := style.MarkerSuccess + " " + msg
+	fmt.Fprintln(writer, style.Colorize(f.useColor, style.Green, line))
+}
+
+// writeFileTransferTo formats and writes a file-transfer progress line, e.g.
+// `↑ sent "firmware.bin" (1.2 MiB)` / `↓ received "result.log" (4.0 KiB)`.
+func (f *TextFormatter) writeFileTransferTo(content Content, writer io.Writer) {
+	transfer, ok := content.Data.(FileTransfer)
+	if !ok {
+		f.writeGeneralTo(content, writer)
+
+		return
+	}
+
+	f.writeMetadata(content, writer)
+
+	marker := style.MarkerSent
+	if transfer.Direction == "received" {
+		marker = style.MarkerReceived
+	}
+
+	line := fmt.Sprintf("%s %s %q (%s)", marker, transfer.Direction, transfer.Path, humanBytes(transfer.Bytes))
+	fmt.Fprintln(writer, style.Colorize(f.useColor, style.Cyan, line))
 }
 
 // writeCommandListTo formats and writes a list of commands with bullet points.
@@ -291,7 +342,15 @@ func (f *TextFormatter) writeGeneralTo(content Content, writer io.Writer) {
 
 	switch data := content.Data.(type) {
 	case string:
-		fmt.Fprint(writer, data)
+		// A string flagged as an error gets the error marker/color; IsError here
+		// means "client error" because device stderr is TypeModuleOutput and is
+		// rendered elsewhere.
+		if content.IsError {
+			line := style.MarkerError + " " + strings.TrimRight(data, "\n")
+			fmt.Fprintln(writer, style.Colorize(f.useColor, style.Red, line))
+		} else {
+			fmt.Fprint(writer, data)
+		}
 	case []byte:
 		fmt.Fprint(writer, string(data))
 	case []string:
@@ -315,21 +374,13 @@ func (f *TextFormatter) writeMetadata(content Content, writer io.Writer) {
 		return
 	}
 
-	// ANSI escape codes for inverted text and reset - only used if invertedMetadata is true
-	const (
-		invertCode = "\033[7m" // Invert colors
-		resetCode  = "\033[0m" // Reset formatting
-	)
-
-	// Process metadata that should be printed
+	// Process metadata that should be printed. Context lines are muted (gray)
+	// so they sit visually below the payload.
 	knownMetadata, otherMetadata := splitMetadata(content.Metadata)
 
 	if sentence := metadataText(knownMetadata); sentence != "" {
-		if f.invertedMetadata {
-			fmt.Fprintf(writer, "%s# %s%s\n", invertCode, sentence, resetCode)
-		} else {
-			fmt.Fprintf(writer, "# %s\n", sentence)
-		}
+		line := style.MarkerContext + " " + sentence
+		fmt.Fprintln(writer, style.Colorize(f.useColor, style.Gray, line))
 	}
 
 	// Print all remaining metadata on a single line, sorted by keys
@@ -342,11 +393,8 @@ func (f *TextFormatter) writeMetadata(content Content, writer io.Writer) {
 		slices.Sort(keys)
 
 		for _, key := range keys {
-			if f.invertedMetadata {
-				fmt.Fprintf(writer, "%s# %s: %s%s\n", invertCode, key, otherMetadata[key], resetCode)
-			} else {
-				fmt.Fprintf(writer, "# %s: %s\n", key, otherMetadata[key])
-			}
+			line := fmt.Sprintf("%s %s: %s", style.MarkerContext, key, otherMetadata[key])
+			fmt.Fprintln(writer, style.Colorize(f.useColor, style.Gray, line))
 		}
 	}
 

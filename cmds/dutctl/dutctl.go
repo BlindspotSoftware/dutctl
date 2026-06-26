@@ -11,7 +11,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 
@@ -51,13 +51,15 @@ option to release a lock held by another user.
 
 `
 
+// Usage strings for the command-line flags, shown in the OPTIONS section of `dutctl -h`.
 const (
-	serverAddrInfo   = `Address and port of the dutagent to connect to in the format: address:port`
-	outputFormatInfo = `Output format, text|json|yaml|oneline, default is text`
-	verboseInfo      = `Verbose output`
-	noColorInfo      = `Disable colored output`
-	userInfo         = `User Identity of the user of the device, defaults to <user>@<host>`
-	forceInfo        = `Force unlock a device locked by another user`
+	serverAddrUsage   = `Address and port of the dutagent to connect to in the format: address:port`
+	outputFormatUsage = `Output format, text|json|yaml|oneline, default is text`
+	verboseUsage      = `Annotate output with connection/RPC context (metadata)`
+	noColorUsage      = `Disable colored output`
+	userUsage         = `User Identity of the user of the device, defaults to <user>@<host>`
+	forceUsage        = `Force unlock a device locked by another user`
+	logUsage          = `Client-side diagnostic logging (on stderr), debug|warn|none, default is warn`
 )
 
 func newApp(stdin io.Reader, stdout, stderr io.Writer, exitFunc func(int), args []string) *application {
@@ -80,16 +82,29 @@ func newApp(stdin io.Reader, stdout, stderr io.Writer, exitFunc func(int), args 
 		app.printFlagDefaults()
 	}
 	// Flags
-	fs.StringVar(&app.serverAddr, "s", "localhost:1024", serverAddrInfo)
-	fs.StringVar(&app.outputFormat, "f", "", outputFormatInfo)
-	fs.BoolVar(&app.verbose, "v", false, verboseInfo)
-	fs.BoolVar(&app.noColor, "no-color", false, noColorInfo)
-	fs.StringVar(&app.user, "u", lock.DefaultUser(), userInfo)
-	fs.BoolVar(&app.force, "force", false, forceInfo)
+	fs.StringVar(&app.serverAddr, "s", "localhost:1024", serverAddrUsage)
+	fs.StringVar(&app.outputFormat, "f", "", outputFormatUsage)
+	fs.BoolVar(&app.verbose, "v", false, verboseUsage)
+	fs.BoolVar(&app.noColor, "no-color", false, noColorUsage)
+	fs.StringVar(&app.user, "u", lock.DefaultUser(), userUsage)
+	fs.BoolVar(&app.force, "force", false, forceUsage)
+
+	mode := logModeWarn
+	fs.Var(&mode, "log", logUsage)
 
 	//nolint:errcheck // flag.Parse always returns no error because of flag.ExitOnError
 	fs.Parse(args[1:])
 	app.args = fs.Args()
+
+	// Setup diagnostic logging. The handler writes to stderr only and is
+	// installed as the process default so any package can log via package-level
+	// slog. An invalid --log value was already rejected by fs.Parse above.
+	//
+	// Color is suppressed unless -no-color is unset AND the target stream is a
+	// terminal, so redirected/piped output stays free of ANSI escapes. The log
+	// handler is gated on stderr; the formatter's content on stdout.
+	app.logHandler = newCLIHandler(stderr, mode, !app.noColor && isTerminal(stderr))
+	slog.SetDefault(slog.New(app.logHandler))
 
 	// Setup output formatter
 	app.formatter = output.New(output.Config{
@@ -97,7 +112,7 @@ func newApp(stdin io.Reader, stdout, stderr io.Writer, exitFunc func(int), args 
 		Stderr:  stderr,
 		Format:  app.outputFormat,
 		Verbose: app.verbose,
-		NoColor: app.noColor,
+		NoColor: app.noColor || !isTerminal(stdout),
 	})
 
 	return &app
@@ -119,8 +134,14 @@ type application struct {
 	args              []string
 	printFlagDefaults func()
 
+	// runtime services
 	rpcClient dutctlv1connect.DeviceServiceClient
 	formatter output.Formatter
+	// logHandler is retained only so exit can call Flush: diagnostics are emitted
+	// via package-level slog (this handler is the process default), but the
+	// buffered warning summary must be flushed explicitly and Flush is not part
+	// of the slog.Handler interface reachable through slog.Default().
+	logHandler *cliHandler
 }
 
 func (app *application) setupRPCClient() {
@@ -151,10 +172,12 @@ func newInsecureClient() *http.Client {
 
 var errInvalidCmdline = fmt.Errorf("invalid command line")
 
+// exitInterrupted is the conventional exit code for termination by a signal
+// such as SIGINT (128 + signal number 2).
+const exitInterrupted = 130
+
 // start is the entry point of the application.
 func (app *application) start() {
-	log.SetOutput(app.stdout)
-
 	if len(app.args) == 0 {
 		app.exit(errInvalidCmdline)
 	}
@@ -201,32 +224,51 @@ func (app *application) start() {
 	app.exit(err)
 }
 
-// exit terminates the application. If the provided error is not nil, it is printed to
-// the standard error output. If printUsage is true, the usage information is printed additionally.
+// exit terminates the application. Buffered diagnostics (the warning summary)
+// are flushed first so they read as a trailing note, then any terminating
+// status or error is rendered through the formatter as the final output. A nil
+// error exits 0; an interrupt exits 130; any other error exits 1.
 func (app *application) exit(err error) {
+	if app.logHandler != nil {
+		app.logHandler.Flush()
+	}
+
 	if err == nil {
-		// Flush any buffered output before exiting
 		if app.formatter != nil {
 			_ = app.formatter.Flush()
 		}
 
 		app.exitFunc(0)
+
+		return
 	}
 
-	if err != nil {
-		log.Print(err)
+	if errors.Is(err, errInterrupted) {
+		app.formatter.WriteContent(output.Content{
+			Type:    output.TypeGeneral,
+			Data:    "interrupted",
+			IsError: true,
+		})
+
+		_ = app.formatter.Flush()
+		app.exitFunc(exitInterrupted)
+
+		return
 	}
+
+	// Render the terminating error through the formatter (stderr, format-aware).
+	app.formatter.WriteContent(output.Content{
+		Type:    output.TypeGeneral,
+		Data:    err.Error(),
+		IsError: true,
+	})
 
 	if errors.Is(err, errInvalidCmdline) {
 		fmt.Fprint(app.stderr, usageSynopsis)
 		app.printFlagDefaults()
 	}
 
-	// Flush any buffered output before exiting with error
-	if app.formatter != nil {
-		_ = app.formatter.Flush()
-	}
-
+	_ = app.formatter.Flush()
 	app.exitFunc(1)
 }
 

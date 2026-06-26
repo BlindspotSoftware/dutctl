@@ -124,6 +124,18 @@ linters:
     - zerologlint
 
   settings:
+    forbidigo:
+      forbid:
+        # Re-add forbidigo's defaults (defining `forbid` replaces them).
+        - pattern: '^(fmt\.Print(|f|ln)|print|println)$'
+          msg: do not print to stdout directly; use fmt.Fprint with an explicit writer, the output formatter, or slog
+        - pattern: '^spew\.(ConfigState\.)?Dump$'
+          msg: remove debug spew.Dump calls before committing
+        # Only slog.Debug and slog.Warn are sanctioned; other levels map into the
+        # client's two-channel logging model.
+        - pattern: '^slog\.(Info|Error|Log|LogAttrs|DebugContext|InfoContext|WarnContext|ErrorContext)$'
+          msg: use slog.Debug or slog.Warn only
+
     funcorder:
       # Checks if the exported methods of a structure are placed before the non-exported ones.
       # Default: true
