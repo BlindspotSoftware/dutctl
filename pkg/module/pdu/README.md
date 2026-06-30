@@ -23,13 +23,14 @@ pdu [on|off|toggle|status]
 
 If no command is provided, the module prints a usage message and exits.
 
-See [pdu-example-cfg.yml](./pdu-example-cfg.yml) for examples. 
+See [pdu-example-cfg.yml](./pdu-example-cfg.yml) for examples.
 
 ## Configuration Options
 
-| Option     | Type   | Description                                    |
-| ---------- | ------ | ---------------------------------------------- |
-| `host`     | string | Base URL of the PDU (e.g. `10.0.0.5`)          |
-| `user`     | string | (Optional) Username for HTTP Basic Auth        |
-| `password` | string | (Optional) Password for HTTP Basic Auth        |
-| `outlet`   | int    | Outlet number to control (0-15, defaults to 0) |
+| Option     | Type   | Description                                                         |
+| ---------- | ------ | -----------------------------------------------------------         |
+| `apistyle` | string | apiStyle of PDU either `gude` or `intellinet` default: 'intellinet' |
+| `host`     | string | Base URL of the PDU (e.g. `10.0.0.5`)                               |
+| `user`     | string | (Optional) Username for HTTP Basic Auth                             |
+| `password` | string | (Optional) Password for HTTP Basic Auth                             |
+| `outlet`   | int    | Outlet number to control (0-15, defaults to 0)                      |
