@@ -34,7 +34,9 @@ type IPMI struct {
 	Password string // Password is used for IPMI authentication. WARNING: Unsavely stored as plaintext
 	Timeout  string // Timeout is the duration for IPMI commands. Default: 10 seconds
 
-	client *ipmi.Client // client is the module's internal entity to forward IPMI commands
+	timeout   time.Duration // timeout is the resolved command timeout; set in Init
+	client    *ipmi.Client  // client is the current IPMI session; nil until the first command
+	connected bool          // connected tracks whether client holds a live session
 }
 
 // Ensure implementing the Module interface.
@@ -73,19 +75,19 @@ const (
 func (i *IPMI) Init(ctx context.Context) error {
 	l := log.FromContext(ctx)
 
-	port := i.Port
-	if port == 0 {
-		port = defaultPort
+	if i.Port == 0 {
+		i.Port = defaultPort
 		l.Debug(fmt.Sprintf("no port configured, using default %d", defaultPort))
 	}
 
 	// Parse custom timeout if provided; an unparseable value falls back to the default.
-	timeout := defaultTimeout
+	i.timeout = defaultTimeout
 
 	if i.Timeout != "" {
 		parsedTimeout, err := time.ParseDuration(i.Timeout)
 		if err == nil {
-			timeout = parsedTimeout
+			i.timeout = parsedTimeout
+			l.Debug(fmt.Sprintf("using custom timeout %s", i.timeout))
 		} else {
 			l.Debug(fmt.Sprintf("invalid timeout %q, using default %s", i.Timeout, defaultTimeout))
 		}
@@ -97,42 +99,105 @@ func (i *IPMI) Init(ctx context.Context) error {
 		return fmt.Errorf("IPMI Host is not set")
 	}
 
-	ipmiClient, err := ipmi.NewClient(i.Host, port, i.User, i.Password)
-	if err != nil {
-		return fmt.Errorf("failed to create IPMI client: %v", err)
-	}
-
-	ipmiClient.WithTimeout(timeout)
-	ipmiClient.WithRetry(trials)
-
-	// Bounded by ctx: today the init context is a plain background context, but
-	// passing it (not context.Background()) means a later startup deadline or
-	// shutdown cancellation on that context will bound this connect. TODO(ctx).
-	err = ipmiClient.Connect(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to connect to IPMI BMC %s:%d: %v", i.Host, port, err)
-	}
-
-	i.client = ipmiClient
-
-	l.Debug(fmt.Sprintf("connected to BMC %s:%d", i.Host, port))
+	// Deliberately do NOT open the IPMI session here. The BMC may be
+	// unreachable at agent startup (e.g. the board's outer power is off), and
+	// the dutagent treats a failed Init() as fatal — it shuts down and
+	// systemd crash-loops the whole agent, taking down every other device on
+	// the worker too. The session is opened lazily on the first command and
+	// re-opened automatically if it goes stale (see connect / withSession).
+	l.Debug(fmt.Sprintf("init completed for %s:%d (BMC session deferred to first use)", i.Host, i.Port))
 
 	return nil
 }
 
-func (i *IPMI) Deinit(ctx context.Context) error {
-	if i.client == nil {
+// connect ensures a live IPMI session exists. It is a no-op when already
+// connected; otherwise it builds a fresh client and opens a new session. A new
+// client is used each time so a previously stale session is fully discarded.
+// Called lazily on the first command (not in Init) so an unreachable BMC
+// surfaces as a normal command error instead of a fatal module-init failure.
+func (i *IPMI) connect(ctx context.Context) error {
+	if i.connected && i.client != nil {
 		return nil
 	}
 
-	return i.client.Close(ctx)
+	client, err := ipmi.NewClient(i.Host, i.Port, i.User, i.Password)
+	if err != nil {
+		return fmt.Errorf("failed to create IPMI client: %v", err)
+	}
+
+	client.WithTimeout(i.timeout)
+	client.WithRetry(trials)
+
+	err = client.Connect(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to connect to IPMI BMC %s: %w", i.Host, err)
+	}
+
+	i.client = client
+	i.connected = true
+
+	return nil
+}
+
+// disconnect closes the current session (best-effort) and clears it so the next
+// connect opens a fresh one. Used to recover from a session that has gone stale.
+func (i *IPMI) disconnect(ctx context.Context) {
+	if i.client != nil {
+		_ = i.client.Close(ctx)
+	}
+
+	i.client = nil
+	i.connected = false
+}
+
+// withSession runs op against a live IPMI session, transparently re-opening the
+// session once if op fails. IPMI/RMCP sessions idle-time-out and the BMC drops
+// inactive ones, so a cached session goes stale between commands; without this
+// the module would keep using the dead session and every command would time out
+// until the agent was restarted. On the first failure the session is dropped,
+// reconnected, and op is retried once so a stale session self-heals.
+func (i *IPMI) withSession(ctx context.Context, op func() error) error {
+	err := i.connect(ctx)
+	if err != nil {
+		return err
+	}
+
+	err = op()
+	if err == nil {
+		return nil
+	}
+
+	// First attempt failed — most likely a stale session. Drop it, reconnect,
+	// and retry once against a fresh session.
+	log.FromContext(ctx).Debug(fmt.Sprintf("command failed (%v); re-opening session and retrying once", err))
+
+	i.disconnect(ctx)
+
+	cerr := i.connect(ctx)
+	if cerr != nil {
+		return fmt.Errorf("%v; reconnect failed: %w", err, cerr)
+	}
+
+	return op()
+}
+
+func (i *IPMI) Deinit(ctx context.Context) error {
+	if i.client == nil || !i.connected {
+		return nil
+	}
+
+	err := i.client.Close(ctx)
+	if err != nil {
+		log.FromContext(ctx).Debug(fmt.Sprintf("Deinit failed to close client: %v", err))
+	}
+
+	i.client = nil
+	i.connected = false
+
+	return err
 }
 
 func (i *IPMI) Run(ctx context.Context, s module.Session, args ...string) error {
-	if i.client == nil {
-		return fmt.Errorf("IPMI client not initialized")
-	}
-
 	if len(args) == 0 {
 		s.Println("No command specified. Try 'help' for usage.")
 
@@ -175,7 +240,11 @@ func (i *IPMI) handlePowerCommand(ctx context.Context, s module.Session, command
 		message = "Power RESET command sent"
 	}
 
-	_, err := i.client.ChassisControl(ctx, controlType)
+	err := i.withSession(ctx, func() error {
+		_, cerr := i.client.ChassisControl(ctx, controlType)
+
+		return cerr
+	})
 	if err != nil {
 		return fmt.Errorf("power %s command failed: %v", command, err)
 	}
@@ -187,13 +256,24 @@ func (i *IPMI) handlePowerCommand(ctx context.Context, s module.Session, command
 }
 
 func (i *IPMI) handleStatusCommand(ctx context.Context, s module.Session) error {
-	status, err := i.client.GetChassisStatus(ctx)
+	var powerIsOn bool
+
+	err := i.withSession(ctx, func() error {
+		chassis, cerr := i.client.GetChassisStatus(ctx)
+		if cerr != nil {
+			return cerr
+		}
+
+		powerIsOn = chassis.PowerIsOn
+
+		return nil
+	})
 	if err != nil {
 		return fmt.Errorf("failed to get chassis status: %v", err)
 	}
 
 	powerStatus := "Off"
-	if status.PowerIsOn {
+	if powerIsOn {
 		powerStatus = "On"
 	}
 
