@@ -24,9 +24,10 @@ import (
 
 const usageAbstract = `dutctl - The client application of the DUT Control system.
 `
+
 const usageSynopsis = `
 SYNOPSIS:
-	dutctl [options] list
+	dutctl [options] [list]
 	dutctl [options] <device>
 	dutctl [options] <device> <command> [args...]
 	dutctl [options] <device> <command> help
@@ -35,6 +36,7 @@ SYNOPSIS:
 	dutctl version
 
 `
+
 const usageDescription = `
 If a device and a command are provided, dutctl will execute the command on the device.
 The optional args are passed to the command.
@@ -49,6 +51,7 @@ The lock command reserves a device for the current user; the optional duration
 (e.g. 30m, 2h) defaults to 30m. The unlock command releases it; pass the -force
 option to release a lock held by another user.
 
+When dutctl is run without any positional arguments, it defaults to the list command.
 `
 
 // Usage strings for the command-line flags, shown in the OPTIONS section of `dutctl -h`.
@@ -178,30 +181,32 @@ const exitInterrupted = 130
 
 // start is the entry point of the application.
 func (app *application) start() {
-	if len(app.args) == 0 {
-		app.exit(errInvalidCmdline)
-	}
-
-	if app.args[0] == "version" {
+	if len(app.args) > 0 && app.args[0] == "version" {
 		app.printVersion()
 		app.exit(nil)
 	}
 
 	app.setupRPCClient()
+	app.exit(app.dispatch())
+}
+
+// dispatch decides which RPC to call based on app.args.
+// It is split out from start so it can be unit tested without os.Exit.
+func (app *application) dispatch() error {
+	if len(app.args) == 0 {
+		return app.listRPC()
+	}
 
 	if app.args[0] == "list" {
 		if len(app.args) > 1 {
-			app.exit(errInvalidCmdline)
+			return errInvalidCmdline
 		}
 
-		err := app.listRPC()
-		app.exit(err)
+		return app.listRPC()
 	}
 
 	if len(app.args) == 1 {
-		device := app.args[0]
-		err := app.commandsRPC(device)
-		app.exit(err)
+		return app.commandsRPC(app.args[0])
 	}
 
 	device := app.args[0]
@@ -216,12 +221,10 @@ func (app *application) start() {
 	}
 
 	if len(cmdArgs) > 0 && cmdArgs[0] == "help" {
-		err := app.detailsRPC(device, command, "help")
-		app.exit(err)
+		return app.detailsRPC(device, command, "help")
 	}
 
-	err := app.runRPC(device, command, cmdArgs)
-	app.exit(err)
+	return app.runRPC(device, command, cmdArgs)
 }
 
 // exit terminates the application. Buffered diagnostics (the warning summary)
