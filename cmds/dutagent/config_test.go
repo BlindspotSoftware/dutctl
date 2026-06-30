@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/BlindspotSoftware/dutctl/pkg/dut"
+	"github.com/BlindspotSoftware/dutctl/pkg/keyword"
 	"gopkg.in/yaml.v3"
 )
 
@@ -56,5 +57,22 @@ func TestInvalidConfigEmptyDevices(t *testing.T) {
 
 	if !errors.Is(err, dut.ErrEmptyDevices) {
 		t.Errorf("errors.Is: want %v, got %v", dut.ErrEmptyDevices, err)
+	}
+}
+
+func TestInvalidConfigReservedCommandName(t *testing.T) {
+	data := loadTestdata(t, "invalid_config_reserved_command.yaml")
+
+	var cfg config
+
+	err := yaml.Unmarshal(data, &cfg)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	t.Logf("error message: %s", err)
+
+	if !errors.Is(err, keyword.ErrReservedName) {
+		t.Errorf("errors.Is: want %v, got %v", keyword.ErrReservedName, err)
 	}
 }

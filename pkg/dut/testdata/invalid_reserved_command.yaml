@@ -1,7 +1,7 @@
 device1:
   desc: "Device 1"
   cmds:
-    lock:
+    help:
       desc: "Report status"
       uses:
         - module: dummy-status
