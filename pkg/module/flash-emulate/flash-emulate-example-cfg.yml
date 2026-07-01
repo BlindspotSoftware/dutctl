@@ -1,8 +1,9 @@
----
-version: 1.0.0-alpha.1 # x-release-please-version
+version: 2.0.0-alpha.1
 devices:
   xyz:
-    desc: "A mainboard that uses a Dediprog EM100Pro-G2 flash emulator during firmware development"
+    desc: >-
+      A mainboard that uses a Dediprog EM100Pro-G2 flash emulator during
+      firmware development
     cmds:
       flash-emulate:
         desc: |
@@ -11,6 +12,4 @@ devices:
           - module: flash-emulate
             passthrough: true
             with:
-              chip: "N25Q256A13"
-              # tool: "/usr/local/bin/em100"  # optional, defaults to em100
-              # device: "0"                    # optional, for multiple emulators
+              chip: N25Q256A13

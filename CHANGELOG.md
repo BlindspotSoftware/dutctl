@@ -1,5 +1,137 @@
 # Changelog
 
+## [2.0.0-alpha.1](https://github.com/BlindspotSoftware/dutctl/compare/v1.0.0-alpha.1...v2.0.0-alpha.1) (2026-07-01)
+
+
+### ⚠ BREAKING CHANGES
+
+* The serial module's invocation changed. It no longer accepts a single optional expect regex; callers must pass an explicit step sequence. For example, `serial "(?i)hello"` becomes `serial -- expect "(?i)hello"`. Existing configs/scripts using the old form must be updated.
+* The `main` YAML config key on modules is replaced by `passthrough`. Existing config files must be updated.
+* The dutagent configuration changed. Existing configurations must be updated in the following way: From commands:   - name: example     modules:       - name: flash         options:           file: firmware.bin To commands:   - name: example     uses:       - name: flash         with:           file: firmware.bin
+* Flash module removed default tool. Users must now explicitly configure the tool option in their flash module configuration.
+* The -v flag now enabled verbose output, while version information is printed with the 'dutctl version' command.
+* The client does not add an extra newline to received Print messages anymore.
+
+### Features
+
+* add --log level and keep diagnostics off stdout ([93df26a](https://github.com/BlindspotSoftware/dutctl/commit/93df26a26b53880c5ddc4c00586825e301e05d7a))
+* add command-level argument templating ([711c8d2](https://github.com/BlindspotSoftware/dutctl/commit/711c8d29f3986a46283a8d21bfafd38fc28caffa))
+* add dpcmd support ([13a4ace](https://github.com/BlindspotSoftware/dutctl/commit/13a4acee09848ff7458bb4eb7bf7dfbdbbd07109))
+* add emulate module for em100 support ([268bb80](https://github.com/BlindspotSoftware/dutctl/commit/268bb80c75e0c8d398d0e6270e14165b8b4cbd86))
+* add file module for bidirectional file transfers ([ded8a2c](https://github.com/BlindspotSoftware/dutctl/commit/ded8a2cf7bc96061d743df511bb3060c47a087f6))
+* add flashprog support to flash module ([7a9c309](https://github.com/BlindspotSoftware/dutctl/commit/7a9c30990ebce4ad84b3dbddbf5677c01e9823ad))
+* add further output options to dutctl ([5c027cc](https://github.com/BlindspotSoftware/dutctl/commit/5c027ccb170f37eb35a64ac16596872674ba936d))
+* add lock and unlock client commands ([f2b5ea8](https://github.com/BlindspotSoftware/dutctl/commit/f2b5ea834299c5716a90662549fcef64408df0f9))
+* add Lock and Unlock RPCs with agent handlers ([99ccc6b](https://github.com/BlindspotSoftware/dutctl/commit/99ccc6b2b3097d0cb57f8bdd6d0d078daaf0ba88))
+* add per-device Locker engine ([c825745](https://github.com/BlindspotSoftware/dutctl/commit/c82574542146506ab90767df3befcbd52b61a91c))
+* add systemd service ([377e47e](https://github.com/BlindspotSoftware/dutctl/commit/377e47e6dc57b46454279ee80155ef2c761a4af9))
+* add wifi socket module ([329161d](https://github.com/BlindspotSoftware/dutctl/commit/329161d5b3834edc5b871741e5feea059a350b48))
+* annotate YAML config errors with device, command, and line ([71a0968](https://github.com/BlindspotSoftware/dutctl/commit/71a0968fa6aeaef1ee938f01930a62b41a5c9e4a))
+* default to list when dutctl is run without arguments ([352a464](https://github.com/BlindspotSoftware/dutctl/commit/352a46488462dbf0ecb84ca5c90ea2beef496a3a))
+* dutctl verbose output flag ([abb8d67](https://github.com/BlindspotSoftware/dutctl/commit/abb8d67afcfc56a7d713a9c64e2329503d5340f4))
+* embed release version constant ([f21b45d](https://github.com/BlindspotSoftware/dutctl/commit/f21b45de4fb9e6db83fbd3dc9b9356cdec1c2ce1))
+* enforce per-device locking on Run ([9c33e80](https://github.com/BlindspotSoftware/dutctl/commit/9c33e80aba784eb83c106589c898ca942b33dd50))
+* establish reusable test doubles ([62a5c99](https://github.com/BlindspotSoftware/dutctl/commit/62a5c990e7b69f73aa1126b5dfb89b406a51b66a))
+* extend module.Session interface  with fmt-style print functions ([3432675](https://github.com/BlindspotSoftware/dutctl/commit/34326753a2a6afc4722329d5e87a8ca6caa89ba4))
+* reject reserved command names in device config ([81ee7f6](https://github.com/BlindspotSoftware/dutctl/commit/81ee7f65bfa6f0b7d0a267a1b6411c9c422964db))
+* serial expect/send automation with monitor mode ([9f57498](https://github.com/BlindspotSoftware/dutctl/commit/9f57498b4ebf99cc1960015832986f059673020b))
+* show device lock state in list output ([0d56523](https://github.com/BlindspotSoftware/dutctl/commit/0d56523cb29c1399bea6550917fa5f72237af9a7))
+
+
+### Bug Fixes
+
+* add missing newline to gpio-switch state output ([a0fbd64](https://github.com/BlindspotSoftware/dutctl/commit/a0fbd64cf607f0e817ac1f8dde29839ec50c4ef7))
+* allow command templating without a passthrough module ([282989f](https://github.com/BlindspotSoftware/dutctl/commit/282989f5948bb7f94bb588865dd94957ca4c0945))
+* broker does not treat io.EOF as error ([1588898](https://github.com/BlindspotSoftware/dutctl/commit/15888988dfdfef39270b3db5efbb31dc8b334042))
+* clear serial expect pattern between runs ([#315](https://github.com/BlindspotSoftware/dutctl/issues/315)) ([b55455e](https://github.com/BlindspotSoftware/dutctl/commit/b55455e8afb9adca3226c702423b8629c1236e50))
+* defer port opening to runtime in serial module ([fd417af](https://github.com/BlindspotSoftware/dutctl/commit/fd417af170850aec61e40d4bf74376b9b2d09124))
+* don't cancel run context on stdin EOF in dutctl client ([cf7de77](https://github.com/BlindspotSoftware/dutctl/commit/cf7de77771b3bf142095cef3ab0cee89739f0a49))
+* don't dial DUT in Init ([dadd3ae](https://github.com/BlindspotSoftware/dutctl/commit/dadd3aea87e653f999643a0b56232e71f872f77c))
+* flush stale RX buffer on connect ([040d45c](https://github.com/BlindspotSoftware/dutctl/commit/040d45cf6d3893eb7beddd7e1b79d32358ccce03))
+* harden module Init/Deinit lifecycle ([7a6518f](https://github.com/BlindspotSoftware/dutctl/commit/7a6518ff4da213bc53d3658508d3231588ca90f3))
+* initialize gpio-switch state to off on startup ([5dfd776](https://github.com/BlindspotSoftware/dutctl/commit/5dfd776ddf3059deb0d6aaf74e18f9e8fe181ef4))
+* ipmi-example-cfg.yml ([2d61fc9](https://github.com/BlindspotSoftware/dutctl/commit/2d61fc9be5c8236283036447850370ddc143bbd3))
+* make GPIO Deinit safe to call without prior Init ([36c69c6](https://github.com/BlindspotSoftware/dutctl/commit/36c69c64bbe57ffe73866d94abbeecdda7836a86))
+* prevent infinite recursion in Device.UnmarshalYAML ([af34a6e](https://github.com/BlindspotSoftware/dutctl/commit/af34a6e7d183f3a51251ccefc7f2aad8a65a23ce))
+* relay flash tool stdout/stderr to client ([78a623c](https://github.com/BlindspotSoftware/dutctl/commit/78a623cef29f786b2a158cb4262a4d34e4dcf601))
+* remove extra newline for print messages ([afe31fe](https://github.com/BlindspotSoftware/dutctl/commit/afe31fe40513d431ab9ecf5cef24c9620d332255))
+* stream bytes without waiting for newline ([6a7205c](https://github.com/BlindspotSoftware/dutctl/commit/6a7205c0e49194a9dd695562cd0579682b5f08cb))
+
+
+### Documentation
+
+* add missing modules to README and fix IPMI link ([b79eff2](https://github.com/BlindspotSoftware/dutctl/commit/b79eff2064daffff52eea72c10a7898fe6ea9876))
+* add README and example config for dummy module ([6e1673f](https://github.com/BlindspotSoftware/dutctl/commit/6e1673f8e739a49c4c2d4df80ab984bc34c403b7))
+* explain module.Session interface ([3e9612e](https://github.com/BlindspotSoftware/dutctl/commit/3e9612eb677d904b3ea634c0d6a5f28e1afabcaf))
+* fix several linting issues in markdown files ([1db2cfa](https://github.com/BlindspotSoftware/dutctl/commit/1db2cfa0a3890ba73bf7499a5a28ab73c63fd4ae))
+* fix typos in stream and test fakes ([52d7e32](https://github.com/BlindspotSoftware/dutctl/commit/52d7e323ed8e4565bf2be5665ef082a63eeab684))
+* fix typos, spelling and tables ([c1dbf9b](https://github.com/BlindspotSoftware/dutctl/commit/c1dbf9b840f91a3c6f22332a704839fe2374e2c6))
+* sanitize modules example configuration ([0479c66](https://github.com/BlindspotSoftware/dutctl/commit/0479c66eb96ab7e94208280eb87569779a834768))
+
+
+### Other Work
+
+* add goreleaser config ([f156a48](https://github.com/BlindspotSoftware/dutctl/commit/f156a48c92f58f5a00dd04e2ca654b7cf948c83a))
+* assert gpio switch state after Init and Run output format ([437fe4e](https://github.com/BlindspotSoftware/dutctl/commit/437fe4eadeda8bd3214d16f6a0bd91e74ee98012))
+* broker worker lifecycle and error channel handling ([1da20f9](https://github.com/BlindspotSoftware/dutctl/commit/1da20f96be24b0506741e9960ca914920f60a722))
+* broker.Start returns session and error channel ([b970bac](https://github.com/BlindspotSoftware/dutctl/commit/b970bac4554a4b4b087b44661b464866e123a760))
+* bump actions/checkout from 4 to 5 ([ab84c81](https://github.com/BlindspotSoftware/dutctl/commit/ab84c8109330b5bea1247ebbe161d71e6ea442ff))
+* bump actions/checkout from 5 to 6 ([3bb8551](https://github.com/BlindspotSoftware/dutctl/commit/3bb8551a2ef06a77ddd8b24f8e3ee00825d17714))
+* bump actions/checkout from 6 to 7 ([1c601b4](https://github.com/BlindspotSoftware/dutctl/commit/1c601b470f74fd05385894f6fed13e91b3f75d37))
+* bump actions/checkout from 6 to 7 ([d49dfe0](https://github.com/BlindspotSoftware/dutctl/commit/d49dfe0bd0f53c9764ec0cb6a452783031baca12))
+* bump actions/setup-go from 5 to 6 ([77b3beb](https://github.com/BlindspotSoftware/dutctl/commit/77b3beb4336d393ec08bcecfd3c38d44aa0af35e))
+* bump actions/setup-node from 4 to 6 ([bd4e5f7](https://github.com/BlindspotSoftware/dutctl/commit/bd4e5f71f9ab340a78ef00f90b846adb77f75058))
+* bump connectrpc.com/connect from 1.18.1 to 1.19.1 ([323b013](https://github.com/BlindspotSoftware/dutctl/commit/323b013a9fab7357433e676ee2fa96aead0c8ee5))
+* bump connectrpc.com/connect from 1.19.1 to 1.19.2 ([0fa7ce2](https://github.com/BlindspotSoftware/dutctl/commit/0fa7ce2143283e5bf3b5551e91caeed57ef5cf4d))
+* bump connectrpc.com/connect from 1.19.2 to 1.20.0 ([710bbcd](https://github.com/BlindspotSoftware/dutctl/commit/710bbcd16264e62af932698a229f9be2f83f6286))
+* bump github.com/bougou/go-ipmi from 0.7.7 to 0.7.8 ([d561eab](https://github.com/BlindspotSoftware/dutctl/commit/d561eab15674ea30f35f9667500bbf1d3a57f4d2))
+* bump github.com/bougou/go-ipmi from 0.7.8 to 0.8.2 ([2a7da65](https://github.com/BlindspotSoftware/dutctl/commit/2a7da6522da80e5d27c0e8793e3e21014b7fe713))
+* bump github.com/go-playground/validator/v10 ([4674844](https://github.com/BlindspotSoftware/dutctl/commit/46748448d3019b0545da7254ceed8ac0fea61cc3))
+* bump github.com/go-playground/validator/v10 ([47e4c1f](https://github.com/BlindspotSoftware/dutctl/commit/47e4c1f4bae50ffcb185c17bc4f2a1d53ac71ded))
+* bump github.com/go-playground/validator/v10 ([cabf73d](https://github.com/BlindspotSoftware/dutctl/commit/cabf73de494174285fbfd31428563d333b0aca78))
+* bump github.com/go-playground/validator/v10 ([3f39f64](https://github.com/BlindspotSoftware/dutctl/commit/3f39f64ad88e227f90fcc05c37424d45704d40d6))
+* bump github.com/go-playground/validator/v10 ([2293e9d](https://github.com/BlindspotSoftware/dutctl/commit/2293e9d6948eaf7221a0d5ba953ab1ef0c9c952b))
+* bump golang.org/x/crypto ([933701c](https://github.com/BlindspotSoftware/dutctl/commit/933701cdba424f312f490806e79d53038362d70b))
+* bump golang.org/x/crypto from 0.45.0 to 0.46.0 ([4f262d8](https://github.com/BlindspotSoftware/dutctl/commit/4f262d8b8bc25e61345078e7ea9899bda7871021))
+* bump golang.org/x/crypto from 0.46.0 to 0.47.0 ([e75f000](https://github.com/BlindspotSoftware/dutctl/commit/e75f00066bf5534b11053fedea87a3d44504f39d))
+* bump golang.org/x/crypto from 0.49.0 to 0.50.0 ([073285c](https://github.com/BlindspotSoftware/dutctl/commit/073285c3b825d006f54fda298c13e11ab39fec08))
+* bump golang.org/x/crypto from 0.50.0 to 0.51.0 ([18d6d9d](https://github.com/BlindspotSoftware/dutctl/commit/18d6d9dae193f4327b0128e5ab0ef1c445f0f998))
+* bump golang.org/x/crypto from 0.51.0 to 0.53.0 ([c1ba946](https://github.com/BlindspotSoftware/dutctl/commit/c1ba946d644748b750c9d8adc4ca25bfb3e14bff))
+* bump golang.org/x/net from 0.42.0 to 0.46.0 ([f11049e](https://github.com/BlindspotSoftware/dutctl/commit/f11049e60a6e014d8468f439bee386e68daafac7))
+* bump golang.org/x/net from 0.46.0 to 0.47.0 ([da28691](https://github.com/BlindspotSoftware/dutctl/commit/da286913efed73be4d040ec932698ab4bb911474))
+* bump golang.org/x/net from 0.47.0 to 0.48.0 ([bc399bd](https://github.com/BlindspotSoftware/dutctl/commit/bc399bd9f1bcc4c50d2598c446f30bd543c851e4))
+* bump golang.org/x/net from 0.48.0 to 0.49.0 ([6e3aaa0](https://github.com/BlindspotSoftware/dutctl/commit/6e3aaa0a4fad081134579c208e528b2c004a6ae6))
+* bump golang.org/x/net from 0.49.0 to 0.50.0 ([2dd0cbb](https://github.com/BlindspotSoftware/dutctl/commit/2dd0cbbca02b8546fe31d46217d687594b933c63))
+* bump golang.org/x/net from 0.50.0 to 0.52.0 ([f7bc82f](https://github.com/BlindspotSoftware/dutctl/commit/f7bc82fce3521c02a298758777d1d9946fda04ce))
+* bump golang.org/x/net from 0.52.0 to 0.53.0 ([00f4600](https://github.com/BlindspotSoftware/dutctl/commit/00f4600d8d33ed9dda3395ed98297358af23567f))
+* bump golangci/golangci-lint-action from 8 to 9 ([244cb31](https://github.com/BlindspotSoftware/dutctl/commit/244cb3153fe60f6311163cd0ccb074a93a37c707))
+* bump google.golang.org/protobuf from 1.36.10 to 1.36.11 ([4739d6b](https://github.com/BlindspotSoftware/dutctl/commit/4739d6b4f3e0b1c1739d0e67662aa8ff09c2b560))
+* bump google.golang.org/protobuf from 1.36.6 to 1.36.10 ([e49cc65](https://github.com/BlindspotSoftware/dutctl/commit/e49cc6559ee3084f4aaf2093654044f96bf71e88))
+* bump googleapis/release-please-action from 4 to 5 ([39a9a60](https://github.com/BlindspotSoftware/dutctl/commit/39a9a6034f722bee76510dc5116666ba1c369535))
+* centralise command query logic into Command methods ([8175951](https://github.com/BlindspotSoftware/dutctl/commit/8175951389159d91d302958ee420ca5826b08979))
+* change naming of dutagent config items ([f795b4c](https://github.com/BlindspotSoftware/dutctl/commit/f795b4cb3e45a48372265af8d6c28bb043693d32))
+* cover dutagent/states ([b7ea4c4](https://github.com/BlindspotSoftware/dutctl/commit/b7ea4c4fe19648cf6214c8f32f9dad9a8103c90b))
+* defer moduleErrCh channel init to FSM execution state ([4c01fd0](https://github.com/BlindspotSoftware/dutctl/commit/4c01fd04a705626201846e7d3b8062e07bd5e562))
+* dutctl output formatter ([923f673](https://github.com/BlindspotSoftware/dutctl/commit/923f673ad62424d6aabc0833dc76f8a918a40705))
+* early ctx cancellation in Run RPC ([7638b3b](https://github.com/BlindspotSoftware/dutctl/commit/7638b3ba86322400dda98e00a3f52668ae5ff65b))
+* fix flaky TestWaitModules by resolving race condition ([b98a7e3](https://github.com/BlindspotSoftware/dutctl/commit/b98a7e3c5e91e928540efd1eae0576fad8b70f3d))
+* fix typo and improve logging in rpc handler ([53cac3a](https://github.com/BlindspotSoftware/dutctl/commit/53cac3a14cf7fb2d3acd5747ffbcdb567d4244be))
+* group dutagent FSM states in own file ([f1014a4](https://github.com/BlindspotSoftware/dutctl/commit/f1014a4cca351d65338f7d0b1485d99d264d2d5e))
+* improve default output of dutctl ([46817ce](https://github.com/BlindspotSoftware/dutctl/commit/46817ce15923363133216170ab1d2b5b92af6199))
+* make main module optional for commands ([2af85e7](https://github.com/BlindspotSoftware/dutctl/commit/2af85e79e7a108a2aee5ff26afce8171ff5c981f))
+* modules use session.Print/f/ln functions ([a5acb8f](https://github.com/BlindspotSoftware/dutctl/commit/a5acb8fca7a7499bbc7af76c03e47ad63e791c19))
+* remove check if filepath on dutctl matches with args ([9f625a4](https://github.com/BlindspotSoftware/dutctl/commit/9f625a41a4fe4c28300fc8ff886e9bfe4b5abaa3))
+* rename "main module" to "passthrough" ([cdfeb52](https://github.com/BlindspotSoftware/dutctl/commit/cdfeb527ed5d86b59e7108df6ff6d3800b07476a))
+* replace deprecated h2c package with net/http Protocols ([a85e0da](https://github.com/BlindspotSoftware/dutctl/commit/a85e0da9ba6a9914687847e19c6a73540bafb79c))
+* resolve busy waiting in waitModules loop ([13b2ef7](https://github.com/BlindspotSoftware/dutctl/commit/13b2ef75ea3d111019c80da3ad259faf8de70f84))
+* send/receive synchronization in dutclient ([6f900f2](https://github.com/BlindspotSoftware/dutctl/commit/6f900f28bc6ebe01393a5972acdcfbf63aa27ba8))
+* tune .gitignore ([4e9c943](https://github.com/BlindspotSoftware/dutctl/commit/4e9c94318d254e20a45278012c6c0831e62a16fd))
+* unify broker and module channels to error-only pattern ([84e39d1](https://github.com/BlindspotSoftware/dutctl/commit/84e39d13f64aa4e7d11e4430168ad5e129925852))
+* update signoff signature in release-please-config ([bae6d59](https://github.com/BlindspotSoftware/dutctl/commit/bae6d599315d2bdf5764dc3a568e3b1d4d4916b6))
+* use constants for flag usage strings ([ceb0bf6](https://github.com/BlindspotSoftware/dutctl/commit/ceb0bf68656752b7bee4139b33748e203364eca9))
+* use dutagent.Stream as project wide RPC stream abstraction ([7c0fa17](https://github.com/BlindspotSoftware/dutctl/commit/7c0fa171608b56220f7617afdc15cbf7662fdf48))
+* use string for config version field ([e8d9c0d](https://github.com/BlindspotSoftware/dutctl/commit/e8d9c0d249cd58873897f803d9bb2bab659b0fee))
+
 ## [1.0.0-alpha.1](https://github.com/BlindspotSoftware/dutctl/compare/v0.10.0...v1.0.0-alpha.1) (2025-07-27)
 
 
