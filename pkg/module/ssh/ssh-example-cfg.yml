@@ -1,14 +1,18 @@
----
-version: 1.0.0-alpha.1 # x-release-please-version
+version: 2.0.0-alpha.1
 devices:
   laptop:
-    desc: "A laptop computer"
+    desc: A laptop computer
     cmds:
       ssh:
-        desc: |
-          "Basic demo of the SSH module: Use SSH as the passthrough module to connect
-          to the DUT. The SSH module is used to connect from the dutagent to the DUT
-          and execute commands that are passed to the module from the dutctl client.
+        desc: >
+          "Basic demo of the SSH module: Use SSH as the passthrough module to
+          connect
+
+          to the DUT. The SSH module is used to connect from the dutagent to the
+          DUT
+
+          and execute commands that are passed to the module from the dutctl
+          client.
         uses:
           - module: ssh
             passthrough: true
