@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/BlindspotSoftware/dutctl/pkg/keyword"
 	"github.com/BlindspotSoftware/dutctl/pkg/module"
 	"github.com/go-playground/validator/v10"
 	"gopkg.in/yaml.v3"
@@ -55,7 +56,6 @@ var (
 	ErrModuleNotFound             = errors.New("module not found")
 	ErrEmptyDevices               = errors.New("devices must not be empty")
 	ErrNoCommands                 = errors.New("device must have at least one command")
-	ErrReservedCommand            = errors.New("command name is reserved")
 )
 
 // UnmarshalYAML unmarshals a Devlist from a YAML node, wrapping errors
@@ -88,6 +88,10 @@ func (d *Devlist) UnmarshalYAML(node *yaml.Node) error {
 
 	for idx := 0; idx < len(node.Content); idx += 2 {
 		devName := node.Content[idx].Value
+
+		if keyword.IsReservedDeviceName(devName) {
+			return &ConfigError{Device: devName, Err: keyword.ErrReservedName}
+		}
 
 		var dev Device
 
@@ -188,8 +192,8 @@ func decodeCmds(node *yaml.Node) (map[string]Command, error) {
 	for idx := 0; idx < len(node.Content); idx += 2 {
 		cmdName := node.Content[idx].Value
 
-		if cmdName == "lock" || cmdName == "unlock" {
-			return nil, &ConfigError{Command: cmdName, Err: ErrReservedCommand}
+		if keyword.IsReservedCommandName(cmdName) {
+			return nil, &ConfigError{Command: cmdName, Err: keyword.ErrReservedName}
 		}
 
 		var cmd Command

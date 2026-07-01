@@ -13,6 +13,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/BlindspotSoftware/dutctl/pkg/keyword"
+
 	// Register dummy modules so module.New() succeeds in tests.
 	_ "github.com/BlindspotSoftware/dutctl/pkg/module/dummy"
 )
@@ -144,9 +146,9 @@ func TestInvalidConfig(t *testing.T) {
 		{
 			name:         "reserved_command_name",
 			file:         "invalid_reserved_command.yaml",
-			wantSentinel: ErrReservedCommand,
+			wantSentinel: keyword.ErrReservedName,
 			wantDevice:   "device1",
-			wantCommand:  "lock",
+			wantCommand:  "help",
 		},
 
 		// Null device value

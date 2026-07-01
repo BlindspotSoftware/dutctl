@@ -18,6 +18,7 @@ import (
 	"connectrpc.com/connect"
 	"github.com/BlindspotSoftware/dutctl/internal/buildinfo"
 	"github.com/BlindspotSoftware/dutctl/internal/output"
+	"github.com/BlindspotSoftware/dutctl/pkg/keyword"
 	"github.com/BlindspotSoftware/dutctl/pkg/lock"
 	"github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1/dutctlv1connect"
 )
@@ -199,29 +200,32 @@ func (app *application) start() {
 	}
 
 	if len(app.args) == 1 {
-		device := app.args[0]
-		err := app.commandsRPC(device)
-		app.exit(err)
+		name := app.args[0]
+
+		if handler, ok := keyword.DeviceHandler(name); ok {
+			app.exit(handler(app, name))
+		}
+
+		app.exit(app.commandsRPC(name))
 	}
 
 	device := app.args[0]
 	command := app.args[1]
 	cmdArgs := app.args[2:]
 
-	switch command {
-	case "lock":
-		app.exit(app.lockRPC(device, cmdArgs))
-	case "unlock":
-		app.exit(app.unlockRPC(device))
+	// Device-scoped keyword in the command slot, e.g. "dutctl <device> lock".
+	if handler, ok := keyword.CommandHandler(command, keyword.CommandSlot); ok {
+		app.exit(handler(app, device, command, cmdArgs))
 	}
 
-	if len(cmdArgs) > 0 && cmdArgs[0] == "help" {
-		err := app.detailsRPC(device, command, "help")
-		app.exit(err)
+	// Keyword after a command, e.g. "dutctl <device> <command> help".
+	if len(cmdArgs) > 0 {
+		if handler, ok := keyword.CommandHandler(cmdArgs[0], keyword.AfterCommand); ok {
+			app.exit(handler(app, device, command, cmdArgs))
+		}
 	}
 
-	err := app.runRPC(device, command, cmdArgs)
-	app.exit(err)
+	app.exit(app.runRPC(device, command, cmdArgs))
 }
 
 // exit terminates the application. Buffered diagnostics (the warning summary)

@@ -30,6 +30,28 @@ import (
 // "interrupted" status with exit code 130, not as a failure.
 var errInterrupted = errors.New("interrupted")
 
+// The following methods make *application satisfy keyword.Client, so reserved
+// keyword handlers in pkg/keyword can dispatch through it.
+
+func (app *application) Lock(device string, args []string) error {
+	return app.lockRPC(device, args)
+}
+
+func (app *application) Unlock(device string) error {
+	return app.unlockRPC(device)
+}
+
+func (app *application) Details(device, command, kw string) error {
+	return app.detailsRPC(device, command, kw)
+}
+
+func (app *application) PrintUsage() error {
+	fmt.Fprint(app.stderr, usageAbstract, usageSynopsis, usageDescription)
+	app.printFlagDefaults()
+
+	return nil
+}
+
 func (app *application) listRPC() error {
 	ctx := context.Background()
 	req := connect.NewRequest(&pb.ListRequest{})
