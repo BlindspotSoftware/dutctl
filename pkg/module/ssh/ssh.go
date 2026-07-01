@@ -116,13 +116,6 @@ func (s *SSH) Init() error {
 		HostKeyCallback: hostKeyCallback,
 	}
 
-	// test the connection
-	client, err := ssh.Dial("tcp", s.addr, s.config)
-	if err != nil {
-		return fmt.Errorf("SSH connection to DUT failed: %w", err)
-	}
-	defer client.Close()
-
 	return nil
 }
 
