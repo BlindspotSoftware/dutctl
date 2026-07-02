@@ -38,7 +38,7 @@ func TestNewChanWriter(t *testing.T) {
 func TestNewChanReader(t *testing.T) {
 	// Test with valid channel
 	ch := make(chan []byte)
-	reader, err := NewChanReader(ch)
+	reader, err := NewChanReader(ch, nil)
 
 	if err != nil {
 		t.Fatalf("NewChanReader() returned an error: %v", err)
@@ -53,7 +53,7 @@ func TestNewChanReader(t *testing.T) {
 	}
 
 	// Test with nil channel
-	reader, err = NewChanReader(nil)
+	reader, err = NewChanReader(nil, nil)
 
 	if err == nil {
 		t.Fatalf("NewChanReader() did not return an error for nil channel")

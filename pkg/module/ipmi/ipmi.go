@@ -8,10 +8,10 @@ package ipmi
 import (
 	"context"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
+	"github.com/BlindspotSoftware/dutctl/internal/log"
 	"github.com/BlindspotSoftware/dutctl/pkg/module"
 	"github.com/bougou/go-ipmi"
 )
@@ -41,8 +41,6 @@ type IPMI struct {
 var _ module.Module = &IPMI{}
 
 func (i *IPMI) Help() string {
-	log.Println("ipmi module: Help called")
-
 	help := strings.Builder{}
 	help.WriteString("IPMI Power Management Module\n")
 	help.WriteString("\nUsage:\n")
@@ -73,25 +71,26 @@ const (
 )
 
 func (i *IPMI) Init(ctx context.Context) error {
-	log.Printf("ipmi module: Init starting for BMC %s", i.Host)
+	l := log.FromContext(ctx)
 
 	port := i.Port
 	if port == 0 {
 		port = defaultPort
-		log.Printf("ipmi module: Using default port %d", defaultPort)
+		l.Debug(fmt.Sprintf("no port configured, using default %d", defaultPort))
 	}
 
-	// Parse custom timeout if provided
+	// Parse custom timeout if provided; an unparseable value falls back to the default.
 	timeout := defaultTimeout
 
 	if i.Timeout != "" {
 		parsedTimeout, err := time.ParseDuration(i.Timeout)
 		if err == nil {
 			timeout = parsedTimeout
-			log.Printf("ipmi module: Using custom timeout %v", timeout)
 		} else {
-			log.Printf("ipmi module: Invalid timeout format '%s', using default %v", i.Timeout, defaultTimeout)
+			l.Debug(fmt.Sprintf("invalid timeout %q, using default %s", i.Timeout, defaultTimeout))
 		}
+	} else {
+		l.Debug(fmt.Sprintf("no timeout configured, using default %s", defaultTimeout))
 	}
 
 	if i.Host == "" {
@@ -106,16 +105,17 @@ func (i *IPMI) Init(ctx context.Context) error {
 	ipmiClient.WithTimeout(timeout)
 	ipmiClient.WithRetry(trials)
 
-	// Bounded by ctx: passing it (not context.Background()) means a later startup
-	// deadline or shutdown cancellation on that context will bound this connect.
-	// TODO(ctx).
+	// Bounded by ctx: today the init context is a plain background context, but
+	// passing it (not context.Background()) means a later startup deadline or
+	// shutdown cancellation on that context will bound this connect. TODO(ctx).
 	err = ipmiClient.Connect(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to connect to IPMI BMC %s:%d: %v", i.Host, port, err)
 	}
 
 	i.client = ipmiClient
-	log.Printf("ipmi module: Init completed successfully for %s:%d", i.Host, port)
+
+	l.Debug(fmt.Sprintf("connected to BMC %s:%d", i.Host, port))
 
 	return nil
 }
@@ -125,12 +125,7 @@ func (i *IPMI) Deinit(ctx context.Context) error {
 		return nil
 	}
 
-	err := i.client.Close(ctx)
-	if err != nil {
-		log.Printf("ipmi module: Deinit failed to close client: %v", err)
-	}
-
-	return err
+	return i.client.Close(ctx)
 }
 
 func (i *IPMI) Run(ctx context.Context, s module.Session, args ...string) error {
@@ -185,6 +180,7 @@ func (i *IPMI) handlePowerCommand(ctx context.Context, s module.Session, command
 		return fmt.Errorf("power %s command failed: %v", command, err)
 	}
 
+	log.FromContext(ctx).Info(fmt.Sprintf("chassis %s (BMC %s)", command, i.Host))
 	s.Println(message)
 
 	return nil

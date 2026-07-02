@@ -13,7 +13,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -23,6 +23,7 @@ import (
 	"connectrpc.com/connect"
 	"github.com/BlindspotSoftware/dutctl/internal/buildinfo"
 	"github.com/BlindspotSoftware/dutctl/internal/dutagent"
+	"github.com/BlindspotSoftware/dutctl/internal/log"
 	"github.com/BlindspotSoftware/dutctl/pkg/dut"
 	"github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1/dutctlv1connect"
 	"gopkg.in/yaml.v3"
@@ -37,6 +38,8 @@ const (
 	dryRunInfo      = `Only run the initialization phase of the modules, not start the (includes validation of the configuration)`
 	serverInfo      = `Optional DUT Server address and port to register with in the format: address:port`
 	versionFlagInfo = `Print version information and exit`
+	logLevelInfo    = `Log level: debug, info, warn, or error`
+	logJSONInfo     = `Emit logs as JSON instead of human-readable text`
 )
 
 func newAgent(stdout io.Writer, exitFunc func(int), args []string) *agent {
@@ -52,6 +55,8 @@ func newAgent(stdout io.Writer, exitFunc func(int), args []string) *agent {
 	fs.BoolVar(&agt.dryRun, "dry-run", false, dryRunInfo)
 	fs.StringVar(&agt.server, "server", "", serverInfo)
 	fs.BoolVar(&agt.versionFlag, "v", false, versionFlagInfo)
+	fs.StringVar(&agt.logLevel, "log", "debug", logLevelInfo)
+	fs.BoolVar(&agt.logJSON, "log-json", false, logJSONInfo)
 	//nolint:errcheck // flag.Parse always returns no error because of flag.ExitOnError
 	fs.Parse(args[1:])
 
@@ -70,6 +75,8 @@ type agent struct {
 	checkConfig bool
 	dryRun      bool
 	server      string
+	logLevel    string
+	logJSON     bool
 
 	// state
 	config            config
@@ -100,7 +107,7 @@ func (agt *agent) cleanup(code exitCode) {
 		err := dutagent.Deinit(context.Background(), agt.config.Devices)
 		if err != nil {
 			printInitErr(err)
-			log.Print("System might be in an UNKNOWN STATE !!!")
+			slog.Error("module deinitialization failed - system might be in an UNKNOWN STATE", "err", err)
 			agt.exit(1)
 		}
 	}
@@ -116,12 +123,14 @@ func (agt *agent) watchInterrupt() {
 
 	go func() {
 		sig := <-c
-		log.Printf("Captured signal: %v", sig)
+		slog.Info("captured signal", "signal", sig)
 		agt.cleanup(exit0)
 	}()
 }
 
 func (agt *agent) loadConfig() error {
+	slog.Info("loading configuration", "path", agt.configPath)
+
 	cfgYAML, err := os.ReadFile(agt.configPath)
 	if err != nil {
 		return err
@@ -146,13 +155,17 @@ func (agt *agent) initModules(ctx context.Context) error {
 func printInitErr(err error) {
 	var initerr *dutagent.ModuleInitError
 	if errors.As(err, &initerr) {
+		// Phase-agnostic detail dump; the caller logs the phase-labeled summary
+		// ("module initialization/deinitialization failed").
 		for _, item := range initerr.Errs {
-			devstr := fmt.Sprintf("dev:%q cmd:%q module:%q", item.Dev, item.Cmd, item.Mod.Config.Name)
-			log.Printf("init %s failed with:\n%v\n", devstr, item.Err)
+			slog.Error("module error",
+				"device", item.Dev, "command", item.Cmd, "module", item.Mod.Config.Name, "err", item.Err)
 		}
+
+		return
 	}
 
-	log.Print(err)
+	slog.Error("module error", "err", err)
 }
 
 // readHeaderTimeout bounds how long the server waits to read request headers.
@@ -180,11 +193,13 @@ func (agt *agent) startRPCService() error {
 	srv.Protocols.SetHTTP1(true)
 	srv.Protocols.SetUnencryptedHTTP2(true)
 
+	slog.Info("rpc service listening", "addr", agt.address)
+
 	return srv.ListenAndServe()
 }
 
 func (agt *agent) registerWithServer() error {
-	log.Printf("Registering with server %q", agt.server)
+	slog.Info("registering with server", "server", agt.server)
 
 	client := spawnClient(agt.server)
 	req := connect.NewRequest(&pb.RegisterRequest{
@@ -200,7 +215,7 @@ func (agt *agent) registerWithServer() error {
 		return fmt.Errorf("registering with server %q failed: %w", agt.server, err)
 	}
 
-	log.Printf("Successfully registered with server %q", agt.server)
+	slog.Info("successfully registered with server", "server", agt.server)
 
 	return nil
 }
@@ -210,7 +225,7 @@ func (agt *agent) registerWithServer() error {
 //
 //nolint:ireturn
 func spawnClient(agendURL string) dutctlv1connect.RelayServiceClient {
-	log.Printf("Spawning new client for agent %q", agendURL)
+	slog.Info("spawning new client for agent", "url", agendURL)
 
 	return dutctlv1connect.NewRelayServiceClient(
 		// Instead of http.DefaultClient, use the HTTP/2 protocol without TLS
@@ -240,7 +255,12 @@ func newInsecureClient() *http.Client {
 //
 //nolint:cyclop
 func (agt *agent) start() {
-	log.SetOutput(agt.stdout)
+	// Install the process-wide structured logger. Service diagnostics go to
+	// stderr (stdout is reserved for program output such as the version banner).
+	// The default is scoped "agent"; request handlers replace the scope as
+	// control enters their subsystem. See package internal/log.
+	base := log.New(os.Stderr, log.ParseLevel(agt.logLevel), agt.logJSON)
+	slog.SetDefault(log.Scope(base, "agent"))
 
 	if agt.versionFlag {
 		agt.printVersion()
@@ -252,7 +272,7 @@ func (agt *agent) start() {
 	// to do a graceful shutdown
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("Recovered from panic: %v", r)
+			slog.Error("recovered from panic", "panic", r)
 			agt.cleanup(exit1)
 		}
 	}()
@@ -262,48 +282,49 @@ func (agt *agent) start() {
 	err := agt.loadConfig()
 	if agt.checkConfig {
 		if err != nil {
-			log.Printf("Bad configuration: %v", err)
+			slog.Error("bad configuration", "err", err)
 			agt.cleanup(exit0)
 		}
 
-		log.Print("Configuration is valid")
+		slog.Info("configuration is valid")
 		agt.cleanup(exit0)
 	} else if err != nil {
-		log.Printf("Loading config failed: %v", err)
+		slog.Error("loading config failed", "err", err)
 		agt.cleanup(exit1)
 	}
 
 	// initCtx is the agent-lifetime context for module initialization. Today it
 	// is a plain background context; it is the single seam where a later change
 	// can attach a startup deadline (context.WithTimeout) or wire in
-	// cancellation. It flows into every module's Init. TODO(ctx).
+	// cancellation. It flows into every module's Init via internal/log. TODO(ctx).
 	initCtx := context.Background()
 
 	err = agt.initModules(initCtx)
 	if agt.dryRun {
 		if err != nil {
 			printInitErr(err)
-			log.Print("Initialization FAILED - Dry run finished")
+			slog.Info("initialization failed - dry run finished")
 			agt.cleanup(exit0)
 		}
 
-		log.Print("Initialization SUCCESSFUL - Dry run finished")
+		slog.Info("initialization successful - dry run finished")
 		agt.cleanup(exit0)
 	} else if err != nil {
 		printInitErr(err)
+		slog.Error("module initialization failed", "err", err)
 		agt.cleanup(exit1)
 	}
 
 	if agt.server != "" {
 		err := agt.registerWithServer()
 		if err != nil {
-			log.Printf("Registering with server %q failed: %v", agt.server, err)
+			slog.Error("registering with server failed", "server", agt.server, "err", err)
 			agt.cleanup(exit1)
 		}
 	}
 
 	err = agt.startRPCService()
-	log.Printf("internal RPC handler error: %v", err)
+	slog.Error("internal RPC handler error", "err", err)
 	agt.cleanup(exit1)
 }
 

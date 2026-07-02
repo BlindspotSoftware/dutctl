@@ -8,13 +8,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"time"
 
 	"connectrpc.com/connect"
 	"github.com/BlindspotSoftware/dutctl/internal/dutagent"
 	"github.com/BlindspotSoftware/dutctl/internal/fsm"
+	"github.com/BlindspotSoftware/dutctl/internal/log"
 	"github.com/BlindspotSoftware/dutctl/pkg/dut"
 	"github.com/BlindspotSoftware/dutctl/pkg/lock"
 
@@ -37,12 +38,19 @@ func userFromHeader(h http.Header) string {
 	return lock.AnonymousUser()
 }
 
+// rpcLogger returns a logger scoped to the RPC subsystem and tagged with the
+// handler's method name, derived from the logger carried in ctx.
+func rpcLogger(ctx context.Context, method string) *slog.Logger {
+	return log.Scope(log.FromContext(ctx), "rpc").With("rpc", method)
+}
+
 // List is the handler for the List RPC.
 func (a *rpcService) List(
-	_ context.Context,
+	ctx context.Context,
 	_ *connect.Request[pb.ListRequest],
 ) (*connect.Response[pb.ListResponse], error) {
-	log.Println("Server received List request")
+	l := rpcLogger(ctx, "List")
+	l.Info("request received")
 
 	locks := a.locker.StatusAll()
 
@@ -67,17 +75,18 @@ func (a *rpcService) List(
 		Devices: infos,
 	})
 
-	log.Print("List-RPC finished")
+	l.Info("request finished")
 
 	return res, nil
 }
 
 // Commands is the handler for the Commands RPC.
 func (a *rpcService) Commands(
-	_ context.Context,
+	ctx context.Context,
 	req *connect.Request[pb.CommandsRequest],
 ) (*connect.Response[pb.CommandsResponse], error) {
-	log.Println("Server received Commands request")
+	l := rpcLogger(ctx, "Commands")
+	l.Info("request received")
 
 	device := req.Msg.GetDevice()
 
@@ -102,17 +111,18 @@ func (a *rpcService) Commands(
 		Commands: cmds,
 	})
 
-	log.Print("Commands-RPC finished")
+	l.Info("request finished")
 
 	return res, nil
 }
 
 // Details is the handler for the Details RPC.
 func (a *rpcService) Details(
-	_ context.Context,
+	ctx context.Context,
 	req *connect.Request[pb.DetailsRequest],
 ) (*connect.Response[pb.DetailsResponse], error) {
-	log.Println("Server received Details request")
+	l := rpcLogger(ctx, "Details")
+	l.Info("request received")
 
 	wantDev := req.Msg.GetDevice()
 	wantCmd := req.Msg.GetCmd()
@@ -150,17 +160,18 @@ func (a *rpcService) Details(
 		Details: helpStr,
 	})
 
-	log.Print("Details-RPC finished")
+	l.Info("request finished")
 
 	return res, nil
 }
 
 // Lock is the handler for the Lock RPC.
 func (a *rpcService) Lock(
-	_ context.Context,
+	ctx context.Context,
 	req *connect.Request[pb.LockRequest],
 ) (*connect.Response[pb.LockResponse], error) {
-	log.Println("Server received Lock request")
+	l := rpcLogger(ctx, "Lock")
+	l.Info("request received")
 
 	device := req.Msg.GetDevice()
 	user := userFromHeader(req.Header())
@@ -198,17 +209,18 @@ func (a *rpcService) Lock(
 		ExpiresAt: expiresAt,
 	})
 
-	log.Print("Lock-RPC finished")
+	l.Info("lock acquired", "device", device, "owner", info.Owner)
 
 	return res, nil
 }
 
 // Unlock is the handler for the Unlock RPC.
 func (a *rpcService) Unlock(
-	_ context.Context,
+	ctx context.Context,
 	req *connect.Request[pb.UnlockRequest],
 ) (*connect.Response[pb.UnlockResponse], error) {
-	log.Println("Server received Unlock request")
+	l := rpcLogger(ctx, "Unlock")
+	l.Info("request received")
 
 	device := req.Msg.GetDevice()
 	user := userFromHeader(req.Header())
@@ -231,7 +243,7 @@ func (a *rpcService) Unlock(
 		}
 	}
 
-	log.Print("Unlock-RPC finished")
+	l.Info("lock released", "device", device, "user", user, "forced", req.Msg.GetForce())
 
 	return connect.NewResponse(&pb.UnlockResponse{}), nil
 }
@@ -249,13 +261,19 @@ func (a *rpcService) Run(
 	ctx context.Context,
 	stream *connect.BidiStream[pb.RunRequest, pb.RunResponse],
 ) error {
-	log.Println("Server received Run request")
+	user := userFromHeader(stream.RequestHeader())
+
+	// Set the RPC scope once; it flows through the FSM, the session backend and
+	// the modules on ctx, so each only logs its own concern.
+	ctx = log.With(log.WithScope(ctx, "rpc"), "rpc", "Run", "user", user)
+	l := log.FromContext(ctx)
+	l.Info("request received")
 
 	fsmArgs := runCmdArgs{
 		stream:     &streamAdapter{inner: stream},
 		deviceList: a.devices,
 		locker:     a.locker,
-		user:       userFromHeader(stream.RequestHeader()),
+		user:       user,
 	}
 
 	finalArgs, err := fsm.Run(ctx, fsmArgs, receiveCommandRPC)
@@ -276,9 +294,9 @@ func (a *rpcService) Run(
 	}
 
 	if err != nil {
-		log.Print("Run-RPC finished with error: ", err)
+		l.Error("request finished with error", "err", err)
 	} else {
-		log.Print("Run-RPC finished successfully")
+		l.Info("request finished successfully")
 	}
 
 	return err

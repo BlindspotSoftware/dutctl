@@ -7,10 +7,10 @@ package time
 import (
 	"context"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
+	"github.com/BlindspotSoftware/dutctl/internal/log"
 	"github.com/BlindspotSoftware/dutctl/pkg/module"
 )
 
@@ -52,8 +52,6 @@ and a unit suffix, such as "300ms", "-1.5h" or "2h45m".
 Valid time units are "ns", "us" (or "µs"), "ms", "s", "m", "h".`
 
 func (w *Wait) Help() string {
-	log.Println("time.Wait module: Help called")
-
 	help := strings.Builder{}
 	help.WriteString(abstract)
 	help.WriteString(usage)
@@ -64,11 +62,10 @@ func (w *Wait) Help() string {
 	return help.String()
 }
 
-func (w *Wait) Init(_ context.Context) error {
-	log.Println("time.Wait module: Init called")
-
+func (w *Wait) Init(ctx context.Context) error {
 	if w.Duration == "" {
 		w.Duration = DefaultDuration
+		log.FromContext(ctx).Debug("no duration configured, using default " + DefaultDuration)
 	}
 
 	d, err := time.ParseDuration(w.Duration)
@@ -82,14 +79,10 @@ func (w *Wait) Init(_ context.Context) error {
 }
 
 func (w *Wait) Deinit(_ context.Context) error {
-	log.Println("time.Wait module: Deinit called")
-
 	return nil
 }
 
 func (w *Wait) Run(_ context.Context, s module.Session, args ...string) error {
-	log.Println("time.Wait module: Run called")
-
 	var duration time.Duration
 
 	// Override default duration or configured duration with value passed via cmd line.

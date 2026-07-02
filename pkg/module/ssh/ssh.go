@@ -10,10 +10,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"strings"
 
+	"github.com/BlindspotSoftware/dutctl/internal/log"
 	"github.com/BlindspotSoftware/dutctl/pkg/module"
 	"golang.org/x/crypto/ssh"
 )
@@ -57,8 +57,6 @@ The ssh module is non-interactive yet.
 `
 
 func (s *SSH) Help() string {
-	log.Println("ssh module: Help called")
-
 	help := strings.Builder{}
 	help.WriteString(abstract)
 	help.WriteString(usage)
@@ -70,8 +68,6 @@ func (s *SSH) Help() string {
 }
 
 func (s *SSH) Init(_ context.Context) error {
-	log.Println("ssh module: Init called")
-
 	err := s.evalConfiguration()
 	if err != nil {
 		return err
@@ -120,14 +116,10 @@ func (s *SSH) Init(_ context.Context) error {
 }
 
 func (s *SSH) Deinit(_ context.Context) error {
-	log.Println("ssh module: Deinit called")
-
 	return nil
 }
 
-func (s *SSH) Run(_ context.Context, sesh module.Session, args ...string) error {
-	log.Println("ssh module: Run called")
-
+func (s *SSH) Run(ctx context.Context, sesh module.Session, args ...string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("missing command-string")
 	}
@@ -135,6 +127,9 @@ func (s *SSH) Run(_ context.Context, sesh module.Session, args ...string) error 
 	if len(args) > 1 {
 		return fmt.Errorf("too many arguments - if the command-string contains spaces or special characters, quote it")
 	}
+
+	l := log.FromContext(ctx)
+	l.Debug(fmt.Sprintf("dialing %s@%s", s.User, s.addr))
 
 	client, err := ssh.Dial("tcp", s.addr, s.config)
 	if err != nil {
@@ -147,6 +142,8 @@ func (s *SSH) Run(_ context.Context, sesh module.Session, args ...string) error 
 		return fmt.Errorf("failed to create SSH session: %w", err)
 	}
 	defer session.Close()
+
+	l.Info(fmt.Sprintf("executing %q on %s", args[0], s.Host))
 
 	// Execute the command and capture output
 	output, err := session.CombinedOutput(args[0])

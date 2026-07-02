@@ -11,10 +11,10 @@ package gpio
 import (
 	"context"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
+	"github.com/BlindspotSoftware/dutctl/internal/log"
 	"github.com/BlindspotSoftware/dutctl/pkg/module"
 )
 
@@ -102,8 +102,6 @@ other modules or otherwise occupied by the system!
 `
 
 func (b *Button) Help() string {
-	log.Println("gpio.Button module: Help called")
-
 	help := strings.Builder{}
 	help.WriteString(abstractButton)
 	help.WriteString(usageButton)
@@ -123,10 +121,10 @@ func (b *Button) Help() string {
 	return help.String()
 }
 
-func (b *Button) Init(_ context.Context) error {
-	log.Println("gpio.Button module: Init called")
-
+func (b *Button) Init(ctx context.Context) error {
 	b.gpio = b.backendParser(b.Backend)
+
+	log.FromContext(ctx).Debug(fmt.Sprintf("initializing pin %d to idle", b.Pin))
 
 	if b.ActiveLow {
 		// with active low, idle is high
@@ -137,8 +135,6 @@ func (b *Button) Init(_ context.Context) error {
 }
 
 func (b *Button) Deinit(_ context.Context) error {
-	log.Println("gpio.Button module: Deinit called")
-
 	if b.gpio == nil {
 		return nil
 	}
@@ -146,9 +142,7 @@ func (b *Button) Deinit(_ context.Context) error {
 	return b.Low(b.Pin)
 }
 
-func (b *Button) Run(_ context.Context, s module.Session, args ...string) error {
-	log.Println("gpio.Button module: Run called")
-
+func (b *Button) Run(ctx context.Context, s module.Session, args ...string) error {
 	var (
 		duration time.Duration
 		err      error
@@ -175,6 +169,7 @@ func (b *Button) Run(_ context.Context, s module.Session, args ...string) error 
 		return err
 	}
 
+	log.FromContext(ctx).Info(fmt.Sprintf("button press for %s (pin %d)", duration, b.Pin))
 	s.Printf("Button pressed for %s\n", duration)
 
 	return nil
@@ -225,8 +220,6 @@ other modules or otherwise occupied by the system!
 `
 
 func (s *Switch) Help() string {
-	log.Println("gpio.Switch module: Help called")
-
 	help := strings.Builder{}
 	help.WriteString(abstractSwitch)
 	help.WriteString(usageSwitch)
@@ -244,26 +237,24 @@ func (s *Switch) Help() string {
 	return help.String()
 }
 
-func (s *Switch) Init(_ context.Context) error {
-	log.Println("gpio.Switch module: Init called")
-
+func (s *Switch) Init(ctx context.Context) error {
 	s.gpio = s.backendParser(s.Backend)
 
 	initial := strings.ToLower(s.Initial)
 	if initial == "on" {
 		s.state = on
+		log.FromContext(ctx).Debug(fmt.Sprintf("initializing pin %d to on", s.Pin))
 
 		return s.on()
 	}
 
 	s.state = off
+	log.FromContext(ctx).Debug(fmt.Sprintf("initializing pin %d to off", s.Pin))
 
 	return s.off()
 }
 
 func (s *Switch) Deinit(_ context.Context) error {
-	log.Println("gpio.Switch module: Deinit called")
-
 	if s.gpio == nil {
 		return nil
 	}
@@ -271,9 +262,9 @@ func (s *Switch) Deinit(_ context.Context) error {
 	return s.Low(s.Pin)
 }
 
-//nolint:cyclop
-func (s *Switch) Run(_ context.Context, sesh module.Session, args ...string) error {
-	log.Println("gpio.Switch module: Run called")
+//nolint:cyclop,funlen // on/off/toggle branches each set state and log; long but linear and readable.
+func (s *Switch) Run(ctx context.Context, sesh module.Session, args ...string) error {
+	l := log.FromContext(ctx)
 
 	if len(args) == 0 {
 		sesh.Printf("Current state: %s\n", s.state)
@@ -287,6 +278,8 @@ func (s *Switch) Run(_ context.Context, sesh module.Session, args ...string) err
 		if err != nil {
 			return err
 		}
+
+		l.Info(fmt.Sprintf("switch on (pin %d)", s.Pin))
 
 		if s.state == on {
 			sesh.Print("Already on")
@@ -302,6 +295,8 @@ func (s *Switch) Run(_ context.Context, sesh module.Session, args ...string) err
 		if err != nil {
 			return err
 		}
+
+		l.Info(fmt.Sprintf("switch off (pin %d)", s.Pin))
 
 		if s.state == off {
 			sesh.Print("Already off")
@@ -327,6 +322,8 @@ func (s *Switch) Run(_ context.Context, sesh module.Session, args ...string) err
 
 			s.state = on
 		}
+
+		l.Info(fmt.Sprintf("switch %s (pin %d)", s.state, s.Pin))
 	default:
 		return fmt.Errorf("unknown argument: %s", args[0])
 	}

@@ -10,12 +10,12 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"log"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 
+	"github.com/BlindspotSoftware/dutctl/internal/log"
 	"github.com/BlindspotSoftware/dutctl/pkg/module"
 )
 
@@ -90,8 +90,6 @@ ARGUMENTS:
 )
 
 func (f *File) Help() string {
-	log.Println("file module: Help called")
-
 	help := strings.Builder{}
 	help.WriteString(abstract)
 
@@ -149,9 +147,7 @@ func usageAndDescription(operation, source, destination string) string {
 	}
 }
 
-func (f *File) Init(_ context.Context) error {
-	log.Println("file module: Init called")
-
+func (f *File) Init(ctx context.Context) error {
 	if f.Permission != "" {
 		// Permission must start with "0" to indicate octal format
 		if f.Permission[0] != '0' {
@@ -164,6 +160,7 @@ func (f *File) Init(_ context.Context) error {
 		}
 	} else {
 		f.Permission = "0" + strconv.FormatInt(int64(DefaultFilePerm), 8)
+		log.FromContext(ctx).Debug("no permission configured, using default " + f.Permission)
 	}
 
 	// Validate operation is set
@@ -180,14 +177,10 @@ func (f *File) Init(_ context.Context) error {
 }
 
 func (f *File) Deinit(_ context.Context) error {
-	log.Println("file module: Deinit called")
-
 	return nil
 }
 
-func (f *File) Run(_ context.Context, sesh module.Session, args ...string) error {
-	log.Println("file module: Run called")
-
+func (f *File) Run(ctx context.Context, sesh module.Session, args ...string) error {
 	// Parse paths
 	err := f.parsePaths(args)
 	if err != nil {
@@ -196,17 +189,18 @@ func (f *File) Run(_ context.Context, sesh module.Session, args ...string) error
 
 	switch f.Operation {
 	case string(opUpload):
-		return f.uploadFile(sesh)
+		return f.uploadFile(ctx, sesh)
 	case string(opDownload):
-		return f.downloadFile(sesh)
+		return f.downloadFile(ctx, sesh)
 	default:
 		return fmt.Errorf("invalid operation %q: must be 'upload' or 'download'", f.Operation)
 	}
 }
 
 // uploadFile handles uploading a file from client to dutagent.
-func (f *File) uploadFile(sesh module.Session) error {
-	log.Printf("file module: Uploading %q from client to %q on dutagent", f.sourcePath, f.destPath)
+func (f *File) uploadFile(ctx context.Context, sesh module.Session) error {
+	l := log.FromContext(ctx)
+	l.Debug(fmt.Sprintf("uploading %q from client to %q on dutagent", f.sourcePath, f.destPath))
 
 	// Request file from client
 	fileReader, err := sesh.RequestFile(f.sourcePath)
@@ -251,15 +245,16 @@ func (f *File) uploadFile(sesh module.Session) error {
 		return fmt.Errorf("failed to write file data: %w", copyErr)
 	}
 
-	log.Printf("file module: Successfully uploaded %d bytes to %q", bytesWritten, f.destPath)
+	l.Info(fmt.Sprintf("uploaded %d bytes to %q", bytesWritten, f.destPath))
 	sesh.Printf("Upload complete: %s -> %s (%d bytes)\n", f.sourcePath, f.destPath, bytesWritten)
 
 	return nil
 }
 
 // downloadFile handles downloading a file from dutagent to client.
-func (f *File) downloadFile(sesh module.Session) error {
-	log.Printf("file module: Downloading %q from dutagent to %q on client", f.sourcePath, f.destPath)
+func (f *File) downloadFile(ctx context.Context, sesh module.Session) error {
+	l := log.FromContext(ctx)
+	l.Debug(fmt.Sprintf("downloading %q from dutagent to %q on client", f.sourcePath, f.destPath))
 
 	// Validate source file exists
 	fileInfo, err := os.Stat(f.sourcePath)
@@ -284,7 +279,7 @@ func (f *File) downloadFile(sesh module.Session) error {
 		return fmt.Errorf("failed to send file to client: %w", err)
 	}
 
-	log.Printf("file module: Successfully downloaded %d bytes from %q", fileInfo.Size(), f.sourcePath)
+	l.Info(fmt.Sprintf("downloaded %d bytes from %q", fileInfo.Size(), f.sourcePath))
 	sesh.Printf("Download complete: %s -> %s (%d bytes)\n", f.sourcePath, f.destPath, fileInfo.Size())
 
 	return nil

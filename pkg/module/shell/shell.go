@@ -9,10 +9,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"os/exec"
 	"strings"
 
+	"github.com/BlindspotSoftware/dutctl/internal/log"
 	"github.com/BlindspotSoftware/dutctl/pkg/module"
 )
 
@@ -50,8 +50,6 @@ The shell module is non-interactive and does not support stdin.
 `
 
 func (s *Shell) Help() string {
-	log.Println("shell module: Help called")
-
 	help := strings.Builder{}
 	help.WriteString(abstract)
 	help.WriteString(usage)
@@ -65,11 +63,10 @@ func (s *Shell) Help() string {
 	return help.String()
 }
 
-func (s *Shell) Init(_ context.Context) error {
-	log.Println("shell module: Init called")
-
+func (s *Shell) Init(ctx context.Context) error {
 	if s.Path == "" {
 		s.Path = DefaultShellPath
+		log.FromContext(ctx).Debug("no shell path configured, using default " + DefaultShellPath)
 	}
 
 	_, err := exec.LookPath(s.Path)
@@ -81,14 +78,10 @@ func (s *Shell) Init(_ context.Context) error {
 }
 
 func (s *Shell) Deinit(_ context.Context) error {
-	log.Println("shell module: Deinit called")
-
 	return nil
 }
 
-func (s *Shell) Run(_ context.Context, sesh module.Session, args ...string) error {
-	log.Println("shell module: Run called")
-
+func (s *Shell) Run(ctx context.Context, sesh module.Session, args ...string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("missing command-string")
 	}
@@ -99,6 +92,8 @@ func (s *Shell) Run(_ context.Context, sesh module.Session, args ...string) erro
 
 	cmdStr := args[0]
 	binary := s.Path
+
+	log.FromContext(ctx).Info(fmt.Sprintf("executing %q", cmdStr))
 
 	//nolint:noctx
 	shell := exec.Command(binary, "-c", cmdStr)

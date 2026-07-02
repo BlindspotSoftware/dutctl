@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/BlindspotSoftware/dutctl/internal/log"
 	"github.com/BlindspotSoftware/dutctl/pkg/module"
 )
 
@@ -87,8 +87,6 @@ the DUT.
 `
 
 func (f *Flash) Help() string {
-	log.Println("flash module: Help called")
-
 	help := strings.Builder{}
 	help.WriteString(abstract)
 	help.WriteString(usage)
@@ -98,9 +96,7 @@ func (f *Flash) Help() string {
 	return help.String()
 }
 
-func (f *Flash) Init(_ context.Context) error {
-	log.Println("flash module: Init called")
-
+func (f *Flash) Init(ctx context.Context) error {
 	if f.Tool == "" {
 		return fmt.Errorf("tool must be configured; supported tools are %v", f.supportedTools)
 	}
@@ -109,10 +105,12 @@ func (f *Flash) Init(_ context.Context) error {
 		return fmt.Errorf("%q unsupported; supported tools are %v", f.Tool, f.supportedTools)
 	}
 
-	_, err := exec.LookPath(f.Tool)
+	toolPath, err := exec.LookPath(f.Tool)
 	if err != nil {
 		return fmt.Errorf("flash tool %q: %w", f.Tool, err)
 	}
+
+	log.FromContext(ctx).Debug(fmt.Sprintf("using flash tool %s at %s", f.Tool, toolPath))
 
 	// dpcmd auto-detects hardware, so programmer is optional
 	// flashrom/flashprog require a programmer to be specified
@@ -131,14 +129,12 @@ func (f *Flash) isSupported(tool string) bool {
 }
 
 func (f *Flash) Deinit(_ context.Context) error {
-	log.Println("flash module: Deinit called")
-
 	return os.RemoveAll(f.localImagePath)
 }
 
 //nolint:cyclop
-func (f *Flash) Run(_ context.Context, sesh module.Session, args ...string) error {
-	log.Println("flash module: Run called")
+func (f *Flash) Run(ctx context.Context, sesh module.Session, args ...string) error {
+	l := log.FromContext(ctx)
 
 	if len(args) < 1 {
 		return errors.New("missing argument: flash operation")
@@ -168,9 +164,16 @@ func (f *Flash) Run(_ context.Context, sesh module.Session, args ...string) erro
 		}
 	}
 
+	action := "reading"
+	if f.op == opWrite {
+		action = "writing"
+	}
+
+	l.Info(fmt.Sprintf("%s flash with %s", action, f.Tool))
+
 	cmdStr := fmt.Sprintf("%s %s", f.Tool, strings.Join(f.cmdline(), " "))
 
-	log.Printf("flash module: Executing command: %s", cmdStr)
+	l.Debug(fmt.Sprintf("executing %s", cmdStr))
 	sesh.Print(fmt.Sprintf("Executing: %s", cmdStr))
 
 	err := execute(sesh, f.Tool, f.cmdline()...)

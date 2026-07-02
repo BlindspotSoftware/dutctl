@@ -5,11 +5,13 @@
 package dutagent
 
 import (
+	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 
 	"github.com/BlindspotSoftware/dutctl/internal/chanio"
+	"github.com/BlindspotSoftware/dutctl/internal/log"
 )
 
 // session implements the module.Session interface.
@@ -25,6 +27,20 @@ type session struct {
 	// It is used for both, to indicate the file that was requested by the module
 	// and the file that is being sent back to the client.
 	currentFile string
+
+	// log is the session-scoped logger, frozen in by the broker (see Broker.Start)
+	// because the module.Session methods carry no context to derive it from.
+	log *slog.Logger
+}
+
+// logger returns the session's scoped logger, falling back to the default if
+// the broker has not set one (e.g. a session built directly in a test).
+func (s *session) logger() *slog.Logger {
+	if s.log != nil {
+		return s.log
+	}
+
+	return slog.Default()
 }
 
 func (s *session) Print(a ...any) {
@@ -47,19 +63,23 @@ func (s *session) Console() (stdin io.Reader, stdout, stderr io.Writer) {
 		err                        error
 	)
 
-	stdinReader, err = chanio.NewChanReader(s.stdinCh)
+	// The channels are always initialized by Broker.init before a module runs,
+	// so a failure here is a broken invariant (a nil channel), not a runtime
+	// condition. Console has no error return, so panic; the module-execution
+	// goroutine recovers it into a clean run error (see executeModules).
+	stdinReader, err = chanio.NewChanReader(s.stdinCh, log.Scope(s.logger(), scopeSessionUpstream))
 	if err != nil {
-		log.Fatalf("session.Console() failed to create stdinReader: %v", err)
+		panic(fmt.Sprintf("session.Console: stdin reader: %v", err))
 	}
 
 	stdoutWriter, err = chanio.NewChanWriter(s.stdoutCh)
 	if err != nil {
-		log.Fatalf("session.Console() failed to create stdoutWriter: %v", err)
+		panic(fmt.Sprintf("session.Console: stdout writer: %v", err))
 	}
 
 	stderrWriter, err = chanio.NewChanWriter(s.stderrCh)
 	if err != nil {
-		log.Fatalf("session.Console() failed to create stderrWriter: %v", err)
+		panic(fmt.Sprintf("session.Console: stderr writer: %v", err))
 	}
 
 	return stdinReader, stdoutWriter, stderrWriter
@@ -67,18 +87,20 @@ func (s *session) Console() (stdin io.Reader, stdout, stderr io.Writer) {
 
 func (s *session) RequestFile(name string) (io.Reader, error) {
 	if s.fileReqCh == nil {
-		log.Fatal("session.RequestFile() called but session.fileReq is nil")
+		return nil, errors.New("session not initialized: file request channel is nil")
 	}
 
-	log.Printf("Module issued file request for: %q", name)
+	// Requesting and reading a file is the upstream (client → agent) flow.
+	uplog := log.Scope(s.logger(), scopeSessionUpstream)
+	uplog.Debug("module requested file", "name", name)
 
 	s.fileReqCh <- name // Send the file request to the client.
 
 	file := <-s.fileCh // This will block until the client sends the file.
 
-	r, err := chanio.NewChanReader(file)
+	r, err := chanio.NewChanReader(file, uplog)
 	if err != nil {
-		log.Fatalf("session.RequestFile() failed to create reader: %v", err)
+		return nil, fmt.Errorf("request file %q: %w", name, err)
 	}
 
 	return r, nil
@@ -86,7 +108,7 @@ func (s *session) RequestFile(name string) (io.Reader, error) {
 
 func (s *session) SendFile(name string, r io.Reader) error {
 	if s.currentFile != "" {
-		log.Fatal("session.SendFile() called during a ongoing file request")
+		return fmt.Errorf("send file %q: a file request is already in progress", name)
 	}
 
 	content, err := io.ReadAll(r)
@@ -94,7 +116,9 @@ func (s *session) SendFile(name string, r io.Reader) error {
 		return err
 	}
 
-	log.Printf("Module issued file transfer of : %q, with %d bytes", name, len(content))
+	// Sending a file to the client is the downstream (agent → client) flow.
+	downlog := log.Scope(s.logger(), scopeSessionDownstream)
+	downlog.Debug("module sending file", "name", name, "bytes", len(content))
 
 	s.currentFile = name
 

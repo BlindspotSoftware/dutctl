@@ -40,8 +40,8 @@ type Module interface {
 	// the module is configured functional. It is also called when a command containing this
 	// module is called as a dry-run to check the configuration.
 	//
-	// The context is agent-lifetime and request-independent; implementations may use it
-	// for cancellation or deadlines when reaching external hosts, tools or devices.
+	// The context carries a logger scoped to this module; obtain it with
+	// log.FromContext(ctx). It has no request deadline (Init runs at startup).
 	Init(ctx context.Context) error
 	// Deinit is called when the module is unloaded by dutagent or an internal error occurs.
 	// It is used to clean up any resources that were allocated during the Init phase and
@@ -49,6 +49,8 @@ type Module interface {
 	//
 	// Implementations must be safe to call even if Init was never called or failed partway.
 	// Init may fail after partially allocating resources that still need cleanup.
+	//
+	// The context carries a logger scoped to this module; obtain it with log.FromContext(ctx).
 	Deinit(ctx context.Context) error
 	// Run is the entry point and executes the module with the given arguments.
 	Run(ctx context.Context, s Session, args ...string) error

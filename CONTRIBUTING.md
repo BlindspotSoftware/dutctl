@@ -152,6 +152,36 @@ Errors that should stop the command are **returned**, not logged — they bubble
 
 The handler and the `--log` flag (`debug|warn|none`, default `warn`) live in [`cmds/dutctl/clilog.go`](cmds/dutctl/clilog.go).
 
+### Agent and server logging
+
+`dutagent` (and `dutserver`) are service daemons, so they log differently from the client: structured records via [`internal/log`](internal/log) (built on `log/slog`), to **stderr**, at the full set of levels. The base logger is installed in `start()` (`slog.SetDefault`); the `-log` flag sets the level (`debug|info|warn|error`, default `debug`) and `-log-json` switches the text handler for a JSON one. Human/TTY output is `2006/01/02 15:04:05 LEVEL [scope] message key=value` (color only on a terminal); JSON emits `scope` as an attribute. Never log to stdout.
+
+**Obtain the logger from the context.** Code retrieves it with `log.FromContext(ctx)`. At a component boundary, the caller sets the scope and any shared attributes *before* handing control on, so each component logs only its own concern:
+
+- `ctx = log.WithScope(ctx, "session")` — set the component scope (a flat label; a new scope replaces the old one).
+- `ctx = log.With(ctx, "device", dev)` — add structured attributes that descend with the context.
+
+Module `Init`/`Deinit` and `Run` all receive a context carrying the `module`-scoped logger — a good place to log applied defaults from missing config, and the external hosts/tools/devices the module talks to. Where there genuinely is no context — process bootstrap and lifecycle — log through the `slog` package directly (`slog.Info`/`slog.Error`/…); where even that is unavailable (the `Session` methods, `Locker`, `chanio`), use a logger frozen into the struct at construction (see `session.log`, `Locker`). Scopes in `dutagent`: `agent` (bootstrap/lifecycle, the default), `rpc`, `session`, `locker`, `module`. Scopes in `dutserver`: `server` (bootstrap/lifecycle, the default), `rpc`, `relay` (with directional `relay downstream`/`relay upstream` for the two forwarders of the relayed `Run` stream), and `registry` (the device→agent map).
+
+Module logging is for the **admin/operator** (the person who wrote the config and wired the DUTs), not a re-narration of what the module already prints to the client. Worth logging: external interactions with their effective parameters (tool + command, host:port, device + settings), and defaults a module applies for missing config. `Init`/`Deinit` should not log lifecycle markers — the framework already logs those.
+
+**Three logging regions, enforced by `forbidigo`** (see the "slog logging buckets" block in [`.golangci.yml`](.golangci.yml)) — you don't have to decide the idiom, the linter guides you:
+
+- **Client** (`cmds/dutctl` and its output rendering): `slog.Debug`/`slog.Warn` only — its two-channel output model. `slog.Info`/`Error`/… are rejected.
+- **Agent/server setup** (process bootstrap, module `Init`/`Deinit` lifecycle summaries, the frozen-logger objects): no request context, so log through the `slog` package directly (`slog.Info`, `slog.Error`, …).
+- **Agent/server request path** (RPC handlers, FSM, broker/workers, relay, modules): obtain the logger from the request context — `log.FromContext(ctx).X` — never bare `slog`.
+
+The default (any file not explicitly listed as a client or setup file in the exclusions) is the strictest request-path rule, so new code is nudged toward `log.FromContext(ctx)` automatically.
+
+Levels:
+
+- `Error` — the agent failed at something it was asked to do; an operator likely must act.
+- `Warn` — a handled or tolerated anomaly (e.g. a malformed client message, an admin force-unlock).
+- `Info` — normal operational milestones; a few lines per request (request received/finished, running a module, listening).
+- `Debug` — internal tracing (per-message traffic, worker start/stop, module init/deinit).
+
+An error returned up the call stack is logged once where it becomes terminal (the RPC handler), not at every hop. Module bodies should not log lifecycle markers (`"Run called"`); the framework logs the transition and sets the scope.
+
 ### Documentation Style Guide
 
 - Use Markdown for documentation

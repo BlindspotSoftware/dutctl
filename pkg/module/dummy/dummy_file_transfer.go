@@ -10,10 +10,11 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 
+	"github.com/BlindspotSoftware/dutctl/internal/log"
 	"github.com/BlindspotSoftware/dutctl/pkg/module"
 )
 
@@ -32,25 +33,21 @@ type FT struct{}
 var _ module.Module = &FT{}
 
 func (d *FT) Help() string {
-	log.Println("dummy.FT module: Help called")
-
 	return "This dummy module demonstrates file transfer."
 }
 
 func (d *FT) Init(_ context.Context) error {
-	log.Println("dummy.FT module: Init called")
-
 	return nil
 }
 
 func (d *FT) Deinit(_ context.Context) error {
-	log.Println("dummy.FT module: Deinit called")
-
 	return nil
 }
 
-func (d *FT) Run(_ context.Context, s module.Session, args ...string) error {
-	log.Println("dummy.FT module: Run called")
+func (d *FT) Run(ctx context.Context, s module.Session, args ...string) error {
+	// The logger on ctx is already scoped to this module by the agent; the
+	// module just logs what it does and passes the logger to its helpers.
+	l := log.FromContext(ctx)
 
 	s.Println("Hello from dummy file transfer module")
 	s.Printf("Called with %d arguments\n", len(args))
@@ -68,14 +65,14 @@ func (d *FT) Run(_ context.Context, s module.Session, args ...string) error {
 		return fmt.Errorf("file request failed: %v", err)
 	}
 
-	log.Printf("dummy.FT module: Reading file: %s", inFile)
+	l.Debug(fmt.Sprintf("reading input file %q", inFile))
 
 	raw, err := io.ReadAll(fileReader)
 	if err != nil {
 		return fmt.Errorf("failed to read file: %v", err)
 	}
 
-	err = save(raw, inFile)
+	err = save(l, raw, inFile)
 	if err != nil {
 		return fmt.Errorf("failed to save file: %v", err)
 	}
@@ -86,21 +83,19 @@ func (d *FT) Run(_ context.Context, s module.Session, args ...string) error {
 	}
 
 	outFile := args[1]
-	log.Printf("dummy.FT module: Sending back processed file %q", outFile)
 
 	err = s.SendFile(outFile, bytes.NewBuffer(result))
 	if err != nil {
 		return fmt.Errorf("failed to send file: %v", err)
 	}
 
+	l.Info(fmt.Sprintf("processed and returned %q", outFile))
 	s.Printf("File operated successfully, delivered %q as passed in arg[1] as output\n", outFile)
 
 	return nil
 }
 
-func save(raw []byte, path string) error {
-	log.Printf("dummy.FT module: Save received content on disk")
-
+func save(l *slog.Logger, raw []byte, path string) error {
 	dir, err := os.MkdirTemp("", "dutagent-out")
 	if err != nil {
 		return fmt.Errorf("failed to create temp dir: %v", err)
@@ -115,22 +110,18 @@ func save(raw []byte, path string) error {
 		return fmt.Errorf("failed to write file: %v", err)
 	}
 
-	log.Printf("dummy.FT module: Wrote file to: %s", dest)
+	l.Debug(fmt.Sprintf("wrote received file to %q", dest))
 
 	return nil
 }
 
 func process(input []byte) ([]byte, error) {
-	log.Printf("dummy.FT module: Process received content")
-
 	if len(input) == 0 {
 		return nil, fmt.Errorf("empty input")
 	}
 
 	// Dummy processing
 	input = append(input, []byte("\n\nprocessed by dummy.FT module\n")...)
-
-	log.Printf("dummy.FT module: Processed content")
 
 	return input, nil
 }
