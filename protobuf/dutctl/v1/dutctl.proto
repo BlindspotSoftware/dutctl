@@ -12,6 +12,7 @@ service DeviceService {
   rpc Run(stream RunRequest) returns (stream RunResponse) {}
   rpc Lock(LockRequest) returns (LockResponse) {}
   rpc Unlock(UnlockRequest) returns (UnlockResponse) {}
+  rpc Version(VersionRequest) returns (VersionResponse) {}
 }
 
 // ListRequest is sent by the client to request a list of devices connected to the agent.
@@ -140,6 +141,16 @@ message UnlockRequest {
 
 // UnlockResponse is sent by the agent in response to a successful UnlockRequest.
 message UnlockResponse {}
+
+// VersionRequest is sent by the client to query the agent's build version.
+message VersionRequest {}
+
+// VersionResponse is sent by the agent in response to a VersionRequest. The
+// version field carries the same build information the agent prints via its
+// -v flag.
+message VersionResponse {
+  string version = 1;
+}
 
 // RelayService defines the service for forwarding communication via relay server.
 // NOTE: This is an experimental service and may change in the future.

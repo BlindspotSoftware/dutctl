@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"github.com/BlindspotSoftware/dutctl/internal/buildinfo"
 	"github.com/BlindspotSoftware/dutctl/internal/dutagent"
 	"github.com/BlindspotSoftware/dutctl/internal/fsm"
 	"github.com/BlindspotSoftware/dutctl/pkg/dut"
@@ -234,6 +235,24 @@ func (a *rpcService) Unlock(
 	log.Print("Unlock-RPC finished")
 
 	return connect.NewResponse(&pb.UnlockResponse{}), nil
+}
+
+// Version is the handler for the Version RPC. It reports the agent's build
+// information — the same string the agent prints via its -v flag — so clients
+// can record which dutagent build served a request.
+func (a *rpcService) Version(
+	_ context.Context,
+	_ *connect.Request[pb.VersionRequest],
+) (*connect.Response[pb.VersionResponse], error) {
+	log.Println("Server received Version request")
+
+	res := connect.NewResponse(&pb.VersionResponse{
+		Version: buildinfo.VersionString(),
+	})
+
+	log.Print("Version-RPC finished")
+
+	return res, nil
 }
 
 // streamAdapter decouples a connect.BidiStream to the dutagent.Stream interface.
