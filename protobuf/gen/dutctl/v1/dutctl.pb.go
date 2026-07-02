@@ -1152,6 +1152,90 @@ func (*UnlockResponse) Descriptor() ([]byte, []int) {
 	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{18}
 }
 
+// VersionRequest is sent by the client to query the agent's build version.
+type VersionRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *VersionRequest) Reset() {
+	*x = VersionRequest{}
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *VersionRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*VersionRequest) ProtoMessage() {}
+
+func (x *VersionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use VersionRequest.ProtoReflect.Descriptor instead.
+func (*VersionRequest) Descriptor() ([]byte, []int) {
+	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{19}
+}
+
+// VersionResponse is sent by the agent in response to a VersionRequest. The
+// version field carries the same build information the agent prints via its
+// -v flag.
+type VersionResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Version       string                 `protobuf:"bytes,1,opt,name=version,proto3" json:"version,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *VersionResponse) Reset() {
+	*x = VersionResponse{}
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *VersionResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*VersionResponse) ProtoMessage() {}
+
+func (x *VersionResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use VersionResponse.ProtoReflect.Descriptor instead.
+func (*VersionResponse) Descriptor() ([]byte, []int) {
+	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *VersionResponse) GetVersion() string {
+	if x != nil {
+		return x.Version
+	}
+	return ""
+}
+
 // RegisterRequest is sent by a device agent to register with the relay server.
 // NOTE: This is an experimental service and may change in the future.
 type RegisterRequest struct {
@@ -1164,7 +1248,7 @@ type RegisterRequest struct {
 
 func (x *RegisterRequest) Reset() {
 	*x = RegisterRequest{}
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[19]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1176,7 +1260,7 @@ func (x *RegisterRequest) String() string {
 func (*RegisterRequest) ProtoMessage() {}
 
 func (x *RegisterRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[19]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1189,7 +1273,7 @@ func (x *RegisterRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterRequest.ProtoReflect.Descriptor instead.
 func (*RegisterRequest) Descriptor() ([]byte, []int) {
-	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{19}
+	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *RegisterRequest) GetDevices() []string {
@@ -1216,7 +1300,7 @@ type RegisterResponse struct {
 
 func (x *RegisterResponse) Reset() {
 	*x = RegisterResponse{}
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[20]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1228,7 +1312,7 @@ func (x *RegisterResponse) String() string {
 func (*RegisterResponse) ProtoMessage() {}
 
 func (x *RegisterResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[20]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1241,7 +1325,7 @@ func (x *RegisterResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterResponse.ProtoReflect.Descriptor instead.
 func (*RegisterResponse) Descriptor() ([]byte, []int) {
-	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{20}
+	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{22}
 }
 
 var File_dutctl_v1_dutctl_proto protoreflect.FileDescriptor
@@ -1311,18 +1395,22 @@ const file_dutctl_v1_dutctl_proto_rawDesc = "" +
 	"\rUnlockRequest\x12\x16\n" +
 	"\x06device\x18\x01 \x01(\tR\x06device\x12\x14\n" +
 	"\x05force\x18\x02 \x01(\bR\x05force\"\x10\n" +
-	"\x0eUnlockResponse\"E\n" +
+	"\x0eUnlockResponse\"\x10\n" +
+	"\x0eVersionRequest\"+\n" +
+	"\x0fVersionResponse\x12\x18\n" +
+	"\aversion\x18\x01 \x01(\tR\aversion\"E\n" +
 	"\x0fRegisterRequest\x12\x18\n" +
 	"\adevices\x18\x01 \x03(\tR\adevices\x12\x18\n" +
 	"\aaddress\x18\x02 \x01(\tR\aaddress\"\x12\n" +
-	"\x10RegisterResponse2\x8d\x03\n" +
+	"\x10RegisterResponse2\xd1\x03\n" +
 	"\rDeviceService\x129\n" +
 	"\x04List\x12\x16.dutctl.v1.ListRequest\x1a\x17.dutctl.v1.ListResponse\"\x00\x12E\n" +
 	"\bCommands\x12\x1a.dutctl.v1.CommandsRequest\x1a\x1b.dutctl.v1.CommandsResponse\"\x00\x12B\n" +
 	"\aDetails\x12\x19.dutctl.v1.DetailsRequest\x1a\x1a.dutctl.v1.DetailsResponse\"\x00\x12:\n" +
 	"\x03Run\x12\x15.dutctl.v1.RunRequest\x1a\x16.dutctl.v1.RunResponse\"\x00(\x010\x01\x129\n" +
 	"\x04Lock\x12\x16.dutctl.v1.LockRequest\x1a\x17.dutctl.v1.LockResponse\"\x00\x12?\n" +
-	"\x06Unlock\x12\x18.dutctl.v1.UnlockRequest\x1a\x19.dutctl.v1.UnlockResponse\"\x002U\n" +
+	"\x06Unlock\x12\x18.dutctl.v1.UnlockRequest\x1a\x19.dutctl.v1.UnlockResponse\"\x00\x12B\n" +
+	"\aVersion\x12\x19.dutctl.v1.VersionRequest\x1a\x1a.dutctl.v1.VersionResponse\"\x002U\n" +
 	"\fRelayService\x12E\n" +
 	"\bRegister\x12\x1a.dutctl.v1.RegisterRequest\x1a\x1b.dutctl.v1.RegisterResponse\"\x00BEZCgithub.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1;dutctlv1b\x06proto3"
 
@@ -1338,7 +1426,7 @@ func file_dutctl_v1_dutctl_proto_rawDescGZIP() []byte {
 	return file_dutctl_v1_dutctl_proto_rawDescData
 }
 
-var file_dutctl_v1_dutctl_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
+var file_dutctl_v1_dutctl_proto_msgTypes = make([]protoimpl.MessageInfo, 23)
 var file_dutctl_v1_dutctl_proto_goTypes = []any{
 	(*ListRequest)(nil),      // 0: dutctl.v1.ListRequest
 	(*ListResponse)(nil),     // 1: dutctl.v1.ListResponse
@@ -1359,8 +1447,10 @@ var file_dutctl_v1_dutctl_proto_goTypes = []any{
 	(*LockResponse)(nil),     // 16: dutctl.v1.LockResponse
 	(*UnlockRequest)(nil),    // 17: dutctl.v1.UnlockRequest
 	(*UnlockResponse)(nil),   // 18: dutctl.v1.UnlockResponse
-	(*RegisterRequest)(nil),  // 19: dutctl.v1.RegisterRequest
-	(*RegisterResponse)(nil), // 20: dutctl.v1.RegisterResponse
+	(*VersionRequest)(nil),   // 19: dutctl.v1.VersionRequest
+	(*VersionResponse)(nil),  // 20: dutctl.v1.VersionResponse
+	(*RegisterRequest)(nil),  // 21: dutctl.v1.RegisterRequest
+	(*RegisterResponse)(nil), // 22: dutctl.v1.RegisterResponse
 }
 var file_dutctl_v1_dutctl_proto_depIdxs = []int32{
 	2,  // 0: dutctl.v1.ListResponse.devices:type_name -> dutctl.v1.DeviceInfo
@@ -1378,16 +1468,18 @@ var file_dutctl_v1_dutctl_proto_depIdxs = []int32{
 	8,  // 12: dutctl.v1.DeviceService.Run:input_type -> dutctl.v1.RunRequest
 	15, // 13: dutctl.v1.DeviceService.Lock:input_type -> dutctl.v1.LockRequest
 	17, // 14: dutctl.v1.DeviceService.Unlock:input_type -> dutctl.v1.UnlockRequest
-	19, // 15: dutctl.v1.RelayService.Register:input_type -> dutctl.v1.RegisterRequest
-	1,  // 16: dutctl.v1.DeviceService.List:output_type -> dutctl.v1.ListResponse
-	5,  // 17: dutctl.v1.DeviceService.Commands:output_type -> dutctl.v1.CommandsResponse
-	7,  // 18: dutctl.v1.DeviceService.Details:output_type -> dutctl.v1.DetailsResponse
-	9,  // 19: dutctl.v1.DeviceService.Run:output_type -> dutctl.v1.RunResponse
-	16, // 20: dutctl.v1.DeviceService.Lock:output_type -> dutctl.v1.LockResponse
-	18, // 21: dutctl.v1.DeviceService.Unlock:output_type -> dutctl.v1.UnlockResponse
-	20, // 22: dutctl.v1.RelayService.Register:output_type -> dutctl.v1.RegisterResponse
-	16, // [16:23] is the sub-list for method output_type
-	9,  // [9:16] is the sub-list for method input_type
+	19, // 15: dutctl.v1.DeviceService.Version:input_type -> dutctl.v1.VersionRequest
+	21, // 16: dutctl.v1.RelayService.Register:input_type -> dutctl.v1.RegisterRequest
+	1,  // 17: dutctl.v1.DeviceService.List:output_type -> dutctl.v1.ListResponse
+	5,  // 18: dutctl.v1.DeviceService.Commands:output_type -> dutctl.v1.CommandsResponse
+	7,  // 19: dutctl.v1.DeviceService.Details:output_type -> dutctl.v1.DetailsResponse
+	9,  // 20: dutctl.v1.DeviceService.Run:output_type -> dutctl.v1.RunResponse
+	16, // 21: dutctl.v1.DeviceService.Lock:output_type -> dutctl.v1.LockResponse
+	18, // 22: dutctl.v1.DeviceService.Unlock:output_type -> dutctl.v1.UnlockResponse
+	20, // 23: dutctl.v1.DeviceService.Version:output_type -> dutctl.v1.VersionResponse
+	22, // 24: dutctl.v1.RelayService.Register:output_type -> dutctl.v1.RegisterResponse
+	17, // [17:25] is the sub-list for method output_type
+	9,  // [9:17] is the sub-list for method input_type
 	9,  // [9:9] is the sub-list for extension type_name
 	9,  // [9:9] is the sub-list for extension extendee
 	0,  // [0:9] is the sub-list for field type_name
@@ -1420,7 +1512,7 @@ func file_dutctl_v1_dutctl_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_dutctl_v1_dutctl_proto_rawDesc), len(file_dutctl_v1_dutctl_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   21,
+			NumMessages:   23,
 			NumExtensions: 0,
 			NumServices:   2,
 		},

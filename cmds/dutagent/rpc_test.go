@@ -215,3 +215,18 @@ func TestListRPCExplicitShadowsAuto(t *testing.T) {
 		t.Error("expected explicit-slot expires_at to win, got 0")
 	}
 }
+
+func TestVersionRPC(t *testing.T) {
+	svc := newTestService()
+
+	res, err := svc.Version(context.Background(), connect.NewRequest(&pb.VersionRequest{}))
+	if err != nil {
+		t.Fatalf("Version: %v", err)
+	}
+
+	// The handler returns buildinfo.VersionString(), which always yields a
+	// non-empty, "Version:"-prefixed block even when built without VCS info.
+	if v := res.Msg.GetVersion(); !strings.Contains(v, "Version") {
+		t.Errorf("Version RPC returned %q, want a version string", v)
+	}
+}

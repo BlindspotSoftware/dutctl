@@ -47,6 +47,8 @@ const (
 	DeviceServiceLockProcedure = "/dutctl.v1.DeviceService/Lock"
 	// DeviceServiceUnlockProcedure is the fully-qualified name of the DeviceService's Unlock RPC.
 	DeviceServiceUnlockProcedure = "/dutctl.v1.DeviceService/Unlock"
+	// DeviceServiceVersionProcedure is the fully-qualified name of the DeviceService's Version RPC.
+	DeviceServiceVersionProcedure = "/dutctl.v1.DeviceService/Version"
 	// RelayServiceRegisterProcedure is the fully-qualified name of the RelayService's Register RPC.
 	RelayServiceRegisterProcedure = "/dutctl.v1.RelayService/Register"
 )
@@ -59,6 +61,7 @@ type DeviceServiceClient interface {
 	Run(context.Context) *connect.BidiStreamForClient[v1.RunRequest, v1.RunResponse]
 	Lock(context.Context, *connect.Request[v1.LockRequest]) (*connect.Response[v1.LockResponse], error)
 	Unlock(context.Context, *connect.Request[v1.UnlockRequest]) (*connect.Response[v1.UnlockResponse], error)
+	Version(context.Context, *connect.Request[v1.VersionRequest]) (*connect.Response[v1.VersionResponse], error)
 }
 
 // NewDeviceServiceClient constructs a client for the dutctl.v1.DeviceService service. By default,
@@ -108,6 +111,12 @@ func NewDeviceServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(deviceServiceMethods.ByName("Unlock")),
 			connect.WithClientOptions(opts...),
 		),
+		version: connect.NewClient[v1.VersionRequest, v1.VersionResponse](
+			httpClient,
+			baseURL+DeviceServiceVersionProcedure,
+			connect.WithSchema(deviceServiceMethods.ByName("Version")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -119,6 +128,7 @@ type deviceServiceClient struct {
 	run      *connect.Client[v1.RunRequest, v1.RunResponse]
 	lock     *connect.Client[v1.LockRequest, v1.LockResponse]
 	unlock   *connect.Client[v1.UnlockRequest, v1.UnlockResponse]
+	version  *connect.Client[v1.VersionRequest, v1.VersionResponse]
 }
 
 // List calls dutctl.v1.DeviceService.List.
@@ -151,6 +161,11 @@ func (c *deviceServiceClient) Unlock(ctx context.Context, req *connect.Request[v
 	return c.unlock.CallUnary(ctx, req)
 }
 
+// Version calls dutctl.v1.DeviceService.Version.
+func (c *deviceServiceClient) Version(ctx context.Context, req *connect.Request[v1.VersionRequest]) (*connect.Response[v1.VersionResponse], error) {
+	return c.version.CallUnary(ctx, req)
+}
+
 // DeviceServiceHandler is an implementation of the dutctl.v1.DeviceService service.
 type DeviceServiceHandler interface {
 	List(context.Context, *connect.Request[v1.ListRequest]) (*connect.Response[v1.ListResponse], error)
@@ -159,6 +174,7 @@ type DeviceServiceHandler interface {
 	Run(context.Context, *connect.BidiStream[v1.RunRequest, v1.RunResponse]) error
 	Lock(context.Context, *connect.Request[v1.LockRequest]) (*connect.Response[v1.LockResponse], error)
 	Unlock(context.Context, *connect.Request[v1.UnlockRequest]) (*connect.Response[v1.UnlockResponse], error)
+	Version(context.Context, *connect.Request[v1.VersionRequest]) (*connect.Response[v1.VersionResponse], error)
 }
 
 // NewDeviceServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -204,6 +220,12 @@ func NewDeviceServiceHandler(svc DeviceServiceHandler, opts ...connect.HandlerOp
 		connect.WithSchema(deviceServiceMethods.ByName("Unlock")),
 		connect.WithHandlerOptions(opts...),
 	)
+	deviceServiceVersionHandler := connect.NewUnaryHandler(
+		DeviceServiceVersionProcedure,
+		svc.Version,
+		connect.WithSchema(deviceServiceMethods.ByName("Version")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/dutctl.v1.DeviceService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case DeviceServiceListProcedure:
@@ -218,6 +240,8 @@ func NewDeviceServiceHandler(svc DeviceServiceHandler, opts ...connect.HandlerOp
 			deviceServiceLockHandler.ServeHTTP(w, r)
 		case DeviceServiceUnlockProcedure:
 			deviceServiceUnlockHandler.ServeHTTP(w, r)
+		case DeviceServiceVersionProcedure:
+			deviceServiceVersionHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -249,6 +273,10 @@ func (UnimplementedDeviceServiceHandler) Lock(context.Context, *connect.Request[
 
 func (UnimplementedDeviceServiceHandler) Unlock(context.Context, *connect.Request[v1.UnlockRequest]) (*connect.Response[v1.UnlockResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("dutctl.v1.DeviceService.Unlock is not implemented"))
+}
+
+func (UnimplementedDeviceServiceHandler) Version(context.Context, *connect.Request[v1.VersionRequest]) (*connect.Response[v1.VersionResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("dutctl.v1.DeviceService.Version is not implemented"))
 }
 
 // RelayServiceClient is a client for the dutctl.v1.RelayService service.
