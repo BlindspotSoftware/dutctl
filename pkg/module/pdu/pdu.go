@@ -69,7 +69,7 @@ const (
 	status         = "status"
 )
 
-func (p *PDU) Init() error {
+func (p *PDU) Init(_ context.Context) error {
 	log.Printf("pdu module: Init called - Host: %s, User: %s, Outlet: %d", p.Host, p.User, p.Outlet)
 
 	if p.Outlet < 0 {
@@ -97,7 +97,7 @@ func (p *PDU) Init() error {
 	return nil
 }
 
-func (p *PDU) Deinit() error {
+func (p *PDU) Deinit(_ context.Context) error {
 	log.Println("pdu module: Deinit called")
 
 	return nil

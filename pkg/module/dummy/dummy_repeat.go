@@ -33,13 +33,13 @@ func (d *Repeat) Help() string {
 	return "This dummy module repeats the input from the client."
 }
 
-func (d *Repeat) Init() error {
+func (d *Repeat) Init(_ context.Context) error {
 	log.Println("dummy.Repeat module: Init called")
 
 	return nil
 }
 
-func (d *Repeat) Deinit() error {
+func (d *Repeat) Deinit(_ context.Context) error {
 	log.Println("dummy.Repeat module: Deinit called")
 
 	return nil

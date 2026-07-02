@@ -127,14 +127,14 @@ func TestSerialRunBadArgs(t *testing.T) {
 func TestSerialInit(t *testing.T) {
 	t.Run("missing port", func(t *testing.T) {
 		s := &Serial{}
-		if err := s.Init(); err == nil {
+		if err := s.Init(context.Background()); err == nil {
 			t.Error("Init with empty Port = nil error, want error")
 		}
 	})
 
 	t.Run("defaults baud", func(t *testing.T) {
 		s := &Serial{Port: "/dev/fake"}
-		if err := s.Init(); err != nil {
+		if err := s.Init(context.Background()); err != nil {
 			t.Fatalf("Init: %v", err)
 		}
 
@@ -161,7 +161,7 @@ func TestSerialInitDelay(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &Serial{Port: "/dev/fake", Delay: tt.delay}
 
-			err := s.Init()
+			err := s.Init(context.Background())
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("Init err = %v, wantErr %v", err, tt.wantErr)
 			}

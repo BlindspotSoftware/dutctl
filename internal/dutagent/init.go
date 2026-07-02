@@ -5,6 +5,7 @@
 package dutagent
 
 import (
+	"context"
 	"fmt"
 	"log"
 
@@ -55,7 +56,11 @@ type ModuleInitErrorDetails struct {
 // Init runs the Init function of all modules for all commands of the provided
 // devices. All init functions are called, even if an error occurs. In this case
 // the an ModuleInitErr is returned that holds all errors reported by the modules.
-func Init(devices dut.Devlist) error {
+//
+// ctx is the agent-lifetime context for startup and is passed to every module's
+// Init. It is a plain background context today — see the caller for where a
+// startup deadline would attach.
+func Init(ctx context.Context, devices dut.Devlist) error {
 	var ierr = &ModuleInitError{
 		Errs: make([]ModuleInitErrorDetails, 0),
 		msg:  "module initialization failed",
@@ -64,7 +69,7 @@ func Init(devices dut.Devlist) error {
 	for devname, device := range devices {
 		for cmdname, cmd := range device.Cmds {
 			for _, module := range cmd.Modules {
-				err := catchPanic(module.Init)
+				err := catchPanic(func() error { return module.Init(ctx) })
 				if err != nil {
 					ierr.Errs = append(ierr.Errs, ModuleInitErrorDetails{
 						Dev: devname,
@@ -89,7 +94,11 @@ func Init(devices dut.Devlist) error {
 // Deinit runs the Deinit function of all modules for all commands of the provided
 // devices. All Deinit functions are called, even if an error occurs. In this case
 // the an ModuleInitErr is returned that holds all errors reported by the modules.
-func Deinit(devices dut.Devlist) error {
+//
+// ctx is the shutdown context and is passed to every module's Deinit. It is a
+// plain background context today — see the caller for where a shutdown deadline
+// would attach.
+func Deinit(ctx context.Context, devices dut.Devlist) error {
 	var derr = &ModuleInitError{
 		Errs: make([]ModuleInitErrorDetails, 0),
 		msg:  "bad clean-up",
@@ -100,7 +109,7 @@ func Deinit(devices dut.Devlist) error {
 	for devname, device := range devices {
 		for cmdname, cmd := range device.Cmds {
 			for _, module := range cmd.Modules {
-				err := catchPanic(module.Deinit)
+				err := catchPanic(func() error { return module.Deinit(ctx) })
 				if err != nil {
 					derr.Errs = append(derr.Errs, ModuleInitErrorDetails{
 						Dev: devname,

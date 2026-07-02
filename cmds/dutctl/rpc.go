@@ -31,6 +31,10 @@ import (
 var errInterrupted = errors.New("interrupted")
 
 func (app *application) listRPC() error {
+	// TODO(ctx): unary RPCs run on a bare background context — no signal
+	// cancellation and no deadline. A later change should share an app-level
+	// context (see runRPC's signal.NotifyContext) and add a timeout. Applies to
+	// every unary RPC in this file (List/Lock/Unlock/Commands/Details).
 	ctx := context.Background()
 	req := connect.NewRequest(&pb.ListRequest{})
 

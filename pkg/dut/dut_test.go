@@ -265,8 +265,8 @@ type helpModule struct {
 }
 
 func (m *helpModule) Help() string                                               { return m.text }
-func (m *helpModule) Init() error                                                { return nil }
-func (m *helpModule) Deinit() error                                              { return nil }
+func (m *helpModule) Init(_ context.Context) error                               { return nil }
+func (m *helpModule) Deinit(_ context.Context) error                             { return nil }
 func (m *helpModule) Run(_ context.Context, _ module.Session, _ ...string) error { return nil }
 
 func TestHelpText(t *testing.T) {

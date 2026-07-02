@@ -64,7 +64,7 @@ func (w *Wait) Help() string {
 	return help.String()
 }
 
-func (w *Wait) Init() error {
+func (w *Wait) Init(_ context.Context) error {
 	log.Println("time.Wait module: Init called")
 
 	if w.Duration == "" {
@@ -81,7 +81,7 @@ func (w *Wait) Init() error {
 	return nil
 }
 
-func (w *Wait) Deinit() error {
+func (w *Wait) Deinit(_ context.Context) error {
 	log.Println("time.Wait module: Deinit called")
 
 	return nil

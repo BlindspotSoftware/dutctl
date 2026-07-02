@@ -72,7 +72,7 @@ const (
 	status         = "status"
 )
 
-func (i *IPMI) Init() error {
+func (i *IPMI) Init(ctx context.Context) error {
 	log.Printf("ipmi module: Init starting for BMC %s", i.Host)
 
 	port := i.Port
@@ -106,7 +106,10 @@ func (i *IPMI) Init() error {
 	ipmiClient.WithTimeout(timeout)
 	ipmiClient.WithRetry(trials)
 
-	err = ipmiClient.Connect(context.Background())
+	// Bounded by ctx: passing it (not context.Background()) means a later startup
+	// deadline or shutdown cancellation on that context will bound this connect.
+	// TODO(ctx).
+	err = ipmiClient.Connect(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to connect to IPMI BMC %s:%d: %v", i.Host, port, err)
 	}
@@ -117,12 +120,12 @@ func (i *IPMI) Init() error {
 	return nil
 }
 
-func (i *IPMI) Deinit() error {
+func (i *IPMI) Deinit(ctx context.Context) error {
 	if i.client == nil {
 		return nil
 	}
 
-	err := i.client.Close(context.Background())
+	err := i.client.Close(ctx)
 	if err != nil {
 		log.Printf("ipmi module: Deinit failed to close client: %v", err)
 	}

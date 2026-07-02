@@ -123,7 +123,7 @@ func (b *Button) Help() string {
 	return help.String()
 }
 
-func (b *Button) Init() error {
+func (b *Button) Init(_ context.Context) error {
 	log.Println("gpio.Button module: Init called")
 
 	b.gpio = b.backendParser(b.Backend)
@@ -136,7 +136,7 @@ func (b *Button) Init() error {
 	return b.Low(b.Pin)
 }
 
-func (b *Button) Deinit() error {
+func (b *Button) Deinit(_ context.Context) error {
 	log.Println("gpio.Button module: Deinit called")
 
 	if b.gpio == nil {
@@ -244,7 +244,7 @@ func (s *Switch) Help() string {
 	return help.String()
 }
 
-func (s *Switch) Init() error {
+func (s *Switch) Init(_ context.Context) error {
 	log.Println("gpio.Switch module: Init called")
 
 	s.gpio = s.backendParser(s.Backend)
@@ -261,7 +261,7 @@ func (s *Switch) Init() error {
 	return s.off()
 }
 
-func (s *Switch) Deinit() error {
+func (s *Switch) Deinit(_ context.Context) error {
 	log.Println("gpio.Switch module: Deinit called")
 
 	if s.gpio == nil {

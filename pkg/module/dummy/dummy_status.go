@@ -31,13 +31,13 @@ func (d *Status) Help() string {
 	return "This dummy module prints status information about itself and the environment."
 }
 
-func (d *Status) Init() error {
+func (d *Status) Init(_ context.Context) error {
 	log.Println("dummy.Status module: Init called")
 
 	return nil
 }
 
-func (d *Status) Deinit() error {
+func (d *Status) Deinit(_ context.Context) error {
 	log.Println("dummy.Status module: Deinit called")
 
 	return nil

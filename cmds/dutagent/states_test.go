@@ -347,9 +347,9 @@ type dummyModule struct {
 	runCalls int
 }
 
-func (m *dummyModule) Help() string  { return "dummy" }
-func (m *dummyModule) Init() error   { return nil }
-func (m *dummyModule) Deinit() error { return nil }
+func (m *dummyModule) Help() string                   { return "dummy" }
+func (m *dummyModule) Init(_ context.Context) error   { return nil }
+func (m *dummyModule) Deinit(_ context.Context) error { return nil }
 func (m *dummyModule) Run(_ context.Context, _ module.Session, args ...string) error { // session unused in these tests
 	m.runCalls++
 	m.runArgs = append([]string{}, args...) // copy for safety

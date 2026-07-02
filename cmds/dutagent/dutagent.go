@@ -94,7 +94,10 @@ const (
 // otherwise with provided exitCode.
 func (agt *agent) cleanup(code exitCode) {
 	if agt.modulesNeedDeinit {
-		err := dutagent.Deinit(agt.config.Devices)
+		// TODO(ctx): this background context is the shutdown seam. A later change
+		// can make it a context.WithTimeout to bound module Deinit, or derive it
+		// from a shutdown-signal context. It flows into every module's Deinit.
+		err := dutagent.Deinit(context.Background(), agt.config.Devices)
 		if err != nil {
 			printInitErr(err)
 			log.Print("System might be in an UNKNOWN STATE !!!")
@@ -132,10 +135,10 @@ func (agt *agent) loadConfig() error {
 	return nil
 }
 
-func (agt *agent) initModules() error {
+func (agt *agent) initModules(ctx context.Context) error {
 	agt.modulesNeedDeinit = true
 
-	return dutagent.Init(agt.config.Devices)
+	return dutagent.Init(ctx, agt.config.Devices)
 }
 
 // printInitErr extracts and pretty-prints the details of a dutagent.ModuleInitErr
@@ -189,6 +192,9 @@ func (agt *agent) registerWithServer() error {
 		Address: agt.address,
 	})
 
+	// TODO(ctx): background context — registration has no deadline or
+	// cancellation. A later change can bound it (context.WithTimeout) or tie it
+	// to a startup/shutdown context.
 	_, err := client.Register(context.Background(), req)
 	if err != nil {
 		return fmt.Errorf("registering with server %q failed: %w", agt.server, err)
@@ -267,7 +273,13 @@ func (agt *agent) start() {
 		agt.cleanup(exit1)
 	}
 
-	err = agt.initModules()
+	// initCtx is the agent-lifetime context for module initialization. Today it
+	// is a plain background context; it is the single seam where a later change
+	// can attach a startup deadline (context.WithTimeout) or wire in
+	// cancellation. It flows into every module's Init. TODO(ctx).
+	initCtx := context.Background()
+
+	err = agt.initModules(initCtx)
 	if agt.dryRun {
 		if err != nil {
 			printInitErr(err)
