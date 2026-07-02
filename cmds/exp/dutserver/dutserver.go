@@ -92,7 +92,8 @@ func (svr *server) startRPCService() error {
 
 	mux := http.NewServeMux()
 	// Register the RPC service handler used by the dutctl client to
-	// communicate with the server.
+	// communicate with the server. dutserver relays the version headers between
+	// client and agent (see rpcService.Run).
 	path, handler := dutctlv1connect.NewDeviceServiceHandler(service)
 	mux.Handle(path, handler)
 	// Register the RPC service handler used by dut agents to register themselves
