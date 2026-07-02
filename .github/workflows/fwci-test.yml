@@ -43,7 +43,6 @@ jobs:
           path: bin/
           retention-days: 14 days
 
-
   # Run a firmware-ci test suite
   client-agent-integration:
     runs-on: ubuntu-latest
@@ -74,10 +73,10 @@ jobs:
           echo "dutctl_pkg_path: ${{ steps.filenames.outputs.dutctl_pkg_path }}"
 
       - name: Upload to FirmwareCI
-        uses: docker://firmwareci/action:v5.1
+        uses: docker://firmwareci/action:v6.0
         with:
           TOKEN: "${{ secrets.FWCI_TOKEN }}"
-          WORKFLOW_ID: "${{ secrets.FWCI_WORKFLOW_ID }}"
+          WORKFLOW_NAME: test-dutctl
           COMMIT_HASH: ${{ github.event.pull_request.head.sha || github.sha }}
           BINARIES: DUTCTL=${{ steps.filenames.outputs.dutctl_path }};REMOTE_PKG=${{ steps.filenames.outputs.dutctl_pkg_path }};CONFIG=${{ matrix.configfile }}
           GITHUB_INSTALLATION_ID: 45795153
