@@ -146,7 +146,7 @@ func (s *Serial) Help() string {
 	return help.String()
 }
 
-func (s *Serial) Init() error {
+func (s *Serial) Init(_ context.Context) error {
 	log.Println("serial module: Init called")
 
 	if s.Port == "" {
@@ -175,7 +175,7 @@ func (s *Serial) Init() error {
 	return nil
 }
 
-func (s *Serial) Deinit() error {
+func (s *Serial) Deinit(_ context.Context) error {
 	log.Println("serial module: Deinit called")
 
 	// Nothing to clean up: the port is opened and closed within each Run

@@ -65,7 +65,7 @@ func (s *Shell) Help() string {
 	return help.String()
 }
 
-func (s *Shell) Init() error {
+func (s *Shell) Init(_ context.Context) error {
 	log.Println("shell module: Init called")
 
 	if s.Path == "" {
@@ -80,7 +80,7 @@ func (s *Shell) Init() error {
 	return nil
 }
 
-func (s *Shell) Deinit() error {
+func (s *Shell) Deinit(_ context.Context) error {
 	log.Println("shell module: Deinit called")
 
 	return nil

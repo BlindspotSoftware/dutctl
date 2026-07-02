@@ -33,13 +33,13 @@ func (m *Status) Help() string {
 	return "Get status information about the system on which dutagent is running. No Arguments required."
 }
 
-func (m *Status) Init() error {
+func (m *Status) Init(_ context.Context) error {
 	log.Println("agent.Status module: Init called")
 
 	return nil
 }
 
-func (m *Status) Deinit() error {
+func (m *Status) Deinit(_ context.Context) error {
 	log.Println("agent.Status module: Deinit called")
 
 	return nil

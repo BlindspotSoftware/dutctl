@@ -100,7 +100,7 @@ func TestButtonInit(t *testing.T) {
 				tt.button.backendParser = mockBackend
 			}
 
-			err := tt.button.Init()
+			err := tt.button.Init(context.Background())
 			if (err != nil) != tt.expectErr {
 				t.Errorf("unexpected error: %v", err)
 			}
@@ -155,7 +155,7 @@ func TestButtonDeinit(t *testing.T) {
 			}
 			tt.button.gpio = mockGpio
 
-			err := tt.button.Deinit()
+			err := tt.button.Deinit(context.Background())
 			if (err != nil) != tt.expectErr {
 				t.Errorf("unexpected error: %v", err)
 			}
@@ -435,7 +435,7 @@ func TestSwitchInit(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			tt.swtch.backendParser = mockBackend
 
-			err := tt.swtch.Init()
+			err := tt.swtch.Init(context.Background())
 			if (err != nil) != tt.expectErr {
 				t.Errorf("unexpected error: %v", err)
 			}
@@ -473,7 +473,7 @@ func TestSwitchDeinit(t *testing.T) {
 			}
 			tt.swtch.gpio = mockGpio
 
-			err := tt.swtch.Deinit()
+			err := tt.swtch.Deinit(context.Background())
 			if (err != nil) != tt.expectErr {
 				t.Errorf("unexpected error: %v", err)
 			}

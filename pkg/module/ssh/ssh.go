@@ -69,7 +69,7 @@ func (s *SSH) Help() string {
 	return help.String()
 }
 
-func (s *SSH) Init() error {
+func (s *SSH) Init(_ context.Context) error {
 	log.Println("ssh module: Init called")
 
 	err := s.evalConfiguration()
@@ -119,7 +119,7 @@ func (s *SSH) Init() error {
 	return nil
 }
 
-func (s *SSH) Deinit() error {
+func (s *SSH) Deinit(_ context.Context) error {
 	log.Println("ssh module: Deinit called")
 
 	return nil

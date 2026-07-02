@@ -89,7 +89,7 @@ func (e *FlashEmulate) Help() string {
 	return help.String()
 }
 
-func (e *FlashEmulate) Init() error {
+func (e *FlashEmulate) Init(_ context.Context) error {
 	log.Println("flash-emulate module: Init called")
 
 	if e.Tool == "" {
@@ -108,7 +108,7 @@ func (e *FlashEmulate) Init() error {
 	return nil
 }
 
-func (e *FlashEmulate) Deinit() error {
+func (e *FlashEmulate) Deinit(_ context.Context) error {
 	log.Println("flash-emulate module: Deinit called")
 
 	return os.RemoveAll(e.localImagePath)

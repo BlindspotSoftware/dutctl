@@ -37,13 +37,13 @@ func (d *FT) Help() string {
 	return "This dummy module demonstrates file transfer."
 }
 
-func (d *FT) Init() error {
+func (d *FT) Init(_ context.Context) error {
 	log.Println("dummy.FT module: Init called")
 
 	return nil
 }
 
-func (d *FT) Deinit() error {
+func (d *FT) Deinit(_ context.Context) error {
 	log.Println("dummy.FT module: Deinit called")
 
 	return nil

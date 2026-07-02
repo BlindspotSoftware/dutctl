@@ -149,7 +149,7 @@ func usageAndDescription(operation, source, destination string) string {
 	}
 }
 
-func (f *File) Init() error {
+func (f *File) Init(_ context.Context) error {
 	log.Println("file module: Init called")
 
 	if f.Permission != "" {
@@ -179,7 +179,7 @@ func (f *File) Init() error {
 	return nil
 }
 
-func (f *File) Deinit() error {
+func (f *File) Deinit(_ context.Context) error {
 	log.Println("file module: Deinit called")
 
 	return nil

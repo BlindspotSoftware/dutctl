@@ -98,7 +98,7 @@ func (f *Flash) Help() string {
 	return help.String()
 }
 
-func (f *Flash) Init() error {
+func (f *Flash) Init(_ context.Context) error {
 	log.Println("flash module: Init called")
 
 	if f.Tool == "" {
@@ -130,7 +130,7 @@ func (f *Flash) isSupported(tool string) bool {
 	return slices.Contains(f.supportedTools, base)
 }
 
-func (f *Flash) Deinit() error {
+func (f *Flash) Deinit(_ context.Context) error {
 	log.Println("flash module: Deinit called")
 
 	return os.RemoveAll(f.localImagePath)

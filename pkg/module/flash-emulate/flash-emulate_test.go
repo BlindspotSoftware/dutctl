@@ -17,30 +17,30 @@ import (
 
 func TestInit(t *testing.T) {
 	tests := []struct {
-		name        string
+		name         string
 		flashEmulate FlashEmulate
-		expectErr   bool
+		expectErr    bool
 	}{
 		{
-			name:        "valid config",
+			name:         "valid config",
 			flashEmulate: FlashEmulate{Tool: "/bin/sh", Chip: "N25Q256A13"},
-			expectErr:   false,
+			expectErr:    false,
 		},
 		{
-			name:        "missing chip",
+			name:         "missing chip",
 			flashEmulate: FlashEmulate{Tool: "/bin/sh"},
-			expectErr:   true,
+			expectErr:    true,
 		},
 		{
-			name:        "tool not found",
+			name:         "tool not found",
 			flashEmulate: FlashEmulate{Tool: "this-tool-does-not-exist-xyzabc123", Chip: "N25Q256A13"},
-			expectErr:   true,
+			expectErr:    true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := tt.flashEmulate.Init()
+			err := tt.flashEmulate.Init(context.Background())
 			if (err != nil) != tt.expectErr {
 				t.Errorf("unexpected error state (wantErr=%v): %v", tt.expectErr, err)
 			}
@@ -61,7 +61,7 @@ func TestInitDefaultTool(t *testing.T) {
 
 	e := FlashEmulate{Chip: "N25Q256A13"}
 
-	if err := e.Init(); err != nil {
+	if err := e.Init(context.Background()); err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
 
@@ -73,7 +73,7 @@ func TestInitDefaultTool(t *testing.T) {
 func TestDeinit(t *testing.T) {
 	t.Run("no image to clean up", func(t *testing.T) {
 		e := FlashEmulate{}
-		if err := e.Deinit(); err != nil {
+		if err := e.Deinit(context.Background()); err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
 	})
@@ -87,7 +87,7 @@ func TestDeinit(t *testing.T) {
 		f.Close()
 
 		e := FlashEmulate{localImagePath: f.Name()}
-		if err := e.Deinit(); err != nil {
+		if err := e.Deinit(context.Background()); err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
 
@@ -99,16 +99,16 @@ func TestDeinit(t *testing.T) {
 
 func TestRun(t *testing.T) {
 	tests := []struct {
-		name        string
+		name         string
 		flashEmulate FlashEmulate
-		args        []string
-		expectErr   bool
+		args         []string
+		expectErr    bool
 	}{
 		{
-			name:        "missing image argument",
+			name:         "missing image argument",
 			flashEmulate: FlashEmulate{Tool: "/bin/sh", Chip: "N25Q256A13"},
-			args:        []string{},
-			expectErr:   true,
+			args:         []string{},
+			expectErr:    true,
 		},
 	}
 
@@ -150,7 +150,7 @@ func TestRun(t *testing.T) {
 			t.Errorf("expected requested file name %q, got %q", "firmware.rom", sesh.RequestedFileName)
 		}
 
-		if err := e.Deinit(); err != nil {
+		if err := e.Deinit(context.Background()); err != nil {
 			t.Errorf("unexpected Deinit error: %v", err)
 		}
 	})
@@ -221,7 +221,7 @@ func TestRun(t *testing.T) {
 			t.Errorf("expected first temp file %q to be cleaned up before second run", firstPath)
 		}
 
-		if err := e.Deinit(); err != nil {
+		if err := e.Deinit(context.Background()); err != nil {
 			t.Errorf("unexpected Deinit error: %v", err)
 		}
 	})
@@ -274,9 +274,9 @@ func TestHelp(t *testing.T) {
 
 func TestCmdline(t *testing.T) {
 	tests := []struct {
-		name        string
+		name         string
 		flashEmulate FlashEmulate
-		expected    []string
+		expected     []string
 	}{
 		{
 			name: "basic cmdline without device",

@@ -67,7 +67,7 @@ func (w *WifiSocket) Help() string {
 	return help.String()
 }
 
-func (w *WifiSocket) Init() error {
+func (w *WifiSocket) Init(_ context.Context) error {
 	log.Printf("wifisocket module: Init called - Host: %s, Channel: %d", w.Host, w.Channel)
 
 	if w.Host == "" {
@@ -99,7 +99,7 @@ func (w *WifiSocket) Init() error {
 	return nil
 }
 
-func (w *WifiSocket) Deinit() error {
+func (w *WifiSocket) Deinit(_ context.Context) error {
 	log.Println("wifisocket module: Deinit called")
 
 	return nil

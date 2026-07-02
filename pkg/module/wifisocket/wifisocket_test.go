@@ -5,6 +5,7 @@
 package wifisocket
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -52,7 +53,7 @@ func TestParseStateJSONHTMLPlain(t *testing.T) {
 
 func TestInitControlURL(t *testing.T) {
 	w := &WifiSocket{Host: "http://example.local:8080"}
-	if err := w.Init(); err != nil {
+	if err := w.Init(context.Background()); err != nil {
 		t.Fatalf("Init failed: %v", err)
 	}
 	if w.controlURL == nil {
@@ -69,7 +70,7 @@ func TestHelpAndDeinit(t *testing.T) {
 	if h == "" || !strings.Contains(h, "WiFi Socket") {
 		t.Fatalf("help seems wrong")
 	}
-	if err := w.Deinit(); err != nil {
+	if err := w.Deinit(context.Background()); err != nil {
 		t.Fatalf("Deinit returned error: %v", err)
 	}
 }
