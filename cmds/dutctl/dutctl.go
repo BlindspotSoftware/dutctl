@@ -152,6 +152,7 @@ func (app *application) setupRPCClient() {
 		newInsecureClient(),
 		fmt.Sprintf("http://%s", app.serverAddr),
 		connect.WithGRPC(),
+		connect.WithInterceptors(buildinfo.NewServerVersionRPCInterceptor(buildinfo.Version)),
 	)
 
 	app.rpcClient = client

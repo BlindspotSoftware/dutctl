@@ -180,7 +180,10 @@ func (agt *agent) startRPCService() error {
 	}
 
 	mux := http.NewServeMux()
-	path, handler := dutctlv1connect.NewDeviceServiceHandler(service)
+	path, handler := dutctlv1connect.NewDeviceServiceHandler(
+		service,
+		connect.WithInterceptors(buildinfo.NewClientVersionRPCInterceptor(buildinfo.Version)),
+	)
 	mux.Handle(path, handler)
 
 	// Serve HTTP/2 without TLS (h2c)

@@ -15,6 +15,7 @@ import (
 	"sync"
 
 	"connectrpc.com/connect"
+	"github.com/BlindspotSoftware/dutctl/internal/buildinfo"
 	"github.com/BlindspotSoftware/dutctl/internal/log"
 	"github.com/BlindspotSoftware/dutctl/pkg/lock"
 	"github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1/dutctlv1connect"
@@ -238,6 +239,11 @@ func (s *rpcService) Run(
 	// Forward the requesting user's identity to the agent so it can enforce locking.
 	upstream.RequestHeader().Set(lock.UserHeader, user)
 
+	// Relay the client's version to the agent (which enforces it); add none of our own.
+	clientVersion := downstream.RequestHeader().Get(buildinfo.VersionHeader)
+	guardMajorMismatch(clientVersion)
+	upstream.RequestHeader().Set(buildinfo.VersionHeader, clientVersion)
+
 	// Forward the initial request to the DUT agent.
 	err = upstream.Send(downStreamRequest)
 	if err != nil {
@@ -256,6 +262,10 @@ func (s *rpcService) Run(
 
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel() // Ensure the context is cancelled when the function returns.
+
+	// relayAgentVersion forwards the agent's version to the client once, before the
+	// first response, so the client's advisory check sees the real agent.
+	var relayAgentVersion sync.Once
 
 	// agent to client forwarding (downstream direction)
 	go func() {
@@ -284,6 +294,12 @@ func (s *rpcService) Run(
 
 				return
 			}
+
+			relayAgentVersion.Do(func() {
+				agentVersion := upstream.ResponseHeader().Get(buildinfo.VersionHeader)
+				guardMajorMismatch(agentVersion)
+				downstream.ResponseHeader().Set(buildinfo.VersionHeader, agentVersion)
+			})
 
 			l.Debug("forwarding message to client", "kind", responseKind(res))
 
@@ -428,6 +444,18 @@ func forwardDetailsReq(
 	// TODO(ctx): ctx carries the caller's cancellation but no deadline (the
 	// client sets none). A per-RPC timeout would attach here.
 	return client.Details(ctx, req)
+}
+
+// guardMajorMismatch panics on a major dutctl version gap between dutserver and a
+// peer: dutserver relays raw protobuf of its own schema and cannot bridge one.
+//
+// TODO: handle this properly (reject or translate) instead of panicking, once
+// dutserver is more than experimental.
+func guardMajorMismatch(peer string) {
+	if buildinfo.CompareVersions(buildinfo.Version, peer).Level == buildinfo.Incompatible {
+		panic(fmt.Sprintf("dutserver: unhandled major dutctl version mismatch (dutserver %s, peer %q)",
+			buildinfo.Version, peer))
+	}
 }
 
 // spawnClient creates a new client to the DUT agent specified by the agent address.

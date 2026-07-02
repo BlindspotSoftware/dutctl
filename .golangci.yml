@@ -194,6 +194,7 @@ linters:
         - Formatter
         - gpio
         - port
+        - Interceptor
 
     lll:
       line-length: 140
