@@ -2,6 +2,7 @@
 # Device-under-Test Configuration for RaspberryPi acting as dutctl tester
 name: fwci-dutctl-tester
 label: fwci-dutctl-tester
-reservation-system: mock
+reservation-system: dutctl
 attributes:
-  Host: "fwci-dutctl-tester.sec.9e.network"
+  Agent: "fwci-dutctl-tester.sec.9e.network:2024"
+  Device: "device1"

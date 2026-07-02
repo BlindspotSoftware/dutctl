@@ -5,4 +5,5 @@ name: {{ defaults.RPI_HOSTNAME }}
 label: {{ defaults.RPI_HOSTNAME }}
 reservation-system: {{ defaults.RPI_RESERVATION_SYSTEM }}
 attributes:
-  Host: "{{ defaults.RPI_FQDN }}"
+  Agent: "{{ defaults.RPI_FQDN }}:{{ defaults.DUTAGENT_PORT }}"
+  Device: "device1"
