@@ -7,8 +7,9 @@ package dutagent
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 
+	"github.com/BlindspotSoftware/dutctl/internal/log"
 	"github.com/BlindspotSoftware/dutctl/pkg/dut"
 )
 
@@ -55,11 +56,11 @@ type ModuleInitErrorDetails struct {
 
 // Init runs the Init function of all modules for all commands of the provided
 // devices. All init functions are called, even if an error occurs. In this case
-// the an ModuleInitErr is returned that holds all errors reported by the modules.
+// a ModuleInitError is returned that holds all errors reported by the modules.
 //
-// ctx is the agent-lifetime context for startup and is passed to every module's
-// Init. It is a plain background context today — see the caller for where a
-// startup deadline would attach.
+// ctx is the agent-lifetime context for startup; each module's Init receives a
+// child of it carrying the module-scoped logger. It is a plain background
+// context today — see the caller for where a startup deadline would attach.
 func Init(ctx context.Context, devices dut.Devlist) error {
 	var ierr = &ModuleInitError{
 		Errs: make([]ModuleInitErrorDetails, 0),
@@ -69,8 +70,14 @@ func Init(ctx context.Context, devices dut.Devlist) error {
 	for devname, device := range devices {
 		for cmdname, cmd := range device.Cmds {
 			for _, module := range cmd.Modules {
-				err := catchPanic(func() error { return module.Init(ctx) })
+				mlog := log.Scope(slog.Default(), "module").With("device", devname, "command", cmdname, "module", module.Config.Name)
+				mctx := log.Into(ctx, mlog)
+
+				mlog.Debug("initializing module")
+
+				err := catchPanic(func() error { return module.Init(mctx) })
 				if err != nil {
+					// Aggregated and reported by the caller (printInitErr); not logged here.
 					ierr.Errs = append(ierr.Errs, ModuleInitErrorDetails{
 						Dev: devname,
 						Cmd: cmdname,
@@ -86,30 +93,35 @@ func Init(ctx context.Context, devices dut.Devlist) error {
 		return ierr
 	}
 
-	log.Print("Module Initialization OK")
+	slog.Info("module initialization complete")
 
 	return nil
 }
 
 // Deinit runs the Deinit function of all modules for all commands of the provided
 // devices. All Deinit functions are called, even if an error occurs. In this case
-// the an ModuleInitErr is returned that holds all errors reported by the modules.
+// a ModuleInitError is returned that holds all errors reported by the modules.
 //
-// ctx is the shutdown context and is passed to every module's Deinit. It is a
-// plain background context today — see the caller for where a shutdown deadline
-// would attach.
+// ctx is the shutdown context; each module's Deinit receives a child of it
+// carrying the module-scoped logger. It is a plain background context today —
+// see the caller for where a shutdown deadline would attach.
 func Deinit(ctx context.Context, devices dut.Devlist) error {
 	var derr = &ModuleInitError{
 		Errs: make([]ModuleInitErrorDetails, 0),
 		msg:  "bad clean-up",
 	}
 
-	log.Printf("GRACEFUL SHUTDOWN: De-init modules")
+	slog.Info("graceful shutdown: deinitializing modules")
 
 	for devname, device := range devices {
 		for cmdname, cmd := range device.Cmds {
 			for _, module := range cmd.Modules {
-				err := catchPanic(func() error { return module.Deinit(ctx) })
+				mlog := log.Scope(slog.Default(), "module").With("device", devname, "command", cmdname, "module", module.Config.Name)
+				mctx := log.Into(ctx, mlog)
+
+				mlog.Debug("deinitializing module")
+
+				err := catchPanic(func() error { return module.Deinit(mctx) })
 				if err != nil {
 					derr.Errs = append(derr.Errs, ModuleInitErrorDetails{
 						Dev: devname,
@@ -126,7 +138,7 @@ func Deinit(ctx context.Context, devices dut.Devlist) error {
 		return derr
 	}
 
-	log.Print("All modules de-initialized")
+	slog.Info("all modules deinitialized")
 
 	return nil
 }

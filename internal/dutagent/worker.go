@@ -9,9 +9,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 
 	"github.com/BlindspotSoftware/dutctl/internal/chanio"
+	"github.com/BlindspotSoftware/dutctl/internal/log"
 
 	pb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1"
 )
@@ -21,6 +21,8 @@ import (
 //
 //nolint:cyclop, funlen
 func toClientWorker(ctx context.Context, stream Stream, s *session) error {
+	l := log.FromContext(ctx)
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -64,7 +66,7 @@ func toClientWorker(ctx context.Context, stream Stream, s *session) error {
 
 			s.currentFile = name
 		case file := <-s.fileCh:
-			r, err := chanio.NewChanReader(file)
+			r, err := chanio.NewChanReader(file, l)
 			if err != nil {
 				return err
 			}
@@ -74,7 +76,7 @@ func toClientWorker(ctx context.Context, stream Stream, s *session) error {
 				return err
 			}
 
-			log.Printf("Received file from module, sending to client. Name: %q, Size %d", s.currentFile, len(content))
+			l.Debug("file received from module", "name", s.currentFile, "bytes", len(content))
 
 			res := &pb.RunResponse{
 				Msg: &pb.RunResponse_File{
@@ -100,6 +102,8 @@ func toClientWorker(ctx context.Context, stream Stream, s *session) error {
 //
 //nolint:cyclop,funlen,gocognit
 func fromClientWorker(ctx context.Context, stream Stream, s *session) error {
+	l := log.FromContext(ctx)
+
 	type recvResult struct {
 		req *pb.RunRequest
 		err error
@@ -153,7 +157,7 @@ func fromClientWorker(ctx context.Context, stream Stream, s *session) error {
 			}
 
 			if r.req == nil { // Defensive: shouldn't happen unless stream.Receive misbehaves
-				log.Println("Received nil request without error; ignoring")
+				l.Warn("ignoring nil request without error")
 
 				continue
 			}
@@ -166,12 +170,12 @@ func fromClientWorker(ctx context.Context, stream Stream, s *session) error {
 				case *pb.Console_Stdin:
 					stdin := consoleMsg.Stdin
 					if stdin == nil {
-						log.Println("Received nil stdin message")
+						l.Warn("ignoring nil stdin message")
 
 						continue
 					}
 
-					log.Printf("Server received stdin from client: %q", string(stdin))
+					l.Debug("received stdin from client", "bytes", len(stdin))
 
 					select {
 					case <-ctx.Done():
@@ -179,21 +183,19 @@ func fromClientWorker(ctx context.Context, stream Stream, s *session) error {
 					case s.stdinCh <- stdin:
 					}
 
-					log.Println("Passed stdin to module")
-
 				default:
-					log.Printf("Unexpected Console message %T", consoleMsg)
+					l.Warn("unexpected console message", "type", fmt.Sprintf("%T", consoleMsg))
 				}
 			case *pb.RunRequest_File:
 				fileMsg := msg.File
 				if fileMsg == nil {
-					log.Println("Received empty file message")
+					l.Warn("bad file transfer: empty file message")
 
 					return fmt.Errorf("bad file transfer: received empty file-message")
 				}
 
 				if s.currentFile == "" {
-					log.Println("Received file without a request")
+					l.Warn("bad file transfer: file without a request")
 
 					return fmt.Errorf("bad file transfer: received file-message without a former request")
 				}
@@ -202,29 +204,28 @@ func fromClientWorker(ctx context.Context, stream Stream, s *session) error {
 				content := fileMsg.GetContent()
 
 				if content == nil {
-					log.Println("Received file message with empty content")
+					l.Warn("bad file transfer: file message with empty content")
 
 					return fmt.Errorf("bad file transfer: received file-message without content")
 				}
 
 				if path != s.currentFile {
-					log.Printf("Received unexpected file %q - ignoring!", path)
+					l.Warn("bad file transfer: unexpected file", "received", path, "requested", s.currentFile)
 
 					return fmt.Errorf("bad file transfer: received file-message %q but requested %q", path, s.currentFile)
 				}
 
-				log.Printf("Server received file %q from client", path)
+				l.Debug("received file from client", "name", path, "bytes", len(content))
 
 				file := make(chan []byte, 1)
 				s.fileCh <- file
 				file <- content
 
 				close(file)
-				log.Println("Passed file to module (buffered in the session)")
 
 				s.currentFile = ""
 			default:
-				log.Printf("Unexpected message type %T", msg)
+				l.Warn("unexpected message type", "type", fmt.Sprintf("%T", msg))
 			}
 		}
 	}

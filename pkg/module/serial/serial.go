@@ -10,10 +10,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
+	"github.com/BlindspotSoftware/dutctl/internal/log"
 	"github.com/BlindspotSoftware/dutctl/pkg/module"
 	"go.bug.st/serial"
 )
@@ -135,8 +135,6 @@ EXAMPLES:
 `
 
 func (s *Serial) Help() string {
-	log.Println("serial module: Help called")
-
 	help := strings.Builder{}
 	help.WriteString(abstract)
 	help.WriteString(usage)
@@ -146,15 +144,14 @@ func (s *Serial) Help() string {
 	return help.String()
 }
 
-func (s *Serial) Init(_ context.Context) error {
-	log.Println("serial module: Init called")
-
+func (s *Serial) Init(ctx context.Context) error {
 	if s.Port == "" {
 		return fmt.Errorf("COM port is not set")
 	}
 
 	if s.Baud == 0 {
 		s.Baud = DefaultBaudRate
+		log.FromContext(ctx).Debug(fmt.Sprintf("no baud rate configured, using default %d", DefaultBaudRate))
 	}
 
 	s.delay = defaultDelay
@@ -176,8 +173,6 @@ func (s *Serial) Init(_ context.Context) error {
 }
 
 func (s *Serial) Deinit(_ context.Context) error {
-	log.Println("serial module: Deinit called")
-
 	// Nothing to clean up: the port is opened and closed within each Run
 	// (see Run's defer), never held on the struct between runs.
 	return nil
@@ -204,7 +199,10 @@ func defaultOpenPort(name string, baud int) (port, error) {
 
 //nolint:cyclop,funlen // monitor/sequence dispatch with pacing and drain; the branch count is inherent
 func (s *Serial) Run(ctx context.Context, session module.Session, args ...string) error {
-	log.Println("serial module: Run called")
+	// The logger carried on ctx is already scoped to this module by the agent
+	// (scope "module", with module/device/command attributes), so the module
+	// only adds what is specific to this run.
+	l := log.FromContext(ctx)
 
 	// Parse into LOCAL state every Run — the module instance is shared and
 	// reused across RPCs, so nothing per-run may live on the struct.
@@ -228,10 +226,10 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 	// previous session, otherwise a step could match data from the last boot.
 	err = serialPort.ResetInputBuffer()
 	if err != nil {
-		log.Printf("serial module: reset input buffer failed: %v", err)
+		l.Warn("reset input buffer failed", "err", err)
 	}
 
-	log.Printf("serial module: connected to %s at %d baud", s.Port, s.Baud)
+	l.Info(fmt.Sprintf("connected to %s at %d baud", s.Port, s.Baud))
 
 	clientOut := newClientWriter(session)
 	clientOut.markerf("--- Connected to %s at %d baud ---\n", s.Port, s.Baud)
@@ -243,7 +241,7 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 	if cfg.timeout > 0 {
 		var cancel context.CancelFunc
 
-		log.Printf("serial module: setting global timeout of %s", cfg.timeout)
+		l.Debug(fmt.Sprintf("setting global timeout %s", cfg.timeout))
 		loopCtx, cancel = context.WithTimeout(ctx, cfg.timeout)
 
 		defer cancel()
@@ -253,7 +251,7 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 
 	// Monitor mode: no steps — stream the console until cancelled or -t elapses.
 	if len(cfg.steps) == 0 {
-		log.Println("serial module: monitor mode; streaming until cancelled")
+		l.Debug("monitor mode; streaming until cancelled")
 
 		err = eng.monitor(loopCtx)
 		if err != nil {

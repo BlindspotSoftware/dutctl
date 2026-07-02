@@ -11,12 +11,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
+	"github.com/BlindspotSoftware/dutctl/internal/log"
 	"github.com/BlindspotSoftware/dutctl/pkg/module"
 )
 
@@ -47,8 +47,6 @@ const (
 )
 
 func (w *WifiSocket) Help() string {
-	log.Println("wifisocket module: Help called")
-
 	help := strings.Builder{}
 
 	help.WriteString("WiFi Socket (Tasmota) Module\n\n")
@@ -67,15 +65,15 @@ func (w *WifiSocket) Help() string {
 	return help.String()
 }
 
-func (w *WifiSocket) Init(_ context.Context) error {
-	log.Printf("wifisocket module: Init called - Host: %s, Channel: %d", w.Host, w.Channel)
-
+func (w *WifiSocket) Init(ctx context.Context) error {
 	if w.Host == "" {
 		return fmt.Errorf("wifisocket: host must be configured")
 	}
 
 	if w.Channel <= 0 {
 		w.Channel = 1
+
+		log.FromContext(ctx).Debug("no channel configured, using default 1")
 	}
 
 	w.client = &http.Client{Timeout: defaultTimeout}
@@ -94,14 +92,10 @@ func (w *WifiSocket) Init(_ context.Context) error {
 	w.controlURL = u
 	w.Host = host
 
-	log.Printf("wifisocket module: Init completed - controlURL: %s", w.controlURL.String())
-
 	return nil
 }
 
 func (w *WifiSocket) Deinit(_ context.Context) error {
-	log.Println("wifisocket module: Deinit called")
-
 	return nil
 }
 
@@ -135,6 +129,8 @@ func (w *WifiSocket) Run(ctx context.Context, s module.Session, args ...string) 
 
 // doRequest performs an HTTP GET and ensures HTTP 200 OK.
 func (w *WifiSocket) doRequest(ctx context.Context, u string) (*http.Response, error) {
+	log.FromContext(ctx).Debug("GET " + u)
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return nil, err
@@ -178,6 +174,8 @@ func (w *WifiSocket) setPower(ctx context.Context, s module.Session, state strin
 		return err
 	}
 	defer resp.Body.Close()
+
+	log.FromContext(ctx).Info(fmt.Sprintf("socket channel %d power %s", w.Channel, state))
 
 	body, _ := io.ReadAll(resp.Body)
 

@@ -6,7 +6,6 @@ package dummy
 
 import (
 	"context"
-	"log"
 
 	"github.com/BlindspotSoftware/dutctl/pkg/module"
 )
@@ -26,26 +25,18 @@ type Status struct{}
 var _ module.Module = &Status{}
 
 func (d *Status) Help() string {
-	log.Println("dummy.Status module: Help called")
-
 	return "This dummy module prints status information about itself and the environment."
 }
 
 func (d *Status) Init(_ context.Context) error {
-	log.Println("dummy.Status module: Init called")
-
 	return nil
 }
 
 func (d *Status) Deinit(_ context.Context) error {
-	log.Println("dummy.Status module: Deinit called")
-
 	return nil
 }
 
 func (d *Status) Run(_ context.Context, s module.Session, args ...string) error {
-	log.Println("dummy.Status module: Run called")
-
 	s.Println("Hello from dummy status module")
 	s.Printf("Called with %d arguments\n", len(args))
 

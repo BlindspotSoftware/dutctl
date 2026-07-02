@@ -11,11 +11,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"os/exec"
 	"strings"
 
+	"github.com/BlindspotSoftware/dutctl/internal/log"
 	"github.com/BlindspotSoftware/dutctl/pkg/module"
 )
 
@@ -74,8 +74,6 @@ from Dediprog) must be connected to the DUT's SPI flash bus.
 `
 
 func (e *FlashEmulate) Help() string {
-	log.Println("flash-emulate module: Help called")
-
 	help := strings.Builder{}
 	help.WriteString(abstract)
 	help.WriteString(usage)
@@ -89,14 +87,13 @@ func (e *FlashEmulate) Help() string {
 	return help.String()
 }
 
-func (e *FlashEmulate) Init(_ context.Context) error {
-	log.Println("flash-emulate module: Init called")
-
+func (e *FlashEmulate) Init(ctx context.Context) error {
 	if e.Tool == "" {
 		e.Tool = defaultTool
+		log.FromContext(ctx).Debug("no tool configured, using default " + defaultTool)
 	}
 
-	_, err := exec.LookPath(e.Tool)
+	toolPath, err := exec.LookPath(e.Tool)
 	if err != nil {
 		return fmt.Errorf("emulation tool %q: %w", e.Tool, err)
 	}
@@ -105,17 +102,17 @@ func (e *FlashEmulate) Init(_ context.Context) error {
 		return errors.New("chip must be configured (e.g. \"N25Q256A13\")")
 	}
 
+	log.FromContext(ctx).Debug(fmt.Sprintf("using emulation tool %s at %s", e.Tool, toolPath))
+
 	return nil
 }
 
 func (e *FlashEmulate) Deinit(_ context.Context) error {
-	log.Println("flash-emulate module: Deinit called")
-
 	return os.RemoveAll(e.localImagePath)
 }
 
-func (e *FlashEmulate) Run(_ context.Context, sesh module.Session, args ...string) error {
-	log.Println("flash-emulate module: Run called")
+func (e *FlashEmulate) Run(ctx context.Context, sesh module.Session, args ...string) error {
+	l := log.FromContext(ctx)
 
 	if len(args) < 1 {
 		return errors.New("missing argument: image file path")
@@ -155,7 +152,8 @@ func (e *FlashEmulate) Run(_ context.Context, sesh module.Session, args ...strin
 
 	cmdArgs := e.cmdline()
 
-	log.Printf("flash-emulate module: Executing command: %s %s", e.Tool, strings.Join(cmdArgs, " "))
+	l.Info(fmt.Sprintf("loading image into emulator with %s", e.Tool))
+	l.Debug(fmt.Sprintf("executing %s %s", e.Tool, strings.Join(cmdArgs, " ")))
 	sesh.Print(fmt.Sprintf("Executing: %s %s", e.Tool, strings.Join(cmdArgs, " ")))
 
 	err = execute(sesh, e.Tool, cmdArgs...)
@@ -222,7 +220,6 @@ func execute(sesh module.Session, tool string, args ...string) error {
 	output, err := cmd.CombinedOutput()
 
 	if len(output) > 0 {
-		log.Printf("flash-emulate module: tool output:\n%s", output)
 		sesh.Print(string(output))
 	}
 

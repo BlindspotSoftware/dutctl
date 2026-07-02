@@ -9,13 +9,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"maps"
 	"net/http"
 	"slices"
 	"sync"
 
 	"connectrpc.com/connect"
+	"github.com/BlindspotSoftware/dutctl/internal/log"
 	"github.com/BlindspotSoftware/dutctl/pkg/lock"
 	"github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1/dutctlv1connect"
 
@@ -32,13 +32,13 @@ type agent struct {
 	client dutctlv1connect.DeviceServiceClient
 }
 
-// conn returns the RPC client that connetcs to the DUT agent.
-func (a *agent) conn() dutctlv1connect.DeviceServiceClient {
+// conn returns the RPC client that connects to the DUT agent.
+func (a *agent) conn(ctx context.Context) dutctlv1connect.DeviceServiceClient {
 	a.Lock()
 	defer a.Unlock()
 
 	if a.client == nil {
-		a.client = spawnClient(a.address)
+		a.client = spawnClient(ctx, a.address)
 	}
 
 	return a.client
@@ -72,13 +72,17 @@ func (s *rpcService) findAgent(device string) (*agent, error) {
 }
 
 // addAgent tries to register devices handled by an agent with address.
-// If one of the provided devices already exists an error is returned and none of the deviced will be stored.
-func (s *rpcService) addAgent(address string, devices []string) error {
+// If one of the provided devices already exists an error is returned and none of the devices will be stored.
+func (s *rpcService) addAgent(ctx context.Context, address string, devices []string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	l := log.FromContext(ctx)
+
 	for _, device := range devices {
 		if _, exists := s.agents[device]; exists {
+			l.Warn("rejecting registration: device already registered", "device", device, "agent", address)
+
 			return fmt.Errorf("device %q already registered", device)
 		}
 	}
@@ -87,15 +91,18 @@ func (s *rpcService) addAgent(address string, devices []string) error {
 		s.agents[device] = &agent{address: address}
 	}
 
+	l.Info("agent registered", "agent", address, "devices", devices)
+
 	return nil
 }
 
 // List is the handler for the List RPC.
 func (s *rpcService) List(
-	_ context.Context,
+	ctx context.Context,
 	_ *connect.Request[pb.ListRequest],
 ) (*connect.Response[pb.ListResponse], error) {
-	log.Println("Server received List request")
+	l := log.FromContext(log.With(log.WithScope(ctx, "rpc"), "rpc", "List"))
+	l.Info("request received")
 
 	names := slices.Sorted(maps.Keys(s.agents))
 	infos := make([]*pb.DeviceInfo, 0, len(names))
@@ -109,60 +116,69 @@ func (s *rpcService) List(
 		Devices: infos,
 	})
 
-	log.Print("List-RPC finished")
+	l.Info("request finished")
 
 	return res, nil
 }
 
 // Commands is the handler for the Commands RPC.
+//
+//nolint:dupl // Commands and Details are parallel unary forwarders; dedup is tracked by the generic-forwarder TODO.
 func (s *rpcService) Commands(
 	ctx context.Context,
 	req *connect.Request[pb.CommandsRequest],
 ) (*connect.Response[pb.CommandsResponse], error) {
-	log.Println("Server received Commands request")
-
 	device := req.Msg.GetDevice()
+	ctx = log.With(log.WithScope(ctx, "rpc"), "rpc", "Commands", "device", device)
+	l := log.FromContext(ctx)
+	l.Info("request received")
 
 	agent, err := s.findAgent(device)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
 
-	res, err := forwardCommandsReq(ctx, agent.address, req)
+	res, err := forwardCommandsReq(log.WithScope(ctx, "relay"), agent.address, req)
 	if err != nil {
+		l.Error("forwarding to agent failed", "agent", agent.address, "err", err)
+
 		return nil, connect.NewError(
 			connect.CodeInternal,
 			fmt.Errorf("forwarding request to agent %q: %w", agent.address, err),
 		)
 	}
 
-	log.Print("Commands-RPC finished")
+	l.Info("request finished", "agent", agent.address)
 
 	return res, nil
 }
 
+//nolint:dupl // Commands and Details are parallel unary forwarders; dedup is tracked by the generic-forwarder TODO.
 func (s *rpcService) Details(
 	ctx context.Context,
 	req *connect.Request[pb.DetailsRequest],
 ) (*connect.Response[pb.DetailsResponse], error) {
-	log.Println("Server received Details request")
-
 	device := req.Msg.GetDevice()
+	ctx = log.With(log.WithScope(ctx, "rpc"), "rpc", "Details", "device", device)
+	l := log.FromContext(ctx)
+	l.Info("request received")
 
 	agent, err := s.findAgent(device)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
 
-	res, err := forwardDetailsReq(ctx, agent.address, req)
+	res, err := forwardDetailsReq(log.WithScope(ctx, "relay"), agent.address, req)
 	if err != nil {
+		l.Error("forwarding to agent failed", "agent", agent.address, "err", err)
+
 		return nil, connect.NewError(
 			connect.CodeInternal,
 			fmt.Errorf("forwarding request to agent %q: %w", agent.address, err),
 		)
 	}
 
-	log.Print("Details-RPC finished")
+	l.Info("request finished", "agent", agent.address)
 
 	return res, nil
 }
@@ -174,9 +190,15 @@ func (s *rpcService) Run(
 	ctx context.Context,
 	downstream *connect.BidiStream[pb.RunRequest, pb.RunResponse],
 ) error {
-	log.Println("Server received Run request")
+	user := downstream.RequestHeader().Get(lock.UserHeader)
 
-	donwnStreamRequest, err := downstream.Receive()
+	// Set the RPC scope once; it flows to the relay forwarding goroutines on
+	// ctx, so each logs only its own concern.
+	ctx = log.With(log.WithScope(ctx, "rpc"), "rpc", "Run", "user", user)
+	l := log.FromContext(ctx)
+	l.Info("request received")
+
+	downStreamRequest, err := downstream.Receive()
 	if err != nil {
 		return connect.NewError(
 			connect.CodeAborted,
@@ -189,7 +211,7 @@ func (s *rpcService) Run(
 		ok     bool
 	)
 
-	if cmdMsg, ok = isCommandMsg(donwnStreamRequest); !ok {
+	if cmdMsg, ok = isCommandMsg(downStreamRequest); !ok {
 		return connect.NewError(
 			connect.CodeInvalidArgument,
 			errors.New("first run request must contain a command"),
@@ -197,23 +219,30 @@ func (s *rpcService) Run(
 	}
 
 	device := cmdMsg.GetDevice()
+	ctx = log.With(ctx, "device", device)
+	l = log.FromContext(ctx)
 
 	agent, err := s.findAgent(device)
 	if err != nil {
 		return connect.NewError(connect.CodeInvalidArgument, err)
 	}
 
-	upstream := agent.conn().Run(ctx)
+	l.Info("routing to agent", "agent", agent.address)
 
-	// This is the first message of a new Run RPC from a client.
-	log.Println("Run request has a command message - starting new stream to DUT agent")
+	// upstream is bound to the request context (ctx), so it is torn down when this
+	// handler returns. A relay-internal abort currently relies on that return plus
+	// parent-context teardown; a future context.WithCancelCause on runCtx could
+	// bind upstream to the relay directly for prompt cancellation. TODO(ctx).
+	upstream := agent.conn(log.WithScope(ctx, "relay")).Run(ctx)
 
 	// Forward the requesting user's identity to the agent so it can enforce locking.
-	upstream.RequestHeader().Set(lock.UserHeader, downstream.RequestHeader().Get(lock.UserHeader))
+	upstream.RequestHeader().Set(lock.UserHeader, user)
 
 	// Forward the initial request to the DUT agent.
-	err = upstream.Send(donwnStreamRequest)
+	err = upstream.Send(downStreamRequest)
 	if err != nil {
+		l.Error("forwarding to agent failed", "agent", agent.address, "err", err)
+
 		return connect.NewError(
 			connect.CodeInternal,
 			fmt.Errorf("sending initial request to agent %q: %w", device, err),
@@ -223,45 +252,43 @@ func (s *rpcService) Run(
 	// TODO: consider refactoring and use context.WithCancelCause(ctx)
 	const numForwardingWorkers = 2
 
-	errChan := make(chan error, numForwardingWorkers) // Each oft the two goroutines can send an error.
+	errChan := make(chan error, numForwardingWorkers) // Each of the two goroutines can send an error.
 
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel() // Ensure the context is cancelled when the function returns.
 
-	// agent to client forwarding
+	// agent to client forwarding (downstream direction)
 	go func() {
 		defer cancel()
+
+		l := log.FromContext(log.WithScope(runCtx, "relay downstream"))
 
 		for {
 			select {
 			case <-runCtx.Done():
-				log.Println("Agent to client forwarding terminating: Run-Context cancelled")
+				l.Debug("forwarding stopped: context cancelled")
 
 				return
 			default: // Unblock select, continue with the forwarding logic.
 			}
-
-			log.Println("Receiving response from agent to forward to client (blocking)")
 
 			res, err := upstream.Receive()
 			if errors.Is(err, io.EOF) {
-				log.Println("Agent to client forwarding terminating: Stream closed by agent")
+				l.Debug("forwarding stopped: stream closed by agent")
 
 				return
 			}
 
 			if err != nil {
-				log.Printf("Agent to client forwarding terminating as receiving has been cancelled: %v", err)
 				errChan <- err
 
 				return
 			}
 
-			log.Printf("Forwarding response to client: %v", res)
+			l.Debug("forwarding message to client", "kind", responseKind(res))
 
 			err = downstream.Send(res)
 			if err != nil {
-				log.Printf("Agent to client forwarding terminating as sending has been cancelled: %v", err)
 				errChan <- err
 
 				return
@@ -269,40 +296,38 @@ func (s *rpcService) Run(
 		}
 	}()
 
-	// client to agent forwarding
+	// client to agent forwarding (upstream direction)
 	go func() {
 		defer cancel()
+
+		l := log.FromContext(log.WithScope(runCtx, "relay upstream"))
 
 		for {
 			select {
 			case <-runCtx.Done():
-				log.Println("Client to agent forwarding terminating: Run-Context cancelled")
+				l.Debug("forwarding stopped: context cancelled")
 
 				return
 			default: // Unblock select, continue with the forwarding logic.
 			}
 
-			log.Println("Receiving request from client to forward to agent (blocking)")
-
 			req, err := downstream.Receive()
 			if errors.Is(err, io.EOF) {
-				log.Println("Client to agent forwarding terminating: Stream closed by client")
+				l.Debug("forwarding stopped: stream closed by client")
 
 				return
 			}
 
 			if err != nil {
-				log.Printf("Client to agent forwarding terminating as receiving has been cancelled: %v", err)
 				errChan <- err
 
 				return
 			}
 
-			log.Printf("Forwarding request to agent %q: %v", device, req)
+			l.Debug("forwarding message to agent", "kind", requestKind(req))
 
 			err = upstream.Send(req)
 			if err != nil {
-				log.Printf("Client to agent forwarding terminating as sending has been cancelled: %v", err)
 				errChan <- err
 
 				return
@@ -310,15 +335,12 @@ func (s *rpcService) Run(
 		}
 	}()
 
-	// Wait for both forwarding routines to finish.
-	log.Println("Waiting for forwarding routines to finish")
-
-	// Check if any of the forwarding routines encountered an error.
+	// Wait for both forwarding routines to finish, or for one to fail.
 	select {
 	case <-runCtx.Done():
-		log.Println("Run RPC forwarding completed successfully")
+		l.Info("request finished")
 	case err := <-errChan:
-		log.Printf("Run RPC forwarding aborted, forwarding error: %v", err)
+		l.Error("request finished with error", "err", err)
 
 		return err
 	}
@@ -340,6 +362,38 @@ func isCommandMsg(req *pb.RunRequest) (*pb.Command, bool) {
 	return cmdMsg, true
 }
 
+// requestKind names the payload variant carried by a RunRequest, so relayed
+// traffic can be logged by kind without dumping its contents.
+func requestKind(req *pb.RunRequest) string {
+	switch {
+	case req.GetCommand() != nil:
+		return "command"
+	case req.GetConsole() != nil:
+		return "console"
+	case req.GetFile() != nil:
+		return "file"
+	default:
+		return "unknown"
+	}
+}
+
+// responseKind names the payload variant carried by a RunResponse, so relayed
+// traffic can be logged by kind without dumping its contents.
+func responseKind(res *pb.RunResponse) string {
+	switch {
+	case res.GetPrint() != nil:
+		return "print"
+	case res.GetConsole() != nil:
+		return "console"
+	case res.GetFileRequest() != nil:
+		return "file-request"
+	case res.GetFile() != nil:
+		return "file"
+	default:
+		return "unknown"
+	}
+}
+
 // forwardCommandsReq forwards the Commands request to the respective DUT agent.
 // It returns the response from the agent or an error if the request fails.
 // TODO: try to refactor the forwarding functions into a generic function that can be reused for all RPCs.
@@ -348,11 +402,13 @@ func forwardCommandsReq(
 	url string,
 	req *connect.Request[pb.CommandsRequest],
 ) (*connect.Response[pb.CommandsResponse], error) {
-	log.Printf("Forwarding Commands request to agent %q", url)
+	log.FromContext(ctx).Debug("forwarding commands request to agent", "agent", url)
 	// TODO: potential resource leak. Investigate how clients can be reused or closed.
 	// For now, we spawn a new client for each request.
-	client := spawnClient(url)
+	client := spawnClient(ctx, url)
 
+	// TODO(ctx): ctx carries the caller's cancellation but no deadline (the
+	// client sets none). A per-RPC timeout would attach here.
 	return client.Commands(ctx, req)
 }
 
@@ -361,26 +417,32 @@ func forwardCommandsReq(
 // TODO: try to refactor the forwarding functions into a generic function that can be reused for all RPCs.
 func forwardDetailsReq(
 	ctx context.Context,
-	agent string,
+	url string,
 	req *connect.Request[pb.DetailsRequest],
 ) (*connect.Response[pb.DetailsResponse], error) {
-	log.Printf("Forwarding Details request to agent %q", agent)
+	log.FromContext(ctx).Debug("forwarding details request to agent", "agent", url)
 	// TODO: potential resource leak. Investigate how clients can be reused or closed.
 	// For now, we spawn a new client for each request.
-	client := spawnClient(agent)
+	client := spawnClient(ctx, url)
 
+	// TODO(ctx): ctx carries the caller's cancellation but no deadline (the
+	// client sets none). A per-RPC timeout would attach here.
 	return client.Details(ctx, req)
 }
 
 // spawnClient creates a new client to the DUT agent specified by the agent address.
 // TODO: refactor into pkg and reuse in dutctl and dutserver.
-func spawnClient(agendURL string) dutctlv1connect.DeviceServiceClient {
-	log.Printf("Spawning new client for agent %q", agendURL)
+func spawnClient(ctx context.Context, agentURL string) dutctlv1connect.DeviceServiceClient {
+	// ctx is used only for the log line below. Do NOT bind the client's dial or
+	// lifetime to it: the client is cached (see agent.conn) and shared across
+	// requests, so tying it to a single request's context would be a bug. A
+	// per-RPC deadline belongs on the call context passed to the forwarders.
+	log.FromContext(ctx).Debug("spawning client for agent", "agent", agentURL)
 
 	return dutctlv1connect.NewDeviceServiceClient(
 		// Instead of http.DefaultClient, use the HTTP/2 protocol without TLS
 		newInsecureClient(),
-		fmt.Sprintf("http://%s", agendURL),
+		fmt.Sprintf("http://%s", agentURL),
 		connect.WithGRPC(),
 	)
 }
@@ -403,10 +465,12 @@ func newInsecureClient() *http.Client {
 }
 
 func (s *rpcService) Register(
-	_ context.Context,
+	ctx context.Context,
 	req *connect.Request[pb.RegisterRequest],
 ) (*connect.Response[pb.RegisterResponse], error) {
-	log.Println("Server received Register request")
+	ctx = log.With(log.WithScope(ctx, "rpc"), "rpc", "Register")
+	l := log.FromContext(ctx)
+	l.Info("request received")
 
 	addr := req.Msg.GetAddress()
 	if addr == "" {
@@ -423,16 +487,14 @@ func (s *rpcService) Register(
 		}
 	}
 
-	log.Printf("Registering agent %q with devices %v", addr, req.Msg.GetDevices())
-
-	err := s.addAgent(addr, req.Msg.GetDevices())
+	err := s.addAgent(log.WithScope(ctx, "registry"), addr, req.Msg.GetDevices())
 	if err != nil {
 		return nil, connect.NewError(connect.CodeAlreadyExists, fmt.Errorf("adding agent %q: %w", addr, err))
 	}
 
 	res := connect.NewResponse(&pb.RegisterResponse{})
 
-	log.Print("Register-RPC finished")
+	l.Info("request finished")
 
 	return res, nil
 }

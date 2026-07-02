@@ -23,7 +23,7 @@ linters:
     - copyloopvar
     - cyclop
     - decorder
-    #- depguard - no package black list needed for now
+    - depguard
     - dogsled
     - dupl
     - dupword
@@ -124,6 +124,22 @@ linters:
     - zerologlint
 
   settings:
+    depguard:
+      # Ban the standard library "log" package repo-wide. The project logs only
+      # via internal/log (structured, context-carried) or log/slog. depguard
+      # matches by import PATH, so internal/log — imported as `log` — is
+      # unaffected (its path is github.com/.../internal/log, not "log").
+      # log/slog is allowed explicitly because "log" is a path-prefix of it;
+      # list-mode "lax" means only the denied package is blocked, everything
+      # else (that matches neither list) stays allowed.
+      rules:
+        no-std-log:
+          list-mode: lax
+          allow:
+            - log/slog
+          deny:
+            - pkg: log
+              desc: use internal/log or log/slog directly, not the standard log package
     forbidigo:
       forbid:
         # Re-add forbidigo's defaults (defining `forbid` replaces them).
@@ -131,10 +147,23 @@ linters:
           msg: do not print to stdout directly; use fmt.Fprint with an explicit writer, the output formatter, or slog
         - pattern: '^spew\.(ConfigState\.)?Dump$'
           msg: remove debug spew.Dump calls before committing
-        # Only slog.Debug and slog.Warn are sanctioned; other levels map into the
-        # client's two-channel logging model.
+        # --- slog logging buckets -------------------------------------------
+        # Logging idiom is enforced per region. The two (disjoint) patterns below
+        # are the RESTRICTIONS; the per-region EXCEPTIONS live in
+        # linters.exclusions.rules (search: "slog logging buckets"). Any file NOT
+        # granted an exception there falls under the strictest, default rule:
+        # the "request path" — obtain the logger from the request context.
+        #
+        # P1 — the levels the client forbids (its two-channel stdout/stderr model).
+        # Fires in the client (its intended target) and, if misused, on the
+        # agent/server request path.
         - pattern: '^slog\.(Info|Error|Log|LogAttrs|DebugContext|InfoContext|WarnContext|ErrorContext)$'
-          msg: use slog.Debug or slog.Warn only
+          msg: 'restricted slog level: in dutctl use slog.Debug/slog.Warn (two-channel model); on the dutagent/dutserver request path use log.FromContext(ctx). Per-region exceptions: see "slog logging buckets" in .golangci.yml'
+        # P2 — any direct slog entry point; the default rule forbids it so
+        # request-path code must derive the logger from context. Lifted for the
+        # client (Debug/Warn) and for agent/server setup files (see exceptions).
+        - pattern: '^slog\.(Debug|Warn|Default)$'
+          msg: 'direct slog on the request path: use log.FromContext(ctx) in dutagent/dutserver request code. slog.* is allowed in the client and in agent/server setup files: see "slog logging buckets" in .golangci.yml'
 
     funcorder:
       # Checks if the exported methods of a structure are placed before the non-exported ones.
@@ -185,6 +214,9 @@ linters:
         - fs
         - "on"
         - op
+        - l # logger
+        - b # strings.Builder / bytes.Buffer
+        - w # io.Writer
       ignore-type-assert-ok: true
       ignore-map-index-ok: true
       ignore-chan-recv-ok: true
@@ -200,6 +232,30 @@ linters:
       - common-false-positives
       - legacy
       - std-error-handling
+    rules:
+      # === slog logging buckets ===
+      # The two slog patterns in settings.forbidigo.forbid restrict logging per
+      # region; these rules grant the per-region EXCEPTIONS. Any file NOT matched
+      # below gets the default (strictest) "request path" rule: no direct slog —
+      # obtain the logger from the request context with log.FromContext(ctx).
+      # This is how the RPC handlers, FSM, broker/workers, relay and modules log.
+      #
+      # CLIENT — dutctl and its output rendering. Its two-channel output model
+      # allows slog.Debug/slog.Warn only, so lift P2 (Debug/Warn/Default) here;
+      # P1 keeps banning Info/Error/*Context. (Matches P2's message, not P1's.)
+      - path: ^(cmds/dutctl/|internal/output/|internal/style/)
+        linters:
+          - forbidigo
+        text: direct slog
+      # AGENT SETUP / AGENT LIFECYCLE — process bootstrap, the module Init/Deinit lifecycle
+      # summaries, the frozen-logger objects (locker, session, chanio) and the
+      # internal/log package itself (its slog.Default fallback). No request
+      # context exists here, so all slog.X is allowed: lift both P1 and P2.
+      # (Matches the "slog logging buckets" tail shared by both messages.)
+      - path: ^(cmds/dutagent/dutagent\.go|cmds/exp/dutserver/dutserver\.go|internal/dutagent/(init|session|locker)\.go|internal/chanio/chanio\.go|internal/log/)
+        linters:
+          - forbidigo
+        text: slog logging buckets
     paths:
       - third_party$
       - builtin$

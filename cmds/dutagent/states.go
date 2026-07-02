@@ -8,11 +8,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 
 	"connectrpc.com/connect"
 	"github.com/BlindspotSoftware/dutctl/internal/dutagent"
 	"github.com/BlindspotSoftware/dutctl/internal/fsm"
+	"github.com/BlindspotSoftware/dutctl/internal/log"
 	"github.com/BlindspotSoftware/dutctl/pkg/dut"
 	"github.com/BlindspotSoftware/dutctl/pkg/module"
 
@@ -136,13 +136,26 @@ func acquireAutoLock(_ context.Context, args runCmdArgs) (runCmdArgs, fsm.State[
 // never touches the explicit lock slot, so an explicit Lock the same owner
 // holds for the device survives the run. ErrNotLocked is tolerated because
 // a forced unlock by an admin may have wiped the slot concurrently.
-func releaseAutoLock(_ context.Context, args runCmdArgs) (runCmdArgs, fsm.State[runCmdArgs], error) {
+func releaseAutoLock(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State[runCmdArgs], error) {
 	err := args.locker.ClearAutoLock(args.cmdMsg.GetDevice(), args.user)
 	if err != nil && !errors.Is(err, dutagent.ErrNotLocked) {
-		log.Printf("Failed to release auto-lock on device %q: %v", args.cmdMsg.GetDevice(), err)
+		log.FromContext(ctx).Warn("failed to release auto-lock", "device", args.cmdMsg.GetDevice(), "err", err)
 	}
 
 	return args, nil, nil
+}
+
+// runModule runs a single module, recovering a panic into an error so a
+// misbehaving module aborts only its run instead of crashing the agent. (The
+// session's Console invariant guards also panic).
+func runModule(ctx context.Context, mod dut.Module, s module.Session, args ...string) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("module panicked: %v", r)
+		}
+	}()
+
+	return mod.Run(ctx, s, args...)
 }
 
 // executeModules is a state of the Run RPC.
@@ -152,6 +165,11 @@ func releaseAutoLock(_ context.Context, args runCmdArgs) (runCmdArgs, fsm.State[
 // Further, worker goroutines will be started to serve the module-to-client communication
 // during the module execution.
 func executeModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State[runCmdArgs], error) {
+	// Module execution is the agent's core orchestration: scope it "agent" and
+	// tag the device and command, which then descend to every record on this path.
+	ctx = log.With(log.WithScope(ctx, "agent"), "device", args.cmdMsg.GetDevice(), "command", args.cmdMsg.GetCommand())
+	l := log.FromContext(ctx)
+
 	broker := &dutagent.Broker{}
 
 	// Deferred initialization of the moduleErr channel: only create if not already provided
@@ -180,28 +198,35 @@ func executeModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State
 	go func() {
 		cnt := len(args.cmd.Modules)
 
-		for idx, module := range args.cmd.Modules {
+		for idx, mod := range args.cmd.Modules {
 			if ctx.Err() != nil {
-				log.Printf("Execution aborted, %d of %d modules done: %v", idx, cnt, ctx.Err())
+				l.Warn("execution aborted", "modules-done", idx, "modules-total", cnt, "err", ctx.Err())
 				modCtxCancel()
 
 				return
 			}
 
-			log.Printf("Running module %d of %d: %q", idx+1, cnt, module.Config.Name)
+			// Announce the hand-off in the agent scope (this line is the
+			// framework's, not the module's).
+			mlog := l.With("module", mod.Config.Name, "module-index", idx+1, "modules-total", cnt)
+			mlog.Info("running module")
 
-			err := module.Run(rpcCtx, moduleSession, moduleArgs[idx]...)
+			// Set the "module" scope on the context handed to the module, so
+			// only the module's own records are scoped to it.
+			runCtx := log.With(log.WithScope(rpcCtx, "module"), "module", mod.Config.Name, "module-index", idx+1)
+
+			err := runModule(runCtx, mod, moduleSession, moduleArgs[idx]...)
 			if err != nil {
 				args.moduleErrCh <- err
 
-				log.Printf("Module %q failed: %v", module.Config.Name, err)
+				mlog.Error("module failed", "err", err)
 				modCtxCancel()
 
 				return
 			}
 		}
 
-		log.Print("All modules finished successfully")
+		l.Info("all modules finished successfully")
 		modCtxCancel()
 		close(args.moduleErrCh)
 	}()

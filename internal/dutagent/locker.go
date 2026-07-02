@@ -7,9 +7,11 @@ package dutagent
 import (
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"sync"
 	"time"
+
+	"github.com/BlindspotSoftware/dutctl/internal/log"
 )
 
 // Sentinel errors returned by Locker.
@@ -115,6 +117,7 @@ type Locker struct {
 	mu       sync.Mutex
 	explicit map[string]LockInfo
 	auto     map[string]LockInfo
+	log      *slog.Logger
 }
 
 // NewLocker returns a ready-to-use Locker.
@@ -122,6 +125,7 @@ func NewLocker() *Locker {
 	return &Locker{
 		explicit: make(map[string]LockInfo),
 		auto:     make(map[string]LockInfo),
+		log:      log.Scope(slog.Default(), "locker"),
 	}
 }
 
@@ -233,12 +237,12 @@ func (l *Locker) ForceClearLock(device string) error {
 	}
 
 	if hadExplicit {
-		log.Printf("Force-clearing explicit lock on device %q, previously held by %q", device, explicitInfo.Owner)
+		l.log.Warn("force-clearing lock", "kind", "explicit", "device", device, "previous_owner", explicitInfo.Owner)
 		delete(l.explicit, device)
 	}
 
 	if hadAuto {
-		log.Printf("Force-clearing auto lock on device %q, previously held by %q", device, autoInfo.Owner)
+		l.log.Warn("force-clearing lock", "kind", "auto", "device", device, "previous_owner", autoInfo.Owner)
 		delete(l.auto, device)
 	}
 

@@ -8,29 +8,32 @@ package main
 
 import (
 	"flag"
-	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"github.com/BlindspotSoftware/dutctl/internal/log"
 	"github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1/dutctlv1connect"
 )
 
 const (
-	addressInfo = `Server address and port in the format: address:port`
+	addressInfo  = `Server address and port in the format: address:port`
+	logLevelInfo = `Log level: debug, info, warn, or error`
+	logJSONInfo  = `Emit logs as JSON instead of human-readable text`
 )
 
-func newServer(stdout io.Writer, exitFunc func(int), args []string) *server {
+func newServer(exitFunc func(int), args []string) *server {
 	var svr server
 
-	svr.stdout = stdout
 	svr.exit = exitFunc
 
 	f := flag.NewFlagSet(args[0], flag.ExitOnError)
 	f.StringVar(&svr.address, "s", "localhost:1024", addressInfo)
+	f.StringVar(&svr.logLevel, "log", "debug", logLevelInfo)
+	f.BoolVar(&svr.logJSON, "log-json", false, logJSONInfo)
 
 	//nolint:errcheck // flag.Parse never returns an error because of flag.ExitOnError
 	f.Parse(args[1:])
@@ -40,11 +43,12 @@ func newServer(stdout io.Writer, exitFunc func(int), args []string) *server {
 
 // server represents the dutserver application.
 type server struct {
-	stdout io.Writer
-	exit   func(int)
+	exit func(int)
 
 	// flags
-	address string
+	address  string
+	logLevel string
+	logJSON  bool
 }
 
 type exitCode int
@@ -70,7 +74,7 @@ func (svr *server) watchInterrupt() {
 
 	go func() {
 		sig := <-c
-		log.Printf("Captured signal: %v", sig)
+		slog.Info("captured signal", "signal", sig)
 		svr.cleanup(exit0)
 	}()
 }
@@ -106,19 +110,25 @@ func (svr *server) startRPCService() error {
 	srv.Protocols.SetHTTP1(true)
 	srv.Protocols.SetUnencryptedHTTP2(true)
 
+	slog.Info("rpc service listening", "addr", svr.address)
+
 	return srv.ListenAndServe()
 }
 
-// start orchestrates the dutagent execution.
+// start orchestrates the dutserver execution.
 func (svr *server) start() {
-	log.SetOutput(svr.stdout)
+	// Install the process-wide structured logger. Service diagnostics go to
+	// stderr; the default scope is "server" and request handlers replace the
+	// scope as control enters their subsystem. See package internal/log.
+	base := log.New(os.Stderr, log.ParseLevel(svr.logLevel), svr.logJSON)
+	slog.SetDefault(log.Scope(base, "server"))
 
 	// By design dutserver's code does not panic.
 	// But other code could, or *things* happen at runtime. So we catch it here
 	// to do a graceful shutdown
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("Recovered from panic: %v", r)
+			slog.Error("recovered from panic", "panic", r)
 			svr.cleanup(exit1)
 		}
 	}()
@@ -131,10 +141,10 @@ func (svr *server) start() {
 
 	err := svr.startRPCService() // runs forever
 
-	log.Printf("internal RPC handler error: %v", err)
+	slog.Error("rpc service stopped", "err", err)
 	svr.cleanup(exit1)
 }
 
 func main() {
-	newServer(os.Stdout, os.Exit, os.Args).start()
+	newServer(os.Exit, os.Args).start()
 }

@@ -9,12 +9,12 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
+	"github.com/BlindspotSoftware/dutctl/internal/log"
 	"github.com/BlindspotSoftware/dutctl/pkg/module"
 )
 
@@ -41,8 +41,6 @@ type PDU struct {
 }
 
 func (p *PDU) Help() string {
-	log.Println("pdu module: Help called")
-
 	help := strings.Builder{}
 
 	help.WriteString("PDU Power Management Module\n")
@@ -70,8 +68,6 @@ const (
 )
 
 func (p *PDU) Init(_ context.Context) error {
-	log.Printf("pdu module: Init called - Host: %s, User: %s, Outlet: %d", p.Host, p.User, p.Outlet)
-
 	if p.Outlet < 0 {
 		return fmt.Errorf("invalid outlet number %d: outlet must be 0 or greater", p.Outlet)
 	}
@@ -92,14 +88,10 @@ func (p *PDU) Init(_ context.Context) error {
 
 	p.statusURL = statusURL
 
-	log.Printf("pdu module: Init completed - controlURL: %s, statusURL: %s", p.controlURL.String(), p.statusURL.String())
-
 	return nil
 }
 
 func (p *PDU) Deinit(_ context.Context) error {
-	log.Println("pdu module: Deinit called")
-
 	return nil
 }
 
@@ -135,6 +127,8 @@ func (p *PDU) Run(ctx context.Context, s module.Session, args ...string) error {
 
 // doRequest creates and executes an HTTP request with authentication and validates the response.
 func (p *PDU) doRequest(ctx context.Context, url string) (*http.Response, error) {
+	log.FromContext(ctx).Debug("GET " + url)
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
@@ -176,6 +170,7 @@ func (p *PDU) setPower(ctx context.Context, s module.Session, state string) erro
 	}
 	defer resp.Body.Close()
 
+	log.FromContext(ctx).Info(fmt.Sprintf("outlet %d power %s", p.Outlet, state))
 	s.Printf("PDU outlet%d power set to '%s' successfully\n", p.Outlet, state)
 
 	return nil
