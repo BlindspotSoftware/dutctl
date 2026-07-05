@@ -84,13 +84,14 @@ func (r *ChanReader) Read(bytes []byte) (int, error) {
 		return nBuf, io.EOF // Return any remaining buffer content before EOF
 	}
 
-	// Calculate the total bytes to copy to bytes, considering any existing content from the buffer
-	totalNeeded := len(bytes) - len(r.buf)
+	// Fill the space left in bytes after the buffer copy with data from the
+	// channel. copy caps at that remaining space (len(bytes)-nBuf), so nChan is
+	// exactly how many channel bytes were consumed.
 	nChan = copy(bytes[nBuf:], chanBytes)
 
-	// If there are excess bytes, append them to the buffer
-	if totalNeeded < len(chanBytes) {
-		r.buf = append(r.buf, chanBytes[totalNeeded:]...)
+	// Buffer whatever did not fit for the next Read.
+	if nChan < len(chanBytes) {
+		r.buf = append(r.buf, chanBytes[nChan:]...)
 	}
 
 	r.logger().Debug("chan read complete", "from_buffer", nBuf, "from_channel", nChan)
