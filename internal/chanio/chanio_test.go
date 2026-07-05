@@ -208,3 +208,41 @@ func TestChanReaderWithReadAll(t *testing.T) {
 		})
 	}
 }
+
+// TestChanReader_ReadStraddleOverflow is a regression test: when a single Read
+// is served partly from the internal buffer and partly from the channel, and
+// the channel chunk is larger than the space left in the destination, the
+// overflow must be buffered for the next Read, never dropped.
+func TestChanReader_ReadStraddleOverflow(t *testing.T) {
+	ch := make(chan []byte, 1)
+	ch <- []byte("llobig") // the channel delivers 6 bytes in one chunk
+	close(ch)
+
+	r := &ChanReader{
+		ch:  ch,
+		buf: []byte("he"), // 2 bytes already buffered
+	}
+
+	// First Read into a 5-byte slice: 2 bytes from the buffer leave room for 3
+	// channel bytes ("llo"); the remaining 3 ("big") overflow and must be kept.
+	p := make([]byte, 5)
+
+	n, err := r.Read(p)
+	if err != nil {
+		t.Fatalf("first Read() error = %v", err)
+	}
+
+	if got := string(p[:n]); got != "hello" {
+		t.Fatalf("first Read() = %q, want %q", got, "hello")
+	}
+
+	// Draining the rest must yield the buffered overflow, so no byte is lost.
+	rest, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v", err)
+	}
+
+	if got := "hello" + string(rest); got != "hellobig" {
+		t.Errorf("total read = %q, want %q (bytes dropped when a read straddled buffer and channel)", got, "hellobig")
+	}
+}
