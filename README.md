@@ -6,7 +6,6 @@ _dutctl_ stands for "Device-under-Test Control" and is an open-source command-li
 [![GitHub Release](https://img.shields.io/github/v/release/BlindspotSoftware/dutctl?include_prereleases&sort=semver&display_name=release)](https://github.com/BlindspotSoftware/dutctl/releases)
 ![Build Status](https://img.shields.io/github/actions/workflow/status/BlindspotSoftware/dutctl/go.yml?branch=main)
 [![License](https://img.shields.io/github/license/BlindspotSoftware/dutctl)](https://github.com/BlindspotSoftware/dutctl/blob/main/LICENSE)
-[![Go Report Card](https://goreportcard.com/badge/github.com/BlindspotSoftware/dutctl)](https://goreportcard.com/report/github.com/BlindspotSoftware/dutctl)
 
 
 ---
