@@ -195,6 +195,7 @@ linters:
         - gpio
         - port
         - Interceptor
+        - Session # Broker.Start returns module.Session intentionally (abstraction boundary)
 
     lll:
       line-length: 140
