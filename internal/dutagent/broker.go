@@ -51,8 +51,6 @@ func (b *Broker) init() {
 // Start initializes the broker and launches its workers. It returns the module session
 // for module execution and a channel signaling worker termination or errors.
 // Multiple calls are idempotent; subsequent calls return the already initialized session and channel.
-//
-//nolint:ireturn // returning interface module.Session is intentional for abstraction boundary
 func (b *Broker) Start(ctx context.Context, s Stream) (module.Session, <-chan error) {
 	ctx = log.WithScope(ctx, scopeSession)
 
