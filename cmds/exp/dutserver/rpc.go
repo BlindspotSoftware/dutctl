@@ -10,13 +10,14 @@ import (
 	"fmt"
 	"io"
 	"maps"
-	"net/http"
 	"slices"
 	"sync"
 
 	"connectrpc.com/connect"
 	"github.com/BlindspotSoftware/dutctl/internal/buildinfo"
+	"github.com/BlindspotSoftware/dutctl/internal/compat"
 	"github.com/BlindspotSoftware/dutctl/internal/log"
+	"github.com/BlindspotSoftware/dutctl/internal/rpc"
 	"github.com/BlindspotSoftware/dutctl/pkg/lock"
 	"github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1/dutctlv1connect"
 
@@ -39,7 +40,12 @@ func (a *agent) conn(ctx context.Context) dutctlv1connect.DeviceServiceClient {
 	defer a.Unlock()
 
 	if a.client == nil {
-		a.client = spawnClient(ctx, a.address)
+		// ctx is used only for this log line. Do NOT bind the client's dial or
+		// lifetime to it: the client is cached and shared across requests, so
+		// tying it to a single request's context would be a bug. A per-RPC
+		// deadline belongs on the call context passed to the forwarders.
+		log.FromContext(ctx).Debug("spawning client for agent", "agent", a.address)
+		a.client = rpc.NewDeviceClient(a.address)
 	}
 
 	return a.client
@@ -240,9 +246,9 @@ func (s *rpcService) Run(
 	upstream.RequestHeader().Set(lock.UserHeader, user)
 
 	// Relay the client's version to the agent (which enforces it); add none of our own.
-	clientVersion := downstream.RequestHeader().Get(buildinfo.VersionHeader)
+	clientVersion := downstream.RequestHeader().Get(rpc.VersionHeader)
 	guardMajorMismatch(clientVersion)
-	upstream.RequestHeader().Set(buildinfo.VersionHeader, clientVersion)
+	upstream.RequestHeader().Set(rpc.VersionHeader, clientVersion)
 
 	// Forward the initial request to the DUT agent.
 	err = upstream.Send(downStreamRequest)
@@ -296,9 +302,9 @@ func (s *rpcService) Run(
 			}
 
 			relayAgentVersion.Do(func() {
-				agentVersion := upstream.ResponseHeader().Get(buildinfo.VersionHeader)
+				agentVersion := upstream.ResponseHeader().Get(rpc.VersionHeader)
 				guardMajorMismatch(agentVersion)
-				downstream.ResponseHeader().Set(buildinfo.VersionHeader, agentVersion)
+				downstream.ResponseHeader().Set(rpc.VersionHeader, agentVersion)
 			})
 
 			l.Debug("forwarding message to client", "kind", responseKind(res))
@@ -421,7 +427,7 @@ func forwardCommandsReq(
 	log.FromContext(ctx).Debug("forwarding commands request to agent", "agent", url)
 	// TODO: potential resource leak. Investigate how clients can be reused or closed.
 	// For now, we spawn a new client for each request.
-	client := spawnClient(ctx, url)
+	client := rpc.NewDeviceClient(url)
 
 	// TODO(ctx): ctx carries the caller's cancellation but no deadline (the
 	// client sets none). A per-RPC timeout would attach here.
@@ -439,7 +445,7 @@ func forwardDetailsReq(
 	log.FromContext(ctx).Debug("forwarding details request to agent", "agent", url)
 	// TODO: potential resource leak. Investigate how clients can be reused or closed.
 	// For now, we spawn a new client for each request.
-	client := spawnClient(ctx, url)
+	client := rpc.NewDeviceClient(url)
 
 	// TODO(ctx): ctx carries the caller's cancellation but no deadline (the
 	// client sets none). A per-RPC timeout would attach here.
@@ -452,43 +458,11 @@ func forwardDetailsReq(
 // TODO: handle this properly (reject or translate) instead of panicking, once
 // dutserver is more than experimental.
 func guardMajorMismatch(peer string) {
-	if buildinfo.CompareVersions(buildinfo.Version, peer).Level == buildinfo.Incompatible {
+	// Check the structural fact directly: dutserver can only bridge peers that
+	// share its major schema version.
+	if compat.Compare(buildinfo.Version, peer).Field == compat.Major {
 		panic(fmt.Sprintf("dutserver: unhandled major dutctl version mismatch (dutserver %s, peer %q)",
 			buildinfo.Version, peer))
-	}
-}
-
-// spawnClient creates a new client to the DUT agent specified by the agent address.
-// TODO: refactor into pkg and reuse in dutctl and dutserver.
-func spawnClient(ctx context.Context, agentURL string) dutctlv1connect.DeviceServiceClient {
-	// ctx is used only for the log line below. Do NOT bind the client's dial or
-	// lifetime to it: the client is cached (see agent.conn) and shared across
-	// requests, so tying it to a single request's context would be a bug. A
-	// per-RPC deadline belongs on the call context passed to the forwarders.
-	log.FromContext(ctx).Debug("spawning client for agent", "agent", agentURL)
-
-	return dutctlv1connect.NewDeviceServiceClient(
-		// Instead of http.DefaultClient, use the HTTP/2 protocol without TLS
-		newInsecureClient(),
-		fmt.Sprintf("http://%s", agentURL),
-		connect.WithGRPC(),
-	)
-}
-
-// TODO: refactor into pkg and reuse in dutctl and dutserver.
-func newInsecureClient() *http.Client {
-	// Use the HTTP/2 protocol without TLS (h2c).
-	transport := &http.Transport{}
-	transport.Protocols = new(http.Protocols)
-	transport.Protocols.SetUnencryptedHTTP2(true)
-
-	return &http.Client{
-		Transport: transport,
-		// TODO: Don't forget timeouts! http.Client.Timeout must not be used here:
-		// it bounds the entire exchange including the response body, which would
-		// abort long-lived streaming RPCs. Instead use per-RPC context deadlines
-		// on unary calls and/or transport timeouts (DialContext,
-		// TLSHandshakeTimeout, ResponseHeaderTimeout, IdleConnTimeout).
 	}
 }
 

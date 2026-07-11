@@ -13,9 +13,9 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/BlindspotSoftware/dutctl/internal/log"
+	"github.com/BlindspotSoftware/dutctl/internal/rpc"
 	"github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1/dutctlv1connect"
 )
 
@@ -79,9 +79,6 @@ func (svr *server) watchInterrupt() {
 	}()
 }
 
-// readHeaderTimeout bounds how long the server waits to read request headers.
-const readHeaderTimeout = 10 * time.Second
-
 // startRPCService starts the RPC service, that ideally listens for incoming
 // connections forever. It always returns an non-nil error.
 func (svr *server) startRPCService() error {
@@ -101,19 +98,9 @@ func (svr *server) startRPCService() error {
 	path, handler = dutctlv1connect.NewRelayServiceHandler(service)
 	mux.Handle(path, handler)
 
-	// Serve HTTP/2 without TLS (h2c)
-	srv := &http.Server{
-		Addr:              svr.address,
-		Handler:           mux,
-		ReadHeaderTimeout: readHeaderTimeout,
-	}
-	srv.Protocols = new(http.Protocols)
-	srv.Protocols.SetHTTP1(true)
-	srv.Protocols.SetUnencryptedHTTP2(true)
-
 	slog.Info("rpc service listening", "addr", svr.address)
 
-	return srv.ListenAndServe()
+	return rpc.ListenAndServe(svr.address, mux)
 }
 
 // start orchestrates the dutserver execution.

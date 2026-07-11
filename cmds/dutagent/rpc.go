@@ -16,6 +16,7 @@ import (
 	"github.com/BlindspotSoftware/dutctl/internal/dutagent/locker"
 	"github.com/BlindspotSoftware/dutctl/internal/fsm"
 	"github.com/BlindspotSoftware/dutctl/internal/log"
+	"github.com/BlindspotSoftware/dutctl/internal/rpc"
 	"github.com/BlindspotSoftware/dutctl/pkg/dut"
 	"github.com/BlindspotSoftware/dutctl/pkg/lock"
 
@@ -251,14 +252,6 @@ func (a *rpcService) Unlock(
 	return connect.NewResponse(&pb.UnlockResponse{}), nil
 }
 
-// streamAdapter decouples a connect.BidiStream to the session.Stream interface.
-type streamAdapter struct {
-	inner *connect.BidiStream[pb.RunRequest, pb.RunResponse]
-}
-
-func (a *streamAdapter) Send(msg *pb.RunResponse) error   { return a.inner.Send(msg) }
-func (a *streamAdapter) Receive() (*pb.RunRequest, error) { return a.inner.Receive() }
-
 // Run is the handler for the Run RPC.
 func (a *rpcService) Run(
 	ctx context.Context,
@@ -273,7 +266,7 @@ func (a *rpcService) Run(
 	l.Info("request received")
 
 	fsmArgs := runCmdArgs{
-		stream:     &streamAdapter{inner: stream},
+		stream:     rpc.NewRunStream(stream),
 		deviceList: a.devices,
 		locker:     a.locker,
 		user:       user,
