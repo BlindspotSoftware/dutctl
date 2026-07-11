@@ -8,6 +8,7 @@ package dut
 import (
 	"errors"
 	"fmt"
+	"iter"
 	"slices"
 	"strings"
 
@@ -55,6 +56,18 @@ func (devs *Devlist) CmdNames(device string) ([]string, error) {
 	return cmds, nil
 }
 
+// Find returns the named device or ErrDeviceNotFound if it is not present. It is
+// the device-level companion to FindCmd and returns the bare sentinel; callers add
+// their own context before mapping it to a status code (see the RPC handlers).
+func (devs *Devlist) Find(device string) (Device, error) {
+	dev, ok := (*devs)[device]
+	if !ok {
+		return Device{}, ErrDeviceNotFound
+	}
+
+	return dev, nil
+}
+
 // FindCmd returns the device and command for a given device and command name.
 // If the device is not found, it returns ErrDeviceNotFound, if the command is not found,
 // it returns ErrCommandNotFound. If the requested command has no modules, it returns ErrNoModules.
@@ -79,6 +92,32 @@ func (devs *Devlist) FindCmd(device, command string) (Device, Command, error) {
 	}
 
 	return dev, cmd, nil
+}
+
+// ModuleRef locates a single module within the device list: the device and
+// command it belongs to, together with the module itself.
+type ModuleRef struct {
+	Device  string
+	Command string
+	Module  Module
+}
+
+// AllModules iterates every module across all devices and commands. Iteration
+// order is unspecified (it follows Go map iteration). It serves whole-system
+// sweeps such as agent startup/shutdown; request-path logic addresses a specific
+// module through FindCmd instead.
+func (devs *Devlist) AllModules() iter.Seq[ModuleRef] {
+	return func(yield func(ModuleRef) bool) {
+		for devName, dev := range *devs {
+			for cmdName, cmd := range dev.Cmds {
+				for _, mod := range cmd.Modules {
+					if !yield(ModuleRef{Device: devName, Command: cmdName, Module: mod}) {
+						return
+					}
+				}
+			}
+		}
+	}
 }
 
 // Device is the representation of a device-under-test (DUT).
