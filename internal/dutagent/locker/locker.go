@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package dutagent
+package locker
 
 import (
 	"errors"
@@ -26,7 +26,7 @@ var (
 	ErrInvalidDuration = errors.New("lock duration must be positive")
 )
 
-// Slot identifies which of a device's two lock slots a LockInfo refers to.
+// Slot identifies which of a device's two lock slots a Info refers to.
 type Slot string
 
 const (
@@ -34,40 +34,40 @@ const (
 	AutoSlot     Slot = "auto"
 )
 
-// LockInfo describes the state of a single lock slot.
-type LockInfo struct {
+// Info describes the state of a single lock slot.
+type Info struct {
 	Owner    string
 	LockedAt time.Time
 	// ExpiresAt is the time the lock expires. The zero value means the lock
 	// never expires by time; only auto-locks may carry a zero ExpiresAt.
 	ExpiresAt time.Time
-	// Slot reports which slot this LockInfo was read from. Set by the
+	// Slot reports which slot this Info was read from. Set by the
 	// Locker on every value it produces.
 	Slot Slot
 }
 
 // isExpired reports whether a slot has a time-based expiry that has passed.
 // A zero ExpiresAt never expires.
-func (li LockInfo) isExpired(now time.Time) bool {
+func (li Info) isExpired(now time.Time) bool {
 	return !li.ExpiresAt.IsZero() && !now.Before(li.ExpiresAt)
 }
 
-// DeviceLockState is a snapshot of both slot states for a single device.
+// DeviceState is a snapshot of both slot states for a single device.
 // Each pointer is nil when the corresponding slot is empty.
-type DeviceLockState struct {
-	Explicit *LockInfo
-	Auto     *LockInfo
+type DeviceState struct {
+	Explicit *Info
+	Auto     *Info
 }
 
-// LockError is returned when an operation is denied because the device is
-// held by a different owner. Holder is the LockInfo of the lock that blocks
+// Error is returned when an operation is denied because the device is
+// held by a different owner. Holder is the Info of the lock that blocks
 // the operation (its owner, when it was taken, its expiry, and which slot
-// it lives in via Holder.Slot). LockError unwraps to ErrWrongOwner so
+// it lives in via Holder.Slot). Error unwraps to ErrWrongOwner so
 // callers can match the "different owner" case across acquire (Lock/AutoLock)
 // and release (ClearLock/ClearAutoLock) APIs with a single errors.Is check.
-type LockError struct {
+type Error struct {
 	Device string
-	Holder LockInfo
+	Holder Info
 }
 
 // humanRemaining renders dur as a compact "1h30m"-style string, rounded to
@@ -92,7 +92,7 @@ func humanRemaining(dur time.Duration) string {
 	}
 }
 
-func (e *LockError) Error() string {
+func (e *Error) Error() string {
 	if e.Holder.Slot == ExplicitSlot {
 		remaining := humanRemaining(time.Until(e.Holder.ExpiresAt))
 
@@ -102,7 +102,7 @@ func (e *LockError) Error() string {
 	return fmt.Sprintf("device %q is locked by %q", e.Device, e.Holder.Owner)
 }
 
-func (e *LockError) Unwrap() error {
+func (e *Error) Unwrap() error {
 	return ErrWrongOwner
 }
 
@@ -115,47 +115,47 @@ func (e *LockError) Unwrap() error {
 // restart.
 type Locker struct {
 	mu       sync.Mutex
-	explicit map[string]LockInfo
-	auto     map[string]LockInfo
+	explicit map[string]Info
+	auto     map[string]Info
 	log      *slog.Logger
 }
 
-// NewLocker returns a ready-to-use Locker.
-func NewLocker() *Locker {
+// New returns a ready-to-use Locker.
+func New() *Locker {
 	return &Locker{
-		explicit: make(map[string]LockInfo),
-		auto:     make(map[string]LockInfo),
+		explicit: make(map[string]Info),
+		auto:     make(map[string]Info),
 		log:      log.Scope(slog.Default(), "locker"),
 	}
 }
 
 // hasExplicitLock returns the live explicit-slot lock for device, pruning it
 // first if it has expired. The caller must hold l.mu.
-func (l *Locker) hasExplicitLock(device string) (LockInfo, bool) {
+func (l *Locker) hasExplicitLock(device string) (Info, bool) {
 	info, ok := l.explicit[device]
 	if !ok {
-		return LockInfo{}, false
+		return Info{}, false
 	}
 
 	if info.isExpired(time.Now()) {
 		delete(l.explicit, device)
 
-		return LockInfo{}, false
+		return Info{}, false
 	}
 
 	return info, true
 }
 
-// checkLocked returns a *LockError describing whichever slot would block
+// checkLocked returns a *Error describing whichever slot would block
 // owner from operating on device, or nil if owner has access. The caller
 // must hold l.mu.
-func (l *Locker) checkLocked(device, owner string) *LockError {
+func (l *Locker) checkLocked(device, owner string) *Error {
 	if info, held := l.hasExplicitLock(device); held && info.Owner != owner {
-		return &LockError{Device: device, Holder: info}
+		return &Error{Device: device, Holder: info}
 	}
 
 	if info, held := l.auto[device]; held && info.Owner != owner {
-		return &LockError{Device: device, Holder: info}
+		return &Error{Device: device, Holder: info}
 	}
 
 	return nil
@@ -165,10 +165,10 @@ func (l *Locker) checkLocked(device, owner string) *LockError {
 // positive; ErrInvalidDuration is returned otherwise. If the device is
 // already explicit-locked by the same owner, the lock is extended: the new
 // expiry is the later of the current and now+dur. If either slot is held by
-// a different owner, a *LockError is returned.
-func (l *Locker) Lock(device, owner string, dur time.Duration) (LockInfo, error) {
+// a different owner, a *Error is returned.
+func (l *Locker) Lock(device, owner string, dur time.Duration) (Info, error) {
 	if dur <= 0 {
-		return LockInfo{}, ErrInvalidDuration
+		return Info{}, ErrInvalidDuration
 	}
 
 	l.mu.Lock()
@@ -176,7 +176,7 @@ func (l *Locker) Lock(device, owner string, dur time.Duration) (LockInfo, error)
 
 	blocker := l.checkLocked(device, owner)
 	if blocker != nil {
-		return LockInfo{}, blocker
+		return Info{}, blocker
 	}
 
 	now := time.Now()
@@ -194,14 +194,14 @@ func (l *Locker) Lock(device, owner string, dur time.Duration) (LockInfo, error)
 		return updated, nil
 	}
 
-	info := LockInfo{Owner: owner, LockedAt: now, ExpiresAt: newExpiry, Slot: ExplicitSlot}
+	info := Info{Owner: owner, LockedAt: now, ExpiresAt: newExpiry, Slot: ExplicitSlot}
 	l.explicit[device] = info
 
 	return info, nil
 }
 
 // ClearLock releases the explicit-slot lock on device. Only the owner may
-// release it. ErrNotLocked / *LockError as appropriate. The auto slot is
+// release it. ErrNotLocked / *Error as appropriate. The auto slot is
 // not touched.
 func (l *Locker) ClearLock(device, owner string) error {
 	l.mu.Lock()
@@ -213,7 +213,7 @@ func (l *Locker) ClearLock(device, owner string) error {
 	}
 
 	if info.Owner != owner {
-		return &LockError{Device: device, Holder: info}
+		return &Error{Device: device, Holder: info}
 	}
 
 	delete(l.explicit, device)
@@ -251,28 +251,28 @@ func (l *Locker) ForceClearLock(device string) error {
 
 // AutoLock acquires the auto-slot lock on device for owner. Auto locks carry
 // no expiry. Re-AutoLock by the same owner is a no-op. If either slot is
-// held by a different owner, a *LockError is returned.
-func (l *Locker) AutoLock(device, owner string) (LockInfo, error) {
+// held by a different owner, a *Error is returned.
+func (l *Locker) AutoLock(device, owner string) (Info, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
 	blocker := l.checkLocked(device, owner)
 	if blocker != nil {
-		return LockInfo{}, blocker
+		return Info{}, blocker
 	}
 
 	if existing, held := l.auto[device]; held {
 		return existing, nil
 	}
 
-	info := LockInfo{Owner: owner, LockedAt: time.Now(), Slot: AutoSlot}
+	info := Info{Owner: owner, LockedAt: time.Now(), Slot: AutoSlot}
 	l.auto[device] = info
 
 	return info, nil
 }
 
 // ClearAutoLock releases the auto-slot lock on device. Only the owner may
-// release it. ErrNotLocked / *LockError as appropriate. The explicit slot
+// release it. ErrNotLocked / *Error as appropriate. The explicit slot
 // is not touched.
 func (l *Locker) ClearAutoLock(device, owner string) error {
 	l.mu.Lock()
@@ -284,7 +284,7 @@ func (l *Locker) ClearAutoLock(device, owner string) error {
 	}
 
 	if info.Owner != owner {
-		return &LockError{Device: device, Holder: info}
+		return &Error{Device: device, Holder: info}
 	}
 
 	delete(l.auto, device)
@@ -294,7 +294,7 @@ func (l *Locker) ClearAutoLock(device, owner string) error {
 
 // CheckAccess reports whether owner may operate on device. It returns nil if
 // neither slot is held or if every held slot is owned by owner; otherwise it
-// returns a *LockError carrying the blocking slot's holder.
+// returns a *Error carrying the blocking slot's holder.
 func (l *Locker) CheckAccess(device, owner string) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -309,23 +309,23 @@ func (l *Locker) CheckAccess(device, owner string) error {
 
 // StatusAll returns a snapshot of both slot states for every device that has
 // at least one slot held. Expired explicit slots are pruned and not included.
-func (l *Locker) StatusAll() map[string]DeviceLockState {
+func (l *Locker) StatusAll() map[string]DeviceState {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	out := make(map[string]DeviceLockState)
+	out := make(map[string]DeviceState)
 
 	for device := range l.explicit {
 		if info, ok := l.hasExplicitLock(device); ok {
 			state := out[device]
-			state.Explicit = &LockInfo{Owner: info.Owner, LockedAt: info.LockedAt, ExpiresAt: info.ExpiresAt, Slot: ExplicitSlot}
+			state.Explicit = &Info{Owner: info.Owner, LockedAt: info.LockedAt, ExpiresAt: info.ExpiresAt, Slot: ExplicitSlot}
 			out[device] = state
 		}
 	}
 
 	for device, info := range l.auto {
 		state := out[device]
-		state.Auto = &LockInfo{Owner: info.Owner, LockedAt: info.LockedAt, ExpiresAt: info.ExpiresAt, Slot: AutoSlot}
+		state.Auto = &Info{Owner: info.Owner, LockedAt: info.LockedAt, ExpiresAt: info.ExpiresAt, Slot: AutoSlot}
 		out[device] = state
 	}
 

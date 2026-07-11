@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	"github.com/BlindspotSoftware/dutctl/internal/dutagent"
+	"github.com/BlindspotSoftware/dutctl/internal/dutagent/locker"
 	"github.com/BlindspotSoftware/dutctl/internal/fsm"
 	"github.com/BlindspotSoftware/dutctl/internal/test/fakes"
 	"github.com/BlindspotSoftware/dutctl/pkg/dut"
@@ -204,8 +204,8 @@ func TestCheckDeviceAccess(t *testing.T) {
 	cmdMsg := &pb.Command{Device: device, Command: "echo"}
 
 	t.Run("unlocked_proceeds_to_acquireAutoLock", func(t *testing.T) {
-		locker := dutagent.NewLocker()
-		args := runCmdArgs{cmdMsg: cmdMsg, locker: locker, user: "alice"}
+		l := locker.New()
+		args := runCmdArgs{cmdMsg: cmdMsg, locker: l, user: "alice"}
 
 		_, next, err := checkDeviceAccess(context.Background(), args)
 		if err != nil {
@@ -218,12 +218,12 @@ func TestCheckDeviceAccess(t *testing.T) {
 	})
 
 	t.Run("same_owner_explicit_lock_passes", func(t *testing.T) {
-		locker := dutagent.NewLocker()
-		if _, err := locker.Lock(device, "alice", time.Hour); err != nil {
+		l := locker.New()
+		if _, err := l.Lock(device, "alice", time.Hour); err != nil {
 			t.Fatalf("setup Lock: %v", err)
 		}
 
-		args := runCmdArgs{cmdMsg: cmdMsg, locker: locker, user: "alice"}
+		args := runCmdArgs{cmdMsg: cmdMsg, locker: l, user: "alice"}
 
 		_, next, err := checkDeviceAccess(context.Background(), args)
 		if err != nil {
@@ -236,12 +236,12 @@ func TestCheckDeviceAccess(t *testing.T) {
 	})
 
 	t.Run("different_owner_rejected", func(t *testing.T) {
-		locker := dutagent.NewLocker()
-		if _, err := locker.Lock(device, "bob", time.Hour); err != nil {
+		l := locker.New()
+		if _, err := l.Lock(device, "bob", time.Hour); err != nil {
 			t.Fatalf("setup Lock: %v", err)
 		}
 
-		args := runCmdArgs{cmdMsg: cmdMsg, locker: locker, user: "alice"}
+		args := runCmdArgs{cmdMsg: cmdMsg, locker: l, user: "alice"}
 
 		_, next, err := checkDeviceAccess(context.Background(), args)
 		if connect.CodeOf(err) != connect.CodeFailedPrecondition {
@@ -260,8 +260,8 @@ func TestAcquireAutoLock(t *testing.T) {
 	cmdMsg := &pb.Command{Device: device, Command: "echo"}
 
 	t.Run("acquires_and_proceeds_to_executeModules", func(t *testing.T) {
-		locker := dutagent.NewLocker()
-		args := runCmdArgs{cmdMsg: cmdMsg, locker: locker, user: "alice"}
+		l := locker.New()
+		args := runCmdArgs{cmdMsg: cmdMsg, locker: l, user: "alice"}
 
 		_, next, err := acquireAutoLock(context.Background(), args)
 		if err != nil {
@@ -272,19 +272,19 @@ func TestAcquireAutoLock(t *testing.T) {
 			t.Fatalf("next state = %p, want executeModules", next)
 		}
 
-		state := locker.StatusAll()[device]
+		state := l.StatusAll()[device]
 		if state.Auto == nil {
 			t.Error("auto-lock not taken")
 		}
 	})
 
 	t.Run("blocked_by_other_owner_returns_FailedPrecondition", func(t *testing.T) {
-		locker := dutagent.NewLocker()
-		if _, err := locker.AutoLock(device, "bob"); err != nil {
+		l := locker.New()
+		if _, err := l.AutoLock(device, "bob"); err != nil {
 			t.Fatalf("setup AutoLock: %v", err)
 		}
 
-		args := runCmdArgs{cmdMsg: cmdMsg, locker: locker, user: "alice"}
+		args := runCmdArgs{cmdMsg: cmdMsg, locker: l, user: "alice"}
 
 		_, _, err := acquireAutoLock(context.Background(), args)
 		if connect.CodeOf(err) != connect.CodeFailedPrecondition {
@@ -299,16 +299,16 @@ func TestReleaseAutoLock(t *testing.T) {
 	cmdMsg := &pb.Command{Device: device, Command: "echo"}
 
 	t.Run("clears_auto_slot_only", func(t *testing.T) {
-		locker := dutagent.NewLocker()
-		if _, err := locker.Lock(device, "alice", time.Hour); err != nil {
+		l := locker.New()
+		if _, err := l.Lock(device, "alice", time.Hour); err != nil {
 			t.Fatalf("setup Lock: %v", err)
 		}
 
-		if _, err := locker.AutoLock(device, "alice"); err != nil {
+		if _, err := l.AutoLock(device, "alice"); err != nil {
 			t.Fatalf("setup AutoLock: %v", err)
 		}
 
-		args := runCmdArgs{cmdMsg: cmdMsg, locker: locker, user: "alice"}
+		args := runCmdArgs{cmdMsg: cmdMsg, locker: l, user: "alice"}
 
 		_, next, err := releaseAutoLock(context.Background(), args)
 		if err != nil {
@@ -319,7 +319,7 @@ func TestReleaseAutoLock(t *testing.T) {
 			t.Errorf("next state = %p, want nil (terminal)", next)
 		}
 
-		state := locker.StatusAll()[device]
+		state := l.StatusAll()[device]
 		if state.Explicit == nil {
 			t.Error("releaseAutoLock wiped the explicit lock")
 		}
@@ -330,8 +330,8 @@ func TestReleaseAutoLock(t *testing.T) {
 	})
 
 	t.Run("missing_auto_lock_is_tolerated", func(t *testing.T) {
-		locker := dutagent.NewLocker()
-		args := runCmdArgs{cmdMsg: cmdMsg, locker: locker, user: "alice"}
+		l := locker.New()
+		args := runCmdArgs{cmdMsg: cmdMsg, locker: l, user: "alice"}
 
 		_, _, err := releaseAutoLock(context.Background(), args)
 		if err != nil {

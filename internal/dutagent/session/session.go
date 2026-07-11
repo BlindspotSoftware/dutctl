@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package dutagent
+package session
 
 import (
 	"errors"
@@ -14,8 +14,8 @@ import (
 	"github.com/BlindspotSoftware/dutctl/internal/log"
 )
 
-// session implements the module.Session interface.
-type session struct {
+// backend implements the module.Session interface.
+type backend struct {
 	printCh   chan string
 	stdinCh   chan []byte
 	stdoutCh  chan []byte
@@ -35,7 +35,7 @@ type session struct {
 
 // logger returns the session's scoped logger, falling back to the default if
 // the broker has not set one (e.g. a session built directly in a test).
-func (s *session) logger() *slog.Logger {
+func (s *backend) logger() *slog.Logger {
 	if s.log != nil {
 		return s.log
 	}
@@ -43,20 +43,20 @@ func (s *session) logger() *slog.Logger {
 	return slog.Default()
 }
 
-func (s *session) Print(a ...any) {
+func (s *backend) Print(a ...any) {
 	s.printCh <- fmt.Sprint(a...)
 }
 
-func (s *session) Printf(format string, a ...any) {
+func (s *backend) Printf(format string, a ...any) {
 	s.printCh <- fmt.Sprintf(format, a...)
 }
 
-func (s *session) Println(a ...any) {
+func (s *backend) Println(a ...any) {
 	s.printCh <- fmt.Sprintln(a...)
 }
 
 //nolint:nonamedreturns
-func (s *session) Console() (stdin io.Reader, stdout, stderr io.Writer) {
+func (s *backend) Console() (stdin io.Reader, stdout, stderr io.Writer) {
 	var (
 		stdinReader                io.Reader
 		stdoutWriter, stderrWriter io.Writer
@@ -85,7 +85,7 @@ func (s *session) Console() (stdin io.Reader, stdout, stderr io.Writer) {
 	return stdinReader, stdoutWriter, stderrWriter
 }
 
-func (s *session) RequestFile(name string) (io.Reader, error) {
+func (s *backend) RequestFile(name string) (io.Reader, error) {
 	if s.fileReqCh == nil {
 		return nil, errors.New("session not initialized: file request channel is nil")
 	}
@@ -106,7 +106,7 @@ func (s *session) RequestFile(name string) (io.Reader, error) {
 	return r, nil
 }
 
-func (s *session) SendFile(name string, r io.Reader) error {
+func (s *backend) SendFile(name string, r io.Reader) error {
 	if s.currentFile != "" {
 		return fmt.Errorf("send file %q: a file request is already in progress", name)
 	}

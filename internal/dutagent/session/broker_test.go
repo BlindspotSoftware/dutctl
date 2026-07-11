@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package dutagent
+package session
 
 import (
 	"context"
@@ -134,7 +134,7 @@ func TestBroker_StdinForwarding(t *testing.T) {
 	sess, errCh := b.Start(ctx, stream)
 
 	// Drain stdin from internal session.
-	internal := sess.(*session)
+	internal := sess.(*backend)
 	select {
 	case data := <-internal.stdinCh:
 		if string(data) != string(stdinPayload) {

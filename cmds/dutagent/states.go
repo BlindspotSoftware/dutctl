@@ -10,7 +10,8 @@ import (
 	"fmt"
 
 	"connectrpc.com/connect"
-	"github.com/BlindspotSoftware/dutctl/internal/dutagent"
+	"github.com/BlindspotSoftware/dutctl/internal/dutagent/locker"
+	"github.com/BlindspotSoftware/dutctl/internal/dutagent/session"
 	"github.com/BlindspotSoftware/dutctl/internal/fsm"
 	"github.com/BlindspotSoftware/dutctl/internal/log"
 	"github.com/BlindspotSoftware/dutctl/pkg/dut"
@@ -22,9 +23,9 @@ import (
 // runCmdArgs are arguments for the finite state machine in the Run RPC.
 type runCmdArgs struct {
 	// dependencies of the state machine
-	stream     dutagent.Stream
+	stream     session.Stream
 	deviceList dut.Devlist
-	locker     *dutagent.Locker
+	locker     *locker.Locker
 	user       string
 
 	// fields for the states used during execution
@@ -102,7 +103,7 @@ func findDUTCmd(_ context.Context, args runCmdArgs) (runCmdArgs, fsm.State[runCm
 func checkDeviceAccess(_ context.Context, args runCmdArgs) (runCmdArgs, fsm.State[runCmdArgs], error) {
 	err := args.locker.CheckAccess(args.cmdMsg.GetDevice(), args.user)
 	if err != nil {
-		if errors.Is(err, dutagent.ErrWrongOwner) {
+		if errors.Is(err, locker.ErrWrongOwner) {
 			return args, nil, connect.NewError(connect.CodeFailedPrecondition, err)
 		}
 
@@ -120,7 +121,7 @@ func checkDeviceAccess(_ context.Context, args runCmdArgs) (runCmdArgs, fsm.Stat
 func acquireAutoLock(_ context.Context, args runCmdArgs) (runCmdArgs, fsm.State[runCmdArgs], error) {
 	_, err := args.locker.AutoLock(args.cmdMsg.GetDevice(), args.user)
 	if err != nil {
-		if errors.Is(err, dutagent.ErrWrongOwner) {
+		if errors.Is(err, locker.ErrWrongOwner) {
 			return args, nil, connect.NewError(connect.CodeFailedPrecondition, err)
 		}
 
@@ -138,7 +139,7 @@ func acquireAutoLock(_ context.Context, args runCmdArgs) (runCmdArgs, fsm.State[
 // a forced unlock by an admin may have wiped the slot concurrently.
 func releaseAutoLock(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State[runCmdArgs], error) {
 	err := args.locker.ClearAutoLock(args.cmdMsg.GetDevice(), args.user)
-	if err != nil && !errors.Is(err, dutagent.ErrNotLocked) {
+	if err != nil && !errors.Is(err, locker.ErrNotLocked) {
 		log.FromContext(ctx).Warn("failed to release auto-lock", "device", args.cmdMsg.GetDevice(), "err", err)
 	}
 
@@ -170,7 +171,7 @@ func executeModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State
 	ctx = log.With(log.WithScope(ctx, "agent"), "device", args.cmdMsg.GetDevice(), "command", args.cmdMsg.GetCommand())
 	l := log.FromContext(ctx)
 
-	broker := &dutagent.Broker{}
+	broker := &session.Broker{}
 
 	// Deferred initialization of the moduleErr channel: only create if not already provided
 	// (tests may still pass a custom channel).
