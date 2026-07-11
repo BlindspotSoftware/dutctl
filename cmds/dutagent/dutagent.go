@@ -22,7 +22,7 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/BlindspotSoftware/dutctl/internal/buildinfo"
-	"github.com/BlindspotSoftware/dutctl/internal/dutagent"
+	"github.com/BlindspotSoftware/dutctl/internal/dutagent/locker"
 	"github.com/BlindspotSoftware/dutctl/internal/log"
 	"github.com/BlindspotSoftware/dutctl/pkg/dut"
 	"github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1/dutctlv1connect"
@@ -104,7 +104,7 @@ func (agt *agent) cleanup(code exitCode) {
 		// TODO(ctx): this background context is the shutdown seam. A later change
 		// can make it a context.WithTimeout to bound module Deinit, or derive it
 		// from a shutdown-signal context. It flows into every module's Deinit.
-		err := dutagent.Deinit(context.Background(), agt.config.Devices)
+		err := deinitModules(context.Background(), agt.config.Devices)
 		if err != nil {
 			printInitErr(err)
 			slog.Error("module deinitialization failed - system might be in an UNKNOWN STATE", "err", err)
@@ -144,16 +144,10 @@ func (agt *agent) loadConfig() error {
 	return nil
 }
 
-func (agt *agent) initModules(ctx context.Context) error {
-	agt.modulesNeedDeinit = true
-
-	return dutagent.Init(ctx, agt.config.Devices)
-}
-
-// printInitErr extracts and pretty-prints the details of a dutagent.ModuleInitErr
+// printInitErr extracts and pretty-prints the details of a moduleInitError
 // if err is of this type, otherwise it just prints err.
 func printInitErr(err error) {
-	var initerr *dutagent.ModuleInitError
+	var initerr *moduleInitError
 	if errors.As(err, &initerr) {
 		// Phase-agnostic detail dump; the caller logs the phase-labeled summary
 		// ("module initialization/deinitialization failed").
@@ -176,7 +170,7 @@ const readHeaderTimeout = 10 * time.Second
 func (agt *agent) startRPCService() error {
 	service := &rpcService{
 		devices: agt.config.Devices,
-		locker:  dutagent.NewLocker(),
+		locker:  locker.New(),
 	}
 
 	mux := http.NewServeMux()
@@ -256,7 +250,7 @@ func newInsecureClient() *http.Client {
 
 // start orchestrates the dutagent execution.
 //
-//nolint:cyclop
+//nolint:cyclop,funlen // top-level orchestration: inherently branchy and sequential
 func (agt *agent) start() {
 	// Install the process-wide structured logger. Service diagnostics go to
 	// stderr (stdout is reserved for program output such as the version banner).
@@ -302,7 +296,9 @@ func (agt *agent) start() {
 	// cancellation. It flows into every module's Init via internal/log. TODO(ctx).
 	initCtx := context.Background()
 
-	err = agt.initModules(initCtx)
+	agt.modulesNeedDeinit = true
+	err = initModules(initCtx, agt.config.Devices)
+
 	if agt.dryRun {
 		if err != nil {
 			printInitErr(err)

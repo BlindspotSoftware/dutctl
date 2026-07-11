@@ -2,8 +2,10 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package dutagent provides utilities for a dutagent service to handel the RPC requests.
-package dutagent
+// Package session brokers module<->client communication during a Run: it adapts
+// the RPC stream into a module.Session and runs the workers that carry the traffic
+// in both directions.
+package session
 
 import (
 	"context"
@@ -31,7 +33,7 @@ const (
 type Broker struct {
 	once    sync.Once
 	stream  Stream
-	session session
+	session backend
 	errCh   chan error // closed after all workers complete
 	wg      sync.WaitGroup
 }

@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package dutagent
+package session
 
 import (
 	"context"
@@ -20,7 +20,7 @@ import (
 // This function is an infinite loop. It terminates when the session's done channel is closed.
 //
 //nolint:cyclop, funlen
-func toClientWorker(ctx context.Context, stream Stream, s *session) error {
+func toClientWorker(ctx context.Context, stream Stream, s *backend) error {
 	l := log.FromContext(ctx)
 
 	for {
@@ -101,7 +101,7 @@ func toClientWorker(ctx context.Context, stream Stream, s *session) error {
 // This function is an infinite loop. It terminates when the session's done channel is closed.
 //
 //nolint:cyclop,funlen,gocognit
-func fromClientWorker(ctx context.Context, stream Stream, s *session) error {
+func fromClientWorker(ctx context.Context, stream Stream, s *backend) error {
 	l := log.FromContext(ctx)
 
 	type recvResult struct {

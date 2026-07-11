@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	"github.com/BlindspotSoftware/dutctl/internal/dutagent"
+	"github.com/BlindspotSoftware/dutctl/internal/dutagent/locker"
 	"github.com/BlindspotSoftware/dutctl/internal/fsm"
 	"github.com/BlindspotSoftware/dutctl/internal/log"
 	"github.com/BlindspotSoftware/dutctl/pkg/dut"
@@ -25,7 +25,7 @@ import (
 // rpcService is the service implementation for the RPCs provided by dutagent.
 type rpcService struct {
 	devices dut.Devlist
-	locker  *dutagent.Locker
+	locker  *locker.Locker
 }
 
 // userFromHeader returns the calling user's identity from a request header,
@@ -191,9 +191,9 @@ func (a *rpcService) Lock(
 	info, lockErr := a.locker.Lock(device, user, dur)
 	if lockErr != nil {
 		switch {
-		case errors.Is(lockErr, dutagent.ErrWrongOwner):
+		case errors.Is(lockErr, locker.ErrWrongOwner):
 			return nil, connect.NewError(connect.CodeFailedPrecondition, lockErr)
-		case errors.Is(lockErr, dutagent.ErrInvalidDuration):
+		case errors.Is(lockErr, locker.ErrInvalidDuration):
 			return nil, connect.NewError(connect.CodeInvalidArgument, lockErr)
 		default:
 			return nil, connect.NewError(connect.CodeInternal, lockErr)
@@ -237,9 +237,9 @@ func (a *rpcService) Unlock(
 
 	if err != nil {
 		switch {
-		case errors.Is(err, dutagent.ErrWrongOwner):
+		case errors.Is(err, locker.ErrWrongOwner):
 			return nil, connect.NewError(connect.CodePermissionDenied, err)
-		case errors.Is(err, dutagent.ErrNotLocked):
+		case errors.Is(err, locker.ErrNotLocked):
 			return nil, connect.NewError(connect.CodeFailedPrecondition, err)
 		default:
 			return nil, connect.NewError(connect.CodeInternal, err)
@@ -251,7 +251,7 @@ func (a *rpcService) Unlock(
 	return connect.NewResponse(&pb.UnlockResponse{}), nil
 }
 
-// streamAdapter decouples a connect.BidiStream to the dutagent.Stream interface.
+// streamAdapter decouples a connect.BidiStream to the session.Stream interface.
 type streamAdapter struct {
 	inner *connect.BidiStream[pb.RunRequest, pb.RunResponse]
 }

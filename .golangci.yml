@@ -249,12 +249,14 @@ linters:
         linters:
           - forbidigo
         text: direct slog
-      # AGENT SETUP / AGENT LIFECYCLE — process bootstrap, the module Init/Deinit lifecycle
-      # summaries, the frozen-logger objects (locker, session, chanio) and the
-      # internal/log package itself (its slog.Default fallback). No request
-      # context exists here, so all slog.X is allowed: lift both P1 and P2.
+      # AGENT SETUP — process bootstrap (dutagent/dutserver mains), the
+      # frozen-logger objects (locker, session) and chanio, plus the internal/log
+      # package itself (its slog.Default fallback). No request context exists
+      # here, so all slog.X is allowed: lift both P1 and P2. The module
+      # Init/Deinit lifecycle now derives its logger from ctx
+      # (cmds/dutagent/lifecycle.go), so it is no longer listed here.
       # (Matches the "slog logging buckets" tail shared by both messages.)
-      - path: ^(cmds/dutagent/dutagent\.go|cmds/exp/dutserver/dutserver\.go|internal/dutagent/(init|session|locker)\.go|internal/chanio/chanio\.go|internal/log/)
+      - path: ^(cmds/dutagent/dutagent\.go|cmds/exp/dutserver/dutserver\.go|internal/dutagent/session/session\.go|internal/dutagent/locker/locker\.go|internal/chanio/chanio\.go|internal/log/)
         linters:
           - forbidigo
         text: slog logging buckets

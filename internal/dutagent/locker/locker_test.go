@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package dutagent
+package locker
 
 import (
 	"errors"
@@ -11,7 +11,7 @@ import (
 )
 
 func TestLockHappyPath(t *testing.T) {
-	l := NewLocker()
+	l := New()
 
 	info, err := l.Lock("dev", "alice", time.Minute)
 	if err != nil {
@@ -36,7 +36,7 @@ func TestLockHappyPath(t *testing.T) {
 }
 
 func TestLockRejectsNonPositiveDuration(t *testing.T) {
-	l := NewLocker()
+	l := New()
 
 	for _, dur := range []time.Duration{0, -time.Second, -time.Hour} {
 		_, err := l.Lock("dev", "alice", dur)
@@ -47,7 +47,7 @@ func TestLockRejectsNonPositiveDuration(t *testing.T) {
 }
 
 func TestLockSameOwnerExtend(t *testing.T) {
-	l := NewLocker()
+	l := New()
 
 	first, err := l.Lock("dev", "alice", time.Minute)
 	if err != nil {
@@ -74,7 +74,7 @@ func TestLockSameOwnerExtend(t *testing.T) {
 }
 
 func TestLockBlockedByDifferentOwnerExplicit(t *testing.T) {
-	l := NewLocker()
+	l := New()
 
 	if _, err := l.Lock("dev", "alice", time.Minute); err != nil {
 		t.Fatalf("setup Lock: %v", err)
@@ -82,18 +82,18 @@ func TestLockBlockedByDifferentOwnerExplicit(t *testing.T) {
 
 	_, err := l.Lock("dev", "bob", time.Minute)
 
-	var le *LockError
+	var le *Error
 	if !errors.As(err, &le) {
-		t.Fatalf("Lock by other owner: err = %v, want *LockError", err)
+		t.Fatalf("Lock by other owner: err = %v, want *Error", err)
 	}
 
 	if le.Holder.Slot != ExplicitSlot || le.Holder.Owner != "alice" {
-		t.Errorf("LockError = %+v, want slot=explicit owner=alice", le)
+		t.Errorf("Error = %+v, want slot=explicit owner=alice", le)
 	}
 }
 
 func TestLockBlockedByDifferentOwnerAuto(t *testing.T) {
-	l := NewLocker()
+	l := New()
 
 	if _, err := l.AutoLock("dev", "alice"); err != nil {
 		t.Fatalf("setup AutoLock: %v", err)
@@ -101,18 +101,18 @@ func TestLockBlockedByDifferentOwnerAuto(t *testing.T) {
 
 	_, err := l.Lock("dev", "bob", time.Minute)
 
-	var le *LockError
+	var le *Error
 	if !errors.As(err, &le) {
-		t.Fatalf("Lock blocked by auto: err = %v, want *LockError", err)
+		t.Fatalf("Lock blocked by auto: err = %v, want *Error", err)
 	}
 
 	if le.Holder.Slot != AutoSlot || le.Holder.Owner != "alice" {
-		t.Errorf("LockError = %+v, want slot=auto owner=alice", le)
+		t.Errorf("Error = %+v, want slot=auto owner=alice", le)
 	}
 }
 
 func TestLockExplicitExpires(t *testing.T) {
-	l := NewLocker()
+	l := New()
 
 	if _, err := l.Lock("dev", "alice", time.Millisecond); err != nil {
 		t.Fatalf("Lock: %v", err)
@@ -126,7 +126,7 @@ func TestLockExplicitExpires(t *testing.T) {
 }
 
 func TestClearLockErrors(t *testing.T) {
-	l := NewLocker()
+	l := New()
 
 	if err := l.ClearLock("dev", "alice"); !errors.Is(err, ErrNotLocked) {
 		t.Errorf("ClearLock on free slot: err = %v, want ErrNotLocked", err)
@@ -142,7 +142,7 @@ func TestClearLockErrors(t *testing.T) {
 }
 
 func TestAutoLockNoExpiry(t *testing.T) {
-	l := NewLocker()
+	l := New()
 
 	info, err := l.AutoLock("dev", "alice")
 	if err != nil {
@@ -164,7 +164,7 @@ func TestAutoLockNoExpiry(t *testing.T) {
 }
 
 func TestAutoLockSameOwnerIdempotent(t *testing.T) {
-	l := NewLocker()
+	l := New()
 
 	first, err := l.AutoLock("dev", "alice")
 	if err != nil {
@@ -182,7 +182,7 @@ func TestAutoLockSameOwnerIdempotent(t *testing.T) {
 }
 
 func TestAutoLockBlockedByExplicitOtherOwner(t *testing.T) {
-	l := NewLocker()
+	l := New()
 
 	if _, err := l.Lock("dev", "alice", time.Minute); err != nil {
 		t.Fatalf("setup Lock: %v", err)
@@ -190,9 +190,9 @@ func TestAutoLockBlockedByExplicitOtherOwner(t *testing.T) {
 
 	_, err := l.AutoLock("dev", "bob")
 
-	var le *LockError
+	var le *Error
 	if !errors.As(err, &le) {
-		t.Fatalf("AutoLock blocked by explicit: err = %v, want *LockError", err)
+		t.Fatalf("AutoLock blocked by explicit: err = %v, want *Error", err)
 	}
 
 	if le.Holder.Slot != ExplicitSlot {
@@ -201,7 +201,7 @@ func TestAutoLockBlockedByExplicitOtherOwner(t *testing.T) {
 }
 
 func TestClearAutoLockLeavesExplicitIntact(t *testing.T) {
-	l := NewLocker()
+	l := New()
 
 	if _, err := l.Lock("dev", "alice", time.Hour); err != nil {
 		t.Fatalf("Lock: %v", err)
@@ -226,7 +226,7 @@ func TestClearAutoLockLeavesExplicitIntact(t *testing.T) {
 }
 
 func TestClearAutoLockErrors(t *testing.T) {
-	l := NewLocker()
+	l := New()
 
 	if err := l.ClearAutoLock("dev", "alice"); !errors.Is(err, ErrNotLocked) {
 		t.Errorf("ClearAutoLock on free slot: err = %v, want ErrNotLocked", err)
@@ -242,7 +242,7 @@ func TestClearAutoLockErrors(t *testing.T) {
 }
 
 func TestForceClearLockWipesBothSlots(t *testing.T) {
-	l := NewLocker()
+	l := New()
 
 	if _, err := l.Lock("dev", "alice", time.Hour); err != nil {
 		t.Fatalf("Lock: %v", err)
@@ -266,7 +266,7 @@ func TestForceClearLockWipesBothSlots(t *testing.T) {
 }
 
 func TestStatusAllReportsBothSlotsIndependently(t *testing.T) {
-	l := NewLocker()
+	l := New()
 
 	if _, err := l.Lock("alpha", "alice", time.Hour); err != nil {
 		t.Fatalf("Lock alpha: %v", err)
@@ -300,7 +300,7 @@ func TestStatusAllReportsBothSlotsIndependently(t *testing.T) {
 }
 
 func TestCheckAccessAllowsSameOwnerOnBothSlots(t *testing.T) {
-	l := NewLocker()
+	l := New()
 
 	if _, err := l.Lock("dev", "alice", time.Hour); err != nil {
 		t.Fatalf("Lock: %v", err)
@@ -316,8 +316,8 @@ func TestCheckAccessAllowsSameOwnerOnBothSlots(t *testing.T) {
 
 	err := l.CheckAccess("dev", "bob")
 
-	var le *LockError
+	var le *Error
 	if !errors.As(err, &le) {
-		t.Fatalf("CheckAccess for other owner: err = %v, want *LockError", err)
+		t.Fatalf("CheckAccess for other owner: err = %v, want *Error", err)
 	}
 }

@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	"github.com/BlindspotSoftware/dutctl/internal/dutagent"
+	"github.com/BlindspotSoftware/dutctl/internal/dutagent/locker"
 	"github.com/BlindspotSoftware/dutctl/pkg/dut"
 	"github.com/BlindspotSoftware/dutctl/pkg/lock"
 
@@ -20,7 +20,7 @@ import (
 func newTestService() *rpcService {
 	return &rpcService{
 		devices: dut.Devlist{"devA": dut.Device{}, "otherDev": dut.Device{}},
-		locker:  dutagent.NewLocker(),
+		locker:  locker.New(),
 	}
 }
 
