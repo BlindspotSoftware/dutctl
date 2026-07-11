@@ -18,12 +18,12 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"connectrpc.com/connect"
 	"github.com/BlindspotSoftware/dutctl/internal/buildinfo"
 	"github.com/BlindspotSoftware/dutctl/internal/dutagent/locker"
 	"github.com/BlindspotSoftware/dutctl/internal/log"
+	"github.com/BlindspotSoftware/dutctl/internal/rpc"
 	"github.com/BlindspotSoftware/dutctl/pkg/dut"
 	"github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1/dutctlv1connect"
 	"gopkg.in/yaml.v3"
@@ -162,9 +162,6 @@ func printInitErr(err error) {
 	slog.Error("module error", "err", err)
 }
 
-// readHeaderTimeout bounds how long the server waits to read request headers.
-const readHeaderTimeout = 10 * time.Second
-
 // startRPCService starts the RPC service, that ideally listens for incoming
 // connections forever. It always returns an non-nil error.
 func (agt *agent) startRPCService() error {
@@ -176,29 +173,19 @@ func (agt *agent) startRPCService() error {
 	mux := http.NewServeMux()
 	path, handler := dutctlv1connect.NewDeviceServiceHandler(
 		service,
-		connect.WithInterceptors(buildinfo.NewClientVersionRPCInterceptor(buildinfo.Version)),
+		connect.WithInterceptors(rpc.NewVersionEnforcer(buildinfo.Version)),
 	)
 	mux.Handle(path, handler)
 
-	// Serve HTTP/2 without TLS (h2c)
-	srv := &http.Server{
-		Addr:              agt.address,
-		Handler:           mux,
-		ReadHeaderTimeout: readHeaderTimeout,
-	}
-	srv.Protocols = new(http.Protocols)
-	srv.Protocols.SetHTTP1(true)
-	srv.Protocols.SetUnencryptedHTTP2(true)
-
 	slog.Info("rpc service listening", "addr", agt.address)
 
-	return srv.ListenAndServe()
+	return rpc.ListenAndServe(agt.address, mux)
 }
 
 func (agt *agent) registerWithServer() error {
 	slog.Info("registering with server", "server", agt.server)
 
-	client := spawnClient(agt.server)
+	client := rpc.NewRelayClient(agt.server)
 	req := connect.NewRequest(&pb.RegisterRequest{
 		Devices: agt.config.Devices.Names(),
 		Address: agt.address,
@@ -215,37 +202,6 @@ func (agt *agent) registerWithServer() error {
 	slog.Info("successfully registered with server", "server", agt.server)
 
 	return nil
-}
-
-// spawnClient creates a new client to the DUT server specified by the server address.
-// TODO: refactor into pkg and reuse in dutctl and dutserver.
-//
-//nolint:ireturn
-func spawnClient(agendURL string) dutctlv1connect.RelayServiceClient {
-	slog.Info("spawning new client for agent", "url", agendURL)
-
-	return dutctlv1connect.NewRelayServiceClient(
-		// Instead of http.DefaultClient, use the HTTP/2 protocol without TLS
-		newInsecureClient(),
-		fmt.Sprintf("http://%s", agendURL),
-		connect.WithGRPC(),
-	)
-}
-
-// TODO: refactor into pkg and reuse in dutctl and dutserver.
-func newInsecureClient() *http.Client {
-	transport := &http.Transport{}
-	transport.Protocols = new(http.Protocols)
-	transport.Protocols.SetUnencryptedHTTP2(true)
-
-	return &http.Client{
-		Transport: transport,
-		// TODO: Don't forget timeouts! http.Client.Timeout must not be used here:
-		// it bounds the entire exchange including the response body, which would
-		// abort long-lived streaming RPCs. Instead use per-RPC context deadlines
-		// on unary calls and/or transport timeouts (DialContext,
-		// TLSHandshakeTimeout, ResponseHeaderTimeout, IdleConnTimeout).
-	}
 }
 
 // start orchestrates the dutagent execution.

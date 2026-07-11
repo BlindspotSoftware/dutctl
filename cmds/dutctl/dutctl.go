@@ -12,12 +12,12 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net/http"
 	"os"
 
 	"connectrpc.com/connect"
 	"github.com/BlindspotSoftware/dutctl/internal/buildinfo"
 	"github.com/BlindspotSoftware/dutctl/internal/output"
+	"github.com/BlindspotSoftware/dutctl/internal/rpc"
 	"github.com/BlindspotSoftware/dutctl/pkg/lock"
 	"github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1/dutctlv1connect"
 )
@@ -148,30 +148,10 @@ type application struct {
 }
 
 func (app *application) setupRPCClient() {
-	client := dutctlv1connect.NewDeviceServiceClient(
-		newInsecureClient(),
-		fmt.Sprintf("http://%s", app.serverAddr),
-		connect.WithGRPC(),
-		connect.WithInterceptors(buildinfo.NewServerVersionRPCInterceptor(buildinfo.Version)),
+	app.rpcClient = rpc.NewDeviceClient(
+		app.serverAddr,
+		connect.WithInterceptors(rpc.NewVersionAdvisor(buildinfo.Version)),
 	)
-
-	app.rpcClient = client
-}
-
-func newInsecureClient() *http.Client {
-	// Use the HTTP/2 protocol without TLS (h2c)
-	transport := &http.Transport{}
-	transport.Protocols = new(http.Protocols)
-	transport.Protocols.SetUnencryptedHTTP2(true)
-
-	return &http.Client{
-		Transport: transport,
-		// TODO: Don't forget timeouts! http.Client.Timeout must not be used here:
-		// it bounds the entire exchange including the response body, which would
-		// abort long-lived streaming RPCs. Instead use per-RPC context deadlines
-		// on unary calls and/or transport timeouts (DialContext,
-		// TLSHandshakeTimeout, ResponseHeaderTimeout, IdleConnTimeout).
-	}
 }
 
 var errInvalidCmdline = fmt.Errorf("invalid command line")

@@ -2,7 +2,15 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package buildinfo_test
+package rpc_test
+
+// This is a deliberate black-box test package (rpc_test): it exercises the
+// version interceptors only through the exported API, wired over a real HTTP
+// transport exactly as dutctl and dutagent wire them. A separate test package
+// is the exception rather than the rule here — it is used because the value
+// under test IS the client<->agent handshake, which only has meaning across the
+// transport boundary. White-box tests of the internals live in version_test.go
+// (package rpc).
 
 import (
 	"context"
@@ -13,8 +21,8 @@ import (
 
 	"connectrpc.com/connect"
 
-	"github.com/BlindspotSoftware/dutctl/internal/buildinfo"
 	"github.com/BlindspotSoftware/dutctl/internal/log"
+	"github.com/BlindspotSoftware/dutctl/internal/rpc"
 	pb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1"
 	"github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1/dutctlv1connect"
 )
@@ -61,7 +69,7 @@ func newAgent(t *testing.T, agentVersion string) string {
 	mux := http.NewServeMux()
 	path, handler := dutctlv1connect.NewDeviceServiceHandler(
 		stubService{},
-		connect.WithInterceptors(buildinfo.NewClientVersionRPCInterceptor(agentVersion)),
+		connect.WithInterceptors(rpc.NewVersionEnforcer(agentVersion)),
 	)
 	mux.Handle(path, handler)
 
@@ -82,7 +90,7 @@ func TestVersionHandshake(t *testing.T) {
 
 		client := dutctlv1connect.NewDeviceServiceClient(
 			http.DefaultClient, url,
-			connect.WithInterceptors(buildinfo.NewServerVersionRPCInterceptor(clientVersion)),
+			connect.WithInterceptors(rpc.NewVersionAdvisor(clientVersion)),
 		)
 		_, err = client.List(ctx, connect.NewRequest(&pb.ListRequest{}))
 
@@ -132,7 +140,7 @@ func TestAgentAdvertisesVersion(t *testing.T) {
 		t.Fatalf("List: %v", err)
 	}
 
-	if got := res.Header().Get(buildinfo.VersionHeader); got != "9.9.9" {
-		t.Errorf("%s header = %q, want 9.9.9", buildinfo.VersionHeader, got)
+	if got := res.Header().Get(rpc.VersionHeader); got != "9.9.9" {
+		t.Errorf("%s header = %q, want 9.9.9", rpc.VersionHeader, got)
 	}
 }
