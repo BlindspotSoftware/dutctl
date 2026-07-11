@@ -176,11 +176,14 @@ func (a *rpcService) Lock(
 	device := req.Msg.GetDevice()
 	user := userFromHeader(req.Header())
 
-	if _, ok := a.devices[device]; !ok {
-		return nil, connect.NewError(
-			connect.CodeInvalidArgument,
-			fmt.Errorf("device %q: %w", device, dut.ErrDeviceNotFound),
-		)
+	_, err := a.devices.Find(device)
+	if err != nil {
+		code := connect.CodeInternal
+		if errors.Is(err, dut.ErrDeviceNotFound) {
+			code = connect.CodeInvalidArgument
+		}
+
+		return nil, connect.NewError(code, fmt.Errorf("device %q: %w", device, err))
 	}
 
 	dur := time.Duration(req.Msg.GetDurationSeconds()) * time.Second

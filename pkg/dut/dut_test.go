@@ -168,6 +168,113 @@ func TestFindCmd(t *testing.T) {
 	}
 }
 
+func TestFind(t *testing.T) {
+	devs := Devlist{
+		"device1": {Cmds: map[string]Command{"cmd1": {}}},
+		"device2": {Cmds: map[string]Command{"cmd2": {}}},
+	}
+
+	tests := []struct {
+		name    string
+		device  string
+		wantDev Device
+		err     error
+	}{
+		{
+			name:    "device found",
+			device:  "device1",
+			wantDev: devs["device1"],
+			err:     nil,
+		},
+		{
+			name:    "device not found",
+			device:  "device3",
+			wantDev: Device{},
+			err:     ErrDeviceNotFound,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dev, err := devs.Find(tt.device)
+			if !reflect.DeepEqual(dev, tt.wantDev) || !errors.Is(err, tt.err) {
+				t.Errorf("expected %v, %v; got %v, %v", tt.wantDev, tt.err, dev, err)
+			}
+		})
+	}
+}
+
+func TestAllModules(t *testing.T) {
+	devs := Devlist{
+		"device1": {Cmds: map[string]Command{
+			"cmd1": {Modules: []Module{
+				{Config: ModuleConfig{Name: "modA"}},
+				{Config: ModuleConfig{Name: "modB"}},
+			}},
+			"cmd2": {Modules: []Module{
+				{Config: ModuleConfig{Name: "modC"}},
+			}},
+		}},
+		"device2": {Cmds: map[string]Command{
+			"cmd3": {Modules: []Module{
+				{Config: ModuleConfig{Name: "modD"}},
+			}},
+		}},
+	}
+
+	// AllModules yields every module across all devices/commands; iteration order
+	// is unspecified (map iteration), so compare as a set keyed by location.
+	type key struct{ dev, cmd, mod string }
+
+	want := map[key]bool{
+		{"device1", "cmd1", "modA"}: true,
+		{"device1", "cmd1", "modB"}: true,
+		{"device1", "cmd2", "modC"}: true,
+		{"device2", "cmd3", "modD"}: true,
+	}
+
+	got := make(map[key]bool)
+	count := 0
+
+	for ref := range devs.AllModules() {
+		got[key{ref.Device, ref.Command, ref.Module.Config.Name}] = true
+		count++
+	}
+
+	if count != len(want) {
+		t.Errorf("expected %d modules, iterated %d", len(want), count)
+	}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("module set mismatch:\n want %v\n  got %v", want, got)
+	}
+}
+
+func TestAllModulesEarlyStop(t *testing.T) {
+	devs := Devlist{
+		"device1": {Cmds: map[string]Command{
+			"cmd1": {Modules: []Module{
+				{Config: ModuleConfig{Name: "modA"}},
+				{Config: ModuleConfig{Name: "modB"}},
+				{Config: ModuleConfig{Name: "modC"}},
+			}},
+		}},
+	}
+
+	// Breaking out of the range must stop iteration (the yield contract).
+	seen := 0
+
+	for range devs.AllModules() {
+		seen++
+
+		break
+	}
+
+	if seen != 1 {
+		t.Errorf("expected iteration to stop after 1, saw %d", seen)
+	}
+}
+
 func TestModuleArgs(t *testing.T) {
 	tests := []struct {
 		name        string
