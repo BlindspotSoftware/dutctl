@@ -63,8 +63,8 @@ func TestLockRPCUnknownDevice(t *testing.T) {
 	svc := newTestService()
 
 	_, err := svc.Lock(context.Background(), lockReq("ghost", "alice", 60))
-	if connect.CodeOf(err) != connect.CodeInvalidArgument {
-		t.Errorf("code = %v, want InvalidArgument", connect.CodeOf(err))
+	if connect.CodeOf(err) != connect.CodeNotFound {
+		t.Errorf("code = %v, want NotFound", connect.CodeOf(err))
 	}
 }
 

@@ -42,6 +42,9 @@ func AnonymousUser() string {
 
 func randSuffix(n int) string {
 	buf := make([]byte, n)
+	// crypto/rand.Read never returns a non-nil error on Go 1.24+ (it reads the OS
+	// CSPRNG and panics internally if that ever fails), so discarding the error is
+	// safe and keeps randSuffix infallible.
 	_, _ = rand.Read(buf)
 
 	return hex.EncodeToString(buf)

@@ -87,9 +87,10 @@ func Scope(l *slog.Logger, name string) *slog.Logger {
 	return slog.New(&scopeHandler{inner: l.Handler(), scope: name})
 }
 
-// New builds a base logger writing to w. When json is false a text handler is
-// used and the scope is rendered as a "[scope]" message prefix; when true a
-// JSON handler is used and the scope is emitted as a ScopeKey attribute.
+// New builds a base logger writing to w. A nil level defaults to LevelInfo.
+// When json is false a text handler is used and the scope is rendered as a
+// "[scope]" message prefix; when true a JSON handler is used and the scope is
+// emitted as a ScopeKey attribute.
 func New(w io.Writer, level slog.Leveler, json bool) *slog.Logger {
 	if level == nil {
 		level = slog.LevelInfo
@@ -222,7 +223,8 @@ func levelColor(l slog.Level) string {
 // after the level. The level is padded for alignment and, when color is set
 // (w is a terminal), the timestamp is dimmed and the level colored by severity.
 // Records are written under a shared mutex so concurrent goroutines never
-// interleave partial lines.
+// interleave partial lines. Handle returns any error from writing the formatted
+// line to w; slog surfaces it to the caller of the logging method.
 type textHandler struct {
 	mu    *sync.Mutex
 	w     io.Writer
@@ -362,7 +364,8 @@ func appendAttr(b *strings.Builder, group string, attr slog.Attr) {
 }
 
 // quoteIfNeeded wraps s in double quotes when it is empty or contains
-// whitespace, '=' or control characters, so the value stays a single token.
+// whitespace, '=', a double quote, or control characters, so the value stays a
+// single, parseable token.
 func quoteIfNeeded(s string) string {
 	if s == "" {
 		return `""`

@@ -53,6 +53,11 @@ func (b *Broker) init() {
 // Start initializes the broker and launches its workers. It returns the module session
 // for module execution and a channel signaling worker termination or errors.
 // Multiple calls are idempotent; subsequent calls return the already initialized session and channel.
+//
+// The returned channel is error-only and carries at most one error per worker; a
+// nil error is never sent. It is closed once both workers have finished, so a
+// receiver can drain any errors and then observe closure to know the session has
+// fully stopped.
 func (b *Broker) Start(ctx context.Context, s Stream) (module.Session, <-chan error) {
 	ctx = log.WithScope(ctx, scopeSession)
 
@@ -94,7 +99,10 @@ func (b *Broker) toClient(ctx context.Context, cancel context.CancelFunc) {
 
 		err := toClientWorker(ctx, b.stream, &b.session)
 		if err != nil {
-			// Surfaced to the RPC layer via errCh, which logs the terminal error.
+			// Log the worker's terminal failure at session scope, and surface it to
+			// the RPC layer via errCh for request classification. This is the
+			// sanctioned detail+summary double-log: the RPC handler (Run) also logs
+			// the rpc-scope summary of the returned error.
 			l.Warn("worker terminated", "err", err)
 			b.errCh <- err
 		} else {
@@ -117,7 +125,10 @@ func (b *Broker) fromClient(ctx context.Context, cancel context.CancelFunc) {
 
 		err := fromClientWorker(ctx, b.stream, &b.session)
 		if err != nil {
-			// Surfaced to the RPC layer via errCh, which logs the terminal error.
+			// Log the worker's terminal failure at session scope, and surface it to
+			// the RPC layer via errCh for request classification. This is the
+			// sanctioned detail+summary double-log: the RPC handler (Run) also logs
+			// the rpc-scope summary of the returned error.
 			l.Warn("worker terminated", "err", err)
 			b.errCh <- err
 		} else {

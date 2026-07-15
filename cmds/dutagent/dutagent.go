@@ -3,7 +3,7 @@
 // license that can be found in the LICENSE file.
 
 // dutagent is the server of the DUT Control system.
-// The service ist designed to run on a single board computer,
+// The service is designed to run on a single board computer,
 // which can handle the wiring to the devices under test (DUTs).
 package main
 
@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"syscall"
 
 	"connectrpc.com/connect"
@@ -96,14 +97,13 @@ const (
 	exit1 exitCode = 1
 )
 
-// cleanup takes care of a graceful shutdown of the agt and its running service.
+// cleanup takes care of a graceful shutdown of the agent and its running service.
 // Afterwards agt.exit is called. If clean-up fails, agt.exit is called with code 1,
-// otherwise with provided exitCode.
+// otherwise with the provided exitCode.
 func (agt *agent) cleanup(code exitCode) {
 	if agt.modulesNeedDeinit {
-		// TODO(ctx): this background context is the shutdown seam. A later change
-		// can make it a context.WithTimeout to bound module Deinit, or derive it
-		// from a shutdown-signal context. It flows into every module's Deinit.
+		// TODO(ctx): the background context leaves module Deinit unbounded; bound it
+		// with a timeout or a shutdown-signal context. It flows into every module's Deinit.
 		err := deinitModules(context.Background(), agt.config.Devices)
 		if err != nil {
 			printInitErr(err)
@@ -162,8 +162,8 @@ func printInitErr(err error) {
 	slog.Error("module error", "err", err)
 }
 
-// startRPCService starts the RPC service, that ideally listens for incoming
-// connections forever. It always returns an non-nil error.
+// startRPCService starts the RPC service, which ideally listens for incoming
+// connections forever. It always returns a non-nil error.
 func (agt *agent) startRPCService() error {
 	service := &rpcService{
 		devices: agt.config.Devices,
@@ -191,9 +191,8 @@ func (agt *agent) registerWithServer() error {
 		Address: agt.address,
 	})
 
-	// TODO(ctx): background context — registration has no deadline or
-	// cancellation. A later change can bound it (context.WithTimeout) or tie it
-	// to a startup/shutdown context.
+	// TODO(ctx): registration runs on a background context with no deadline or
+	// cancellation; bound it with a timeout.
 	_, err := client.Register(context.Background(), req)
 	if err != nil {
 		return fmt.Errorf("registering with server %q failed: %w", agt.server, err)
@@ -225,7 +224,7 @@ func (agt *agent) start() {
 	// to do a graceful shutdown
 	defer func() {
 		if r := recover(); r != nil {
-			slog.Error("recovered from panic", "panic", r)
+			slog.Error("recovered from panic", "panic", r, "stack", string(debug.Stack()))
 			agt.cleanup(exit1)
 		}
 	}()
@@ -246,10 +245,9 @@ func (agt *agent) start() {
 		agt.cleanup(exit1)
 	}
 
-	// initCtx is the agent-lifetime context for module initialization. Today it
-	// is a plain background context; it is the single seam where a later change
-	// can attach a startup deadline (context.WithTimeout) or wire in
-	// cancellation. It flows into every module's Init via internal/log. TODO(ctx).
+	// initCtx is the agent-lifetime context for module initialization; it flows
+	// into every module's Init via internal/log.
+	// TODO(ctx): bound startup with a timeout or wire in cancellation.
 	initCtx := context.Background()
 
 	agt.modulesNeedDeinit = true

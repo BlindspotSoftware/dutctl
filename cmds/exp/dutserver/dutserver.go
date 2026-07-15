@@ -79,8 +79,8 @@ func (svr *server) watchInterrupt() {
 	}()
 }
 
-// startRPCService starts the RPC service, that ideally listens for incoming
-// connections forever. It always returns an non-nil error.
+// startRPCService starts the RPC service, which ideally listens for incoming
+// connections forever. It always returns a non-nil error.
 func (svr *server) startRPCService() error {
 	// TODO: load registered DUTs from a file.
 	service := &rpcService{
@@ -110,16 +110,6 @@ func (svr *server) start() {
 	// scope as control enters their subsystem. See package internal/log.
 	base := log.New(os.Stderr, log.ParseLevel(svr.logLevel), svr.logJSON)
 	slog.SetDefault(log.Scope(base, "server"))
-
-	// By design dutserver's code does not panic.
-	// But other code could, or *things* happen at runtime. So we catch it here
-	// to do a graceful shutdown
-	defer func() {
-		if r := recover(); r != nil {
-			slog.Error("recovered from panic", "panic", r)
-			svr.cleanup(exit1)
-		}
-	}()
 
 	svr.watchInterrupt()
 

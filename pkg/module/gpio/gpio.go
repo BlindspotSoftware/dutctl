@@ -2,10 +2,11 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package gpio provides two modules that simulate buttons and switches respectively, using the GPIO pins of
-// the Raspberry Pi. Used pins of Raspberry Pi needs to be wired to respective pads/connections on the DUT.
+// Package gpio provides two modules that simulate buttons and switches
+// respectively, using the GPIO pins of the Raspberry Pi. The pins used must be
+// wired to the respective pads or connections on the DUT.
 //
-// E.g. this module can be used to pull down the reset line of the DUT.
+// For example, these modules can be used to pull down the reset line of the DUT.
 package gpio
 
 import (
@@ -33,7 +34,10 @@ func init() {
 	})
 }
 
+// Pin is a raw BCM2835/BCM2711 GPIO pin number.
 type Pin uint8
+
+// State is the logic level of a GPIO pin, either [Low] or [High].
 type State uint8
 
 // gpio is an interface for different internal gpio access methods.
@@ -43,12 +47,11 @@ type gpio interface {
 	Toggle(pin Pin) error
 }
 
-// backendParser return a gpio backend based on the name.
+// backendParser is a function that returns a gpio backend for the given name.
 type backendParser func(name string) gpio
 
 // backendFromOption is the default [backendParser] function.
-// Currently only "devmem" is supported.
-// If the name is not recognized, the 'devmem' is used as a fallback.
+// Currently only "devmem" is supported; any unrecognized name falls back to "devmem".
 func backendFromOption(name string) gpio {
 	switch name {
 	case "devmem":
@@ -58,11 +61,14 @@ func backendFromOption(name string) gpio {
 	}
 }
 
+// Low and High are the logic levels of a GPIO [Pin].
 const (
 	Low  State = 0
 	High State = 1
 )
 
+// DefaultButtonPressDuration is the press duration used when Button.Run
+// is invoked without a duration argument.
 const DefaultButtonPressDuration = 500 * time.Millisecond
 
 // A Button simulates a button press by changing the state of a GPIO pin.
@@ -89,7 +95,7 @@ const description1Button = `
 The duration controls the time the button is pressed. If no duration is passed, a default is used.
 `
 
-// According to time.ParseDuration.
+// description2Button restates the duration-string syntax from time.ParseDuration.
 const description2Button = `
 A duration string is a possibly signed sequence of decimal numbers, each with optional fraction
 and a unit suffix, such as "300ms", "-1.5h" or "2h45m".
@@ -162,17 +168,42 @@ func (b *Button) Run(ctx context.Context, s module.Session, args ...string) erro
 		return err
 	}
 
-	time.Sleep(duration)
+	// Hold for the press duration but honor cancellation/deadline. Release the
+	// button afterwards regardless, so an interrupted press does not leave the pin
+	// held.
+	waitErr := sleepCtx(ctx, duration)
 
 	err = b.Toggle(b.Pin)
 	if err != nil {
 		return err
 	}
 
+	if waitErr != nil {
+		return waitErr
+	}
+
 	log.FromContext(ctx).Info(fmt.Sprintf("button press for %s (pin %d)", duration, b.Pin))
 	s.Printf("Button pressed for %s\n", duration)
 
 	return nil
+}
+
+// sleepCtx pauses for d, returning ctx.Err() if ctx is done first. A non-positive
+// d returns nil immediately.
+func sleepCtx(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return nil
+	}
+
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 type switchState string

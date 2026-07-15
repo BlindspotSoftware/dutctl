@@ -15,6 +15,12 @@ import (
 // concrete type: callers pass it where a session.Stream is expected, which it
 // satisfies structurally, so internal/rpc and the session package need not
 // import each other.
+//
+// Send and Receive forward directly to the underlying connect stream and return
+// its error verbatim: the connect error code and io.EOF are preserved. This
+// pass-through is load-bearing — the agent's session workers branch on
+// errors.Is(err, io.EOF) and the RPC handler preserves connect codes — so these
+// errors must not be wrapped here.
 type RunStream struct {
 	inner *connect.BidiStream[pb.RunRequest, pb.RunResponse]
 }

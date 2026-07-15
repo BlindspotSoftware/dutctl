@@ -48,8 +48,15 @@ func (r *ChanReader) logger() *slog.Logger {
 	return slog.Default()
 }
 
-// Read reads up to len(bytes) bytes into bytes. It returns the number of bytes
-// read and any error encountered.
+// Read reads up to len(bytes) bytes into bytes, drawing first from any buffered
+// remainder of a previous channel message and then from the channel. It returns
+// the number of bytes read and any error encountered.
+//
+// It returns io.EOF when the channel is closed, and may return n > 0 together with
+// io.EOF in the same call (a buffered remainder delivered alongside the EOF).
+// Bytes from a channel message that do not fit are buffered for the next Read.
+// Empty channel messages are skipped rather than surfaced as (0, nil), so a
+// request for a non-empty buffer never returns (0, nil).
 func (r *ChanReader) Read(bytes []byte) (int, error) {
 	r.logger().Debug("chan read", "want", len(bytes))
 
@@ -62,7 +69,7 @@ func (r *ChanReader) Read(bytes []byte) (int, error) {
 		return n, nil
 	}
 
-	var nBuf, nChan int
+	var nBuf int
 	// If the buffer is not empty but contains some data, start by filling bytes with it.
 	if len(r.buf) > 0 {
 		nBuf = copy(bytes, r.buf)
@@ -76,27 +83,37 @@ func (r *ChanReader) Read(bytes []byte) (int, error) {
 		}
 	}
 
-	// Read from the channel if the buffer is empty or insufficient
-	chanBytes, ok := <-r.ch
-	if !ok {
-		r.logger().Debug("chan read EOF: channel closed", "buffered", nBuf)
+	// Read from the channel until there is at least one byte to return (or the
+	// channel closes). Skipping empty messages keeps Read from returning (0, nil)
+	// for a non-empty request, which would violate the io.Reader contract.
+	for {
+		chanBytes, ok := <-r.ch
+		if !ok {
+			r.logger().Debug("chan read EOF: channel closed", "buffered", nBuf)
 
-		return nBuf, io.EOF // Return any remaining buffer content before EOF
+			return nBuf, io.EOF // Return any remaining buffer content before EOF
+		}
+
+		// Fill the space left in bytes after the buffer copy with data from the
+		// channel. copy caps at that remaining space (len(bytes)-nBuf), so nChan
+		// is exactly how many channel bytes were consumed.
+		nChan := copy(bytes[nBuf:], chanBytes)
+
+		// Buffer whatever did not fit for the next Read.
+		if nChan < len(chanBytes) {
+			r.buf = append(r.buf, chanBytes[nChan:]...)
+		}
+
+		if nBuf+nChan == 0 {
+			// Empty message and nothing buffered — wait for real data rather than
+			// returning (0, nil).
+			continue
+		}
+
+		r.logger().Debug("chan read complete", "from_buffer", nBuf, "from_channel", nChan)
+
+		return nBuf + nChan, nil
 	}
-
-	// Fill the space left in bytes after the buffer copy with data from the
-	// channel. copy caps at that remaining space (len(bytes)-nBuf), so nChan is
-	// exactly how many channel bytes were consumed.
-	nChan = copy(bytes[nBuf:], chanBytes)
-
-	// Buffer whatever did not fit for the next Read.
-	if nChan < len(chanBytes) {
-		r.buf = append(r.buf, chanBytes[nChan:]...)
-	}
-
-	r.logger().Debug("chan read complete", "from_buffer", nBuf, "from_channel", nChan)
-
-	return nBuf + nChan, nil
 }
 
 // ChanWriter implements io.Writer that writes to a channel of byte slices.
@@ -116,9 +133,13 @@ func NewChanWriter(ch chan<- []byte) (*ChanWriter, error) {
 	}, nil
 }
 
-// Write writes len(bytes) bytes from bytes to the underlying data stream.
-// It returns the number of bytes written from bytes
-// and any error encountered that caused the write to stop early.
+// Write copies bytes and sends the copy on the underlying channel, returning
+// len(bytes) and a nil error. It never returns a non-nil error.
+//
+// Write blocks until a receiver takes the message, and it must not be called after
+// the channel is closed: the send is unguarded, so writing to a closed channel
+// panics. In this package the broker owns the channel lifetime and never closes it
+// while a module may still write, so this does not arise in practice.
 func (w *ChanWriter) Write(bytes []byte) (int, error) {
 	chanBytes := make([]byte, len(bytes))
 	copy(chanBytes, bytes)

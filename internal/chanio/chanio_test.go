@@ -93,6 +93,18 @@ func TestChanReader_Read(t *testing.T) {
 			wantErr:    nil,
 		},
 		{
+			// An empty channel message must be skipped, not surfaced as (0, nil):
+			// Read loops until it has real data (or EOF), which the io.Reader
+			// contract requires for a non-empty request.
+			name:       "skip empty message before data",
+			bufferInit: []byte{},
+			channelIn:  [][]byte{{}, []byte("world")},
+			readSize:   5,
+			want:       []byte("world"),
+			wantN:      5,
+			wantErr:    nil,
+		},
+		{
 			name:       "partial buffer, partial channel",
 			bufferInit: []byte("he"),
 			channelIn:  [][]byte{[]byte("llo")},

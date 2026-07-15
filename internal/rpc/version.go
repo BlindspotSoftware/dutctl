@@ -23,6 +23,9 @@ const VersionHeader = "X-Dutctl-Version"
 // reason renders a human-facing phrase for a compatibility result, derived from
 // the structural fields of the comparison. It lives here — with its only
 // callers — rather than in package compat, which stays free of message prose.
+//
+// It is only called for non-Compatible results (Tolerated or Incompatible), so the
+// Patch and Equal fields do not reach it in practice; they return "" defensively.
 func reason(r compat.Result) string {
 	if !r.Valid {
 		return "versions not comparable"

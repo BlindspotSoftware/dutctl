@@ -105,10 +105,7 @@ func TestOneLineFormatter(t *testing.T) {
 		t.Error("Nothing should be written to stdout while buffering")
 	}
 
-	err := bufferFormatter.Flush()
-	if err != nil {
-		t.Errorf("Flush returned error: %v", err)
-	}
+	bufferFormatter.Flush()
 
 	if bufStdout.Len() == 0 {
 		t.Error("Buffer should have been written to stdout after Flush")

@@ -31,8 +31,8 @@ func (c *Command) validateTemplateReferences() error {
 			refs := extractTemplateReferences(arg)
 			for _, ref := range refs {
 				if !argNames[ref] {
-					return fmt.Errorf("module %q references undefined argument %q (available: %v)",
-						mod.Config.Name, ref, c.argNamesList())
+					return fmt.Errorf("%w: module %q references undefined argument %q (available: %v)",
+						ErrUndefinedArgReference, mod.Config.Name, ref, c.argNamesList())
 				}
 			}
 		}

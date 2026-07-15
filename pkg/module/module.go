@@ -26,8 +26,8 @@ var (
 // Implementations of this interface are the actual steps that are executed on a DUT.
 type Module interface {
 	// Help provides usage information.
-	// The returned string should contain a description of the module the supported
-	// command line arguments and any other information required to interact with the module.
+	// The returned string should contain a description of the module, the supported
+	// command line arguments, and any other information required to interact with the module.
 	// The returned string should be formatted in a way that it can be displayed to the user.
 	//
 	// Implementations should consider the module's concrete configuration and potentially
@@ -35,10 +35,14 @@ type Module interface {
 	// of this method to provide a generic help message for all possible configurations,
 	// but rather usage information for the current configuration.
 	Help() string
-	// Init is called once when the dutagent services is started.
+	// Init is called once when the dutagent service is started.
 	// It's a good place to establish connections or allocate resources and check whether
-	// the module is configured functional. It is also called when a command containing this
+	// the module is configured and functional. It is also called when a command containing this
 	// module is called as a dry-run to check the configuration.
+	//
+	// A non-nil error marks the module as non-functional. The agent aggregates Init
+	// errors across all modules rather than failing on the first, and reports them
+	// together (at startup, and for a dry-run). The error is treated opaquely.
 	//
 	// The context carries a logger scoped to this module; obtain it with
 	// log.FromContext(ctx). It has no request deadline (Init runs at startup).
@@ -53,11 +57,31 @@ type Module interface {
 	// The context carries a logger scoped to this module; obtain it with log.FromContext(ctx).
 	Deinit(ctx context.Context) error
 	// Run is the entry point and executes the module with the given arguments.
+	//
+	// A nil return reports success; a non-nil error aborts the command and is
+	// reported to the client. The error is treated opaquely — the framework does
+	// not inspect its type — so implementations may return any error. A panic in
+	// Run is recovered at the framework boundary and converted into an error, so a
+	// misbehaving module cannot crash dutagent; implementations should nonetheless
+	// prefer returning errors over panicking.
+	//
+	// The context carries a logger scoped to this module (log.FromContext) and is
+	// cancelled when the command is aborted or the client disconnects.
 	Run(ctx context.Context, s Session, args ...string) error
 }
 
 // Session provides an environment / a context for a module.
 // Via the Session interface, modules can interact with the client during execution.
+//
+// The Print family and Console are fire-and-forget: they return no error, and a
+// failure to deliver output to the client (for example a broken stream) is handled
+// out-of-band by the session, which aborts the run rather than reporting the failure
+// back to the module. RequestFile and SendFile do return an error; it is reported
+// opaquely (no sentinel to match) and typically means the client declined the file
+// or the transfer stream failed.
+//
+// Console, Print, RequestFile and SendFile must be called only from the module's
+// Run goroutine.
 type Session interface {
 	// Print sends a message to the client. Implementations should wrap [fmt.Sprint].
 	// The message is displayed in the console or GUI of the client.
@@ -69,7 +93,7 @@ type Session interface {
 	// The message is displayed in the console or GUI of the client.
 	Println(a ...any)
 	// Console returns the stdin, stdout and stderr streams for the module.
-	// It thus indicates to the client that the module may wants to interact with the user
+	// It thus indicates to the client that the module may want to interact with the user
 	// via standard input and output streams.
 	Console() (stdin io.Reader, stdout, stderr io.Writer)
 	// RequestFile requests a file from the client.
@@ -93,7 +117,12 @@ type Record struct {
 	New func() Module
 }
 
-// Register registers a module for use in dutagent.
+// Register registers a module for use in dutagent. It is meant to be called from a
+// module package's init function, so a misuse is a programming error surfaced at
+// startup rather than a returned error (an init function cannot return one).
+//
+// Register panics if r.ID is empty, if r.ID is a reserved name ("help" or "info"),
+// if r.New is nil, or if a module with the same ID is already registered.
 func Register(r Record) {
 	if r.ID == "" {
 		panic("module ID missing")
@@ -117,7 +146,9 @@ func Register(r Record) {
 	modules[r.ID] = r
 }
 
-// New creates a new instance of a former registered module by its unique name.
+// New creates a new instance of a formerly registered module by its unique name.
+// It returns an error if name is empty or if no module with that name has been
+// registered. Both errors are opaque (no sentinel); callers report them as-is.
 func New(name string) (Module, error) {
 	if name == "" {
 		return nil, errors.New("module name must not be empty")

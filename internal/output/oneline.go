@@ -7,6 +7,7 @@ package output
 import (
 	"fmt"
 	"io"
+	"log/slog"
 	"sort"
 	"strings"
 	"time"
@@ -184,17 +185,18 @@ func writeMetadataToLine(line *strings.Builder, metadata map[string]string, sepa
 	}
 }
 
-// Flush ensures all buffered output is written.
-func (f *OneLineFormatter) Flush() error {
+// Flush ensures all buffered output is written. A write failure is logged and the
+// affected buffer dropped; there is no error to act on.
+func (f *OneLineFormatter) Flush() {
 	if !f.buffering {
-		return nil
+		return
 	}
 
 	// Write buffered content to the appropriate streams
 	if f.stdBuffer.Len() > 0 {
 		_, err := fmt.Fprint(f.stdout, f.stdBuffer.String())
 		if err != nil {
-			return fmt.Errorf("error writing stdout buffer: %v", err)
+			slog.Warn("failed to write buffered output", "stream", "stdout", "err", err)
 		}
 
 		f.stdBuffer.Reset()
@@ -203,13 +205,11 @@ func (f *OneLineFormatter) Flush() error {
 	if f.errBuffer.Len() > 0 {
 		_, err := fmt.Fprint(f.stderr, f.errBuffer.String())
 		if err != nil {
-			return fmt.Errorf("error writing stderr buffer: %v", err)
+			slog.Warn("failed to write buffered output", "stream", "stderr", "err", err)
 		}
 
 		f.errBuffer.Reset()
 	}
 
 	f.buffering = false
-
-	return nil
 }

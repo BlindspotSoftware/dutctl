@@ -16,6 +16,12 @@ import (
 
 // ConfigError represents a YAML configuration parsing or validation error
 // with contextual information about where the error occurred.
+//
+// It is always constructed and returned as a pointer (*ConfigError), produced by
+// the Devlist/Device/Command/Module UnmarshalYAML methods. Callers match the
+// category with errors.Is (for example errors.Is(err, ErrNoModules)) and retrieve
+// the Device/Command/Line context with errors.As into a *ConfigError. Unwrap
+// returns the wrapped Err, so the chain stays inspectable.
 type ConfigError struct {
 	Device  string // device name (empty if not yet known)
 	Command string // command name (empty if not yet known)
@@ -47,6 +53,10 @@ func (e *ConfigError) Unwrap() error {
 	return e.Err
 }
 
+// Sentinel errors reported while parsing and validating a device configuration.
+// The UnmarshalYAML methods return them wrapped in a *ConfigError; Devlist.FindCmd
+// returns ErrNoModules and ErrMultiplePassthroughModules unwrapped. Match them
+// with errors.Is.
 var (
 	ErrNoModules                  = errors.New("command must have at least one module")
 	ErrMultiplePassthroughModules = errors.New("command must have at most one passthrough module")
@@ -56,6 +66,7 @@ var (
 	ErrEmptyDevices               = errors.New("devices must not be empty")
 	ErrNoCommands                 = errors.New("device must have at least one command")
 	ErrReservedCommand            = errors.New("command name is reserved")
+	ErrUndefinedArgReference      = errors.New("undefined argument reference")
 )
 
 // UnmarshalYAML unmarshals a Devlist from a YAML node, wrapping errors
@@ -223,6 +234,11 @@ type commandAlias Command
 // UnmarshalYAML unmarshals a Command from a YAML node and adds custom validation.
 // Unlike Devlist and Device, this uses the alias trick rather than manual node
 // iteration because Command fields are not maps that need key-level error context.
+//
+// A validation failure returns a *ConfigError carrying the YAML line and wrapping
+// one of ErrNoModules, ErrMultiplePassthroughModules, ErrPassthroughWithCommandArgs,
+// ErrPassthroughModuleWithArgs, or a template-reference error from
+// validateTemplateReferences.
 func (c *Command) UnmarshalYAML(node *yaml.Node) error {
 	// Decode into alias to get all fields without recursion.
 	var cmd commandAlias
@@ -234,7 +250,6 @@ func (c *Command) UnmarshalYAML(node *yaml.Node) error {
 
 	*c = Command(cmd)
 
-	// Check presence of passthrough module
 	if len(c.Modules) == 0 {
 		return &ConfigError{Line: node.Line, Err: ErrNoModules}
 	}
@@ -265,6 +280,9 @@ func (c *Command) UnmarshalYAML(node *yaml.Node) error {
 }
 
 // UnmarshalYAML unmarshals a Module from a YAML node and adds custom validation.
+// On failure it returns a *ConfigError carrying the YAML line and wrapping
+// ErrModuleNotFound (unknown module name) or ErrModuleValidation (struct-tag
+// validation failure).
 //
 // The module-specific options (the "with" key) are decoded in two passes:
 // first into a generic map via ModuleConfig, then re-marshalled and unmarshalled
@@ -306,8 +324,15 @@ func (m *Module) UnmarshalYAML(node *yaml.Node) error {
 	return nil
 }
 
+// ErrModuleValidation is wrapped in a *ConfigError when a module's struct-tag
+// validation fails during YAML unmarshalling; match it with errors.Is.
 var ErrModuleValidation = errors.New("validation error")
 
+// wrapValidatorErrors converts validator.ValidationErrors into a *ConfigError
+// wrapping ErrModuleValidation, flattening the per-field validator structure into a
+// single human-readable message — the field/tag detail is intentionally not
+// preserved as structured data, since no caller inspects it programmatically. A
+// non-validation error is returned unchanged.
 func wrapValidatorErrors(err error, node *yaml.Node) error {
 	if err == nil {
 		return nil

@@ -3,9 +3,8 @@
 // license that can be found in the LICENSE file.
 
 // Package buildinfo provides a way to read the build information
-// embedded in a Go binary. It is based on the `debug` package's
-// `ReadBuildInfo` function, but provides a simplified interface
-// to access the build information.
+// embedded in a Go binary. It is based on [debug.ReadBuildInfo],
+// but provides a simplified interface to access the build information.
 package buildinfo
 
 import (
@@ -27,11 +26,11 @@ func VersionString() string {
 // info is a wrapper for [debug.BuildInfo].
 type info struct {
 	semver   string    // Semantic release version of the application.
-	revision string    // Revision of the CVS.
+	revision string    // Revision from the version control system.
 	time     time.Time // Date when the application was built.
 	compiler string    // Version of the Go compiler used to build the application.
 
-	once sync.Once // Ensures that populate is called only once.
+	once sync.Once // Ensures that read is called only once.
 }
 
 func (i *info) String() string {
@@ -75,16 +74,21 @@ func findSetting(want string, s []debug.BuildSetting) string {
 }
 
 func cvsShortHash(revision string) string {
+	// Trim first: a whitespace-only value must collapse to "unset", and the length
+	// guard below must see the trimmed length.
+	revision = strings.TrimSpace(revision)
 	if revision == "" {
 		return "unset"
 	}
 
-	// Trim any leading whitespace and get the leftmost 7 characters,
-	// which is the common length for a git commit hash.
-	revision = strings.TrimSpace(revision)
-	revision = revision[:7]
+	// Return the leftmost characters — the common short git hash length — but never
+	// slice past the end for a shorter revision.
+	const shortLen = 7
+	if len(revision) < shortLen {
+		return revision
+	}
 
-	return revision
+	return revision[:shortLen]
 }
 
 func parseTime(rfc3339 string) time.Time {

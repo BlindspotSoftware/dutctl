@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package dut provides representation of the device-under-test (DUT).
+// Package dut provides the types that represent a device-under-test (DUT) and
+// its command configuration.
 package dut
 
 import (
@@ -15,6 +16,8 @@ import (
 	"github.com/BlindspotSoftware/dutctl/pkg/module"
 )
 
+// Sentinel errors returned by the Devlist lookups (Find, CmdNames, FindCmd) and
+// by Command.ModuleArgs; match them with errors.Is.
 var (
 	ErrDeviceNotFound    = errors.New("no such device")
 	ErrCommandNotFound   = errors.New("no such command")
@@ -72,6 +75,11 @@ func (devs *Devlist) Find(device string) (Device, error) {
 // If the device is not found, it returns ErrDeviceNotFound, if the command is not found,
 // it returns ErrCommandNotFound. If the requested command has no modules, it returns ErrNoModules.
 // If the requested command has multiple passthrough modules, it returns ErrMultiplePassthroughModules.
+//
+// ErrNoModules and ErrMultiplePassthroughModules are defensive: configuration
+// validation already rejects both at load time (see config.go), so on the request
+// path they are effectively unreachable and the handlers map them to an internal
+// error code by design.
 func (devs *Devlist) FindCmd(device, command string) (Device, Command, error) {
 	dev, ok := (*devs)[device]
 	if !ok {
@@ -162,6 +170,11 @@ func (c *Command) countPassthrough() int {
 // Passthrough modules receive runtimeArgs directly. Non-passthrough modules
 // receive their statically configured Args with template references substituted
 // using runtimeArgs. The returned slice has the same length and ordering as c.Modules.
+//
+// It returns ErrNoReceiverForArgs when runtimeArgs are supplied but the command has
+// neither a passthrough module nor declared Args to receive them, and otherwise
+// propagates any error from SubstituteArgs (for example when the number of
+// runtime arguments does not match the command's declared Args).
 func (c *Command) ModuleArgs(runtimeArgs []string) ([][]string, error) {
 	// Runtime args may be consumed either by a passthrough module or by
 	// command-level templating (declared c.Args substituted via ${name}).
@@ -226,6 +239,10 @@ type Module struct {
 	Config ModuleConfig
 }
 
+// ModuleConfig holds the module-agnostic settings decoded from a module's YAML
+// entry: the registered module name, whether it is the command's passthrough
+// module, its static args, and the raw "with" options (Options) that are later
+// re-decoded into the concrete module type.
 type ModuleConfig struct {
 	Name        string `yaml:"module"`
 	Passthrough bool   `yaml:"passthrough"`
