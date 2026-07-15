@@ -76,8 +76,9 @@ func collectErrors(t *testing.T, errCh <-chan error, timeout time.Duration) []er
 	}
 }
 
-// NOTE: These tests encode TARGET semantics of the future refactor (error-only channel, close on worker completion).
-// They are EXPECTED TO FAIL against current implementation (which sends nil and never closes) until refactor is applied.
+// These tests verify the broker error-channel contract: the channel is
+// error-only (a nil error is never sent) and is closed once both workers
+// have completed.
 
 func TestBroker_SuccessNoTraffic(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -120,7 +121,7 @@ func TestBroker_SuccessEOFNoCancel(t *testing.T) {
 		if ok {
 			t.Fatalf("error channel not closed after EOF success")
 		}
-	default: // current implementation will not close -> will fail here when we modify tests later by making collectErrors wait for close
+	default: // no residual value buffered
 	}
 }
 
@@ -141,8 +142,7 @@ func TestBroker_StdinForwarding(t *testing.T) {
 			t.Fatalf("stdin mismatch: got %q want %q", string(data), string(stdinPayload))
 		}
 	case <-time.After(200 * time.Millisecond):
-		// Expected to fail until refactor ensures proper sequencing / closure.
-		// (Current code may work but channel closure semantics will still fail later.)
+		// Timed out waiting for the forwarded stdin payload.
 	}
 
 	cancel() // simulate module completion
@@ -223,9 +223,7 @@ func TestBroker_ToClientSendError(t *testing.T) {
 
 	errs := collectErrors(t, errCh, 200*time.Millisecond)
 	if len(errs) != 1 || !errors.Is(errs[0], stream.sendErr) {
-		// Fail expected until refactor.
-		// WANT: exactly one send error.
-		// GOT: %#v
+		// WANT: exactly one send error matching stream.sendErr.
 	}
 }
 

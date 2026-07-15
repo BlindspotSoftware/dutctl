@@ -19,8 +19,10 @@ const (
 	colonArgCount = 2
 )
 
-// parsePaths parses the user argument and returns src and destination paths.
-// destination always represents the destination path when configured.
+// parsePaths resolves the source and destination for the transfer from the
+// configured Source/Destination and the command-line args, storing the result
+// in f.sourcePath and f.destPath. It returns an error when the argument count
+// or the src:dest colon syntax conflicts with what the config already fixes.
 func (f *File) parsePaths(args []string) error {
 	arg, err := f.evalArgs(args)
 	if err != nil {
@@ -154,11 +156,11 @@ func (f *File) parseColonPath(arg string) error {
 	return nil
 }
 
-// sanitizePath cleans and secures a user-provided path.
-// - Normalizes path separators and removes redundant elements
-// - Returns error for absolute paths
-// - Returns error for paths with leading ..
-// - For other relative paths, preserves directory structure.
+// sanitizePath cleans a user-provided path and rejects any that could escape
+// the destination tree. It normalizes separators and removes redundant
+// elements, then returns an error for absolute paths and for paths with a
+// leading "..". Any other relative path is returned cleaned, preserving its
+// directory structure. An empty path returns "", nil.
 func sanitizePath(path string) (string, error) {
 	if path == "" {
 		return "", nil

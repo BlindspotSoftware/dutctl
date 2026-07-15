@@ -31,7 +31,7 @@ type IPMI struct {
 	Host     string // Host is the hostname or IP address of the DUT's BMC
 	Port     int    // Port is the port of the IPMI interface on the BMC. Default: 623
 	User     string // User is used for IPMI authentication
-	Password string // Password is used for IPMI authentication. WARNING: Unsavely stored as plaintext
+	Password string // Password is used for IPMI authentication. WARNING: stored unsafely as plaintext.
 	Timeout  string // Timeout is the duration for IPMI commands. Default: 10 seconds
 
 	timeout   time.Duration // timeout is the resolved command timeout; set in Init
@@ -72,6 +72,9 @@ const (
 	status         = "status"
 )
 
+// Init validates and normalizes the configuration, applying the default port and
+// command timeout when unset. It returns an error if Host is empty. The IPMI
+// session is opened lazily on the first command, not here (see connect).
 func (i *IPMI) Init(ctx context.Context) error {
 	l := log.FromContext(ctx)
 
@@ -181,6 +184,9 @@ func (i *IPMI) withSession(ctx context.Context, op func() error) error {
 	return op()
 }
 
+// Deinit closes the IPMI session if one is open, and is a no-op otherwise. The
+// session is opened lazily on the first command, so a module that never ran a
+// command has nothing to close.
 func (i *IPMI) Deinit(ctx context.Context) error {
 	if i.client == nil || !i.connected {
 		return nil
@@ -197,6 +203,10 @@ func (i *IPMI) Deinit(ctx context.Context) error {
 	return err
 }
 
+// Run executes a single IPMI command taken from the first argument: on, off,
+// cycle, reset or status. A missing or unknown command is reported to the
+// session and returns a nil error; a failure talking to the BMC returns an
+// error.
 func (i *IPMI) Run(ctx context.Context, s module.Session, args ...string) error {
 	if len(args) == 0 {
 		s.Println("No command specified. Try 'help' for usage.")

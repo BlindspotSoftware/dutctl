@@ -18,7 +18,7 @@ import (
 )
 
 // NOTE: Tests that unmarshal through the full dutagent config struct
-// (version + devices wrapper) are subject to the dutagend command domain and
+// (version + devices wrapper) are subject to the dutagent command domain and
 // should be covered there.
 
 func loadTestdata(t *testing.T, name string) []byte {

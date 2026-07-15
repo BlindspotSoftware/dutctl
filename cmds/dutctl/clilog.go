@@ -38,7 +38,7 @@ const (
 
 // parseLogMode maps a --log flag value to a logMode. Unknown values are
 // rejected. The message is intentionally bare ("must be ...") because the flag
-// package wraps it as `invalid value %q for flag -log: <msg>`.
+// package wraps it as "invalid value %q for flag -log: <msg>".
 func parseLogMode(s string) (logMode, error) {
 	switch s {
 	case "none":

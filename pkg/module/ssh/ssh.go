@@ -119,6 +119,11 @@ func (s *SSH) Deinit(_ context.Context) error {
 	return nil
 }
 
+// Run executes the single command-string in args on the DUT over a fresh SSH
+// connection and prints the command's combined stdout and stderr to the
+// session. The connection is opened and closed within the call, so Run is
+// non-interactive. Exactly one argument is required; any partial output
+// produced before a command failure is still printed.
 func (s *SSH) Run(ctx context.Context, sesh module.Session, args ...string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("missing command-string")
@@ -145,7 +150,6 @@ func (s *SSH) Run(ctx context.Context, sesh module.Session, args ...string) erro
 
 	l.Info(fmt.Sprintf("executing %q on %s", args[0], s.Host))
 
-	// Execute the command and capture output
 	output, err := session.CombinedOutput(args[0])
 	if err != nil {
 		// Still show any output that might have been generated before the error
@@ -156,7 +160,6 @@ func (s *SSH) Run(ctx context.Context, sesh module.Session, args ...string) erro
 		return fmt.Errorf("failed to execute command: %w", err)
 	}
 
-	// Send the output back to the client
 	sesh.Print(string(output))
 
 	return nil

@@ -30,8 +30,10 @@ func init() {
 
 // File permission constants.
 const (
-	DefaultDirPerm  = 0o755 // Default directory permissions
-	DefaultFilePerm = 0o644 // Default file permissions
+	// DefaultDirPerm is the mode used for parent directories created on upload.
+	DefaultDirPerm = 0o755
+	// DefaultFilePerm is the mode applied to uploaded files when Permission is unset.
+	DefaultFilePerm = 0o644
 )
 
 // op represents the file operation.
@@ -55,11 +57,11 @@ type File struct {
 	Source      string
 	Destination string
 
-	// sourcePath is the final path combined path from config and args
-	// used for the actual internal file transfer operation.
+	// sourcePath is the final source path, combined from config and args,
+	// used for the internal file transfer operation.
 	sourcePath string
-	// destPath is the final path combined path from config and args
-	// used for the actual internal file transfer operation.
+	// destPath is the final destination path, combined from config and args,
+	// used for the internal file transfer operation.
 	destPath string
 }
 
@@ -180,6 +182,8 @@ func (f *File) Deinit(_ context.Context) error {
 	return nil
 }
 
+// Run performs the configured upload or download. args carry the positional
+// path(s) not already fixed by Source/Destination, in SRC[:DEST] form; see Help.
 func (f *File) Run(ctx context.Context, sesh module.Session, args ...string) error {
 	// Parse paths
 	err := f.parsePaths(args)
@@ -239,7 +243,6 @@ func (f *File) uploadFile(ctx context.Context, sesh module.Session) error {
 		}
 	}()
 
-	// File data
 	bytesWritten, copyErr := io.Copy(dstFile, fileReader)
 	if copyErr != nil {
 		return fmt.Errorf("failed to write file data: %w", copyErr)

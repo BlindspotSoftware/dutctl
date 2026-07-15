@@ -144,6 +144,9 @@ func (s *Serial) Help() string {
 	return help.String()
 }
 
+// Init validates the configuration and parses the send delay. It deliberately
+// does not open the serial port, so dutagent can start even when the device is
+// unavailable (e.g. powered off); the port is opened per Run instead.
 func (s *Serial) Init(ctx context.Context) error {
 	if s.Port == "" {
 		return fmt.Errorf("COM port is not set")
@@ -172,6 +175,8 @@ func (s *Serial) Init(ctx context.Context) error {
 	return nil
 }
 
+// Deinit does nothing: the port is opened and closed within each Run, never
+// held on the struct between runs, so there is nothing to release.
 func (s *Serial) Deinit(_ context.Context) error {
 	// Nothing to clean up: the port is opened and closed within each Run
 	// (see Run's defer), never held on the struct between runs.
@@ -197,6 +202,11 @@ func defaultOpenPort(name string, baud int) (port, error) {
 	return serialPort, nil
 }
 
+// Run opens the configured serial port and either streams its output or
+// executes a step sequence. With no steps it runs in monitor mode, streaming
+// until the session is cancelled or -t elapses (both a success). With steps it
+// sends and expects in order, failing on the first expect that times out.
+//
 //nolint:cyclop,funlen // monitor/sequence dispatch with pacing and drain; the branch count is inherent
 func (s *Serial) Run(ctx context.Context, session module.Session, args ...string) error {
 	// The logger carried on ctx is already scoped to this module by the agent
@@ -347,9 +357,6 @@ func stepError(idx int, failedStep step, timeout time.Duration, err error) error
 // go through markerf, which inserts a newline first when the preceding output
 // (e.g. a prompt with no trailing newline) did not end one — so every marker
 // lands on its own line.
-//
-// A future interactive mode would instead use the stdout writer from
-// session.Console().
 type clientWriter struct {
 	session     module.Session
 	atLineStart bool

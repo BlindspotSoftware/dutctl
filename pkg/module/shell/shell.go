@@ -29,7 +29,7 @@ const DefaultShellPath = "/bin/sh"
 // Shell is a module that executes commands on the dutagent. It is non-interactive and does not support stdin.
 // The shell command is executed with the -c flag and the command to execute as an argument.
 type Shell struct {
-	Path  string // Path is th path to the shell executable on the dutagent. If unset, [DefaultShellPath] is used.
+	Path  string // Path is the path to the shell executable on the dutagent. If unset, [DefaultShellPath] is used.
 	Quiet bool   // Quiet suppresses stdout from the shell command, stderr will be forwarded regardless.
 }
 
@@ -63,6 +63,8 @@ func (s *Shell) Help() string {
 	return help.String()
 }
 
+// Init resolves the shell path, defaulting to [DefaultShellPath] when Path is
+// unset, and returns an error if the executable cannot be found on the dutagent.
 func (s *Shell) Init(ctx context.Context) error {
 	if s.Path == "" {
 		s.Path = DefaultShellPath
@@ -81,6 +83,11 @@ func (s *Shell) Deinit(_ context.Context) error {
 	return nil
 }
 
+// Run executes the single command-string argument via the configured shell's
+// -c flag. It forwards the command's combined output to the session, unless the
+// module is in quiet mode, in which case stdout is suppressed and only stderr
+// is forwarded on failure. It returns an error if no command-string is given,
+// if more than one argument is passed, or if the command exits non-zero.
 func (s *Shell) Run(ctx context.Context, sesh module.Session, args ...string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("missing command-string")
