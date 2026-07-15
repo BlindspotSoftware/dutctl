@@ -8,7 +8,7 @@ require (
 	github.com/go-playground/validator/v10 v10.30.3
 	github.com/google/go-cmp v0.7.0
 	github.com/stianeikeland/go-rpio/v4 v4.6.0
-	go.bug.st/serial v1.7.1
+	go.bug.st/serial v1.8.0
 	golang.org/x/crypto v0.54.0
 	golang.org/x/mod v0.38.0
 	google.golang.org/protobuf v1.36.11
