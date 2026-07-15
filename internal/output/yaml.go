@@ -117,7 +117,7 @@ func output(outputs []YAMLOutput, writer io.Writer) {
 	}
 }
 
-// groupOutputsByStream separates outputs into stdout and stderr groups based on Error field.
+// groupByStream separates outputs into stdout and stderr groups based on the Error field.
 func groupByStream(bufferList []YAMLOutput) ([]YAMLOutput, []YAMLOutput) {
 	var stdoutOutputs, stderrOutputs []YAMLOutput
 
@@ -132,10 +132,11 @@ func groupByStream(bufferList []YAMLOutput) ([]YAMLOutput, []YAMLOutput) {
 	return stdoutOutputs, stderrOutputs
 }
 
-// Flush ensures all output is written.
-func (f *YAMLFormatter) Flush() error {
+// Flush ensures all output is written. Per-item marshal failures are logged and
+// dropped (see output); there is no error to act on.
+func (f *YAMLFormatter) Flush() {
 	if !f.buffering || len(f.bufferList) == 0 {
-		return nil
+		return
 	}
 
 	stdoutOutputs, stderrOutputs := groupByStream(f.bufferList)
@@ -154,6 +155,4 @@ func (f *YAMLFormatter) Flush() error {
 	f.bufferList = f.bufferList[:0]
 	// Reset buffering flag
 	f.buffering = false
-
-	return nil
 }

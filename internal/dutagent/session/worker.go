@@ -16,8 +16,14 @@ import (
 	pb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1"
 )
 
+// ErrBadFileTransfer marks a malformed file transfer from the client (a protocol
+// violation) so the RPC layer can map it to CodeInvalidArgument rather than
+// treating it as an internal fault.
+var ErrBadFileTransfer = errors.New("bad file transfer")
+
 // toClientWorker sends messages from the module session to the client.
-// This function is an infinite loop. It terminates when the session's done channel is closed.
+// It loops until ctx is cancelled (returning nil) or a stream send fails
+// (returning that error).
 //
 //nolint:cyclop, funlen
 func toClientWorker(ctx context.Context, stream Stream, s *backend) error {
@@ -98,7 +104,8 @@ func toClientWorker(ctx context.Context, stream Stream, s *backend) error {
 }
 
 // fromClientWorker reads messages from the client and passes them to the module session.
-// This function is an infinite loop. It terminates when the session's done channel is closed.
+// It loops until ctx is cancelled or the client closes the stream with io.EOF (both
+// returning nil), or a stream/protocol error occurs (returning that error).
 //
 //nolint:cyclop,funlen,gocognit
 func fromClientWorker(ctx context.Context, stream Stream, s *backend) error {
@@ -189,30 +196,22 @@ func fromClientWorker(ctx context.Context, stream Stream, s *backend) error {
 			case *pb.RunRequest_File:
 				fileMsg := msg.File
 				if fileMsg == nil {
-					l.Warn("bad file transfer: empty file message")
-
-					return fmt.Errorf("bad file transfer: received empty file-message")
+					return fmt.Errorf("%w: received empty file-message", ErrBadFileTransfer)
 				}
 
 				if s.currentFile == "" {
-					l.Warn("bad file transfer: file without a request")
-
-					return fmt.Errorf("bad file transfer: received file-message without a former request")
+					return fmt.Errorf("%w: received file-message without a former request", ErrBadFileTransfer)
 				}
 
 				path := fileMsg.GetPath()
 				content := fileMsg.GetContent()
 
 				if content == nil {
-					l.Warn("bad file transfer: file message with empty content")
-
-					return fmt.Errorf("bad file transfer: received file-message without content")
+					return fmt.Errorf("%w: received file-message without content", ErrBadFileTransfer)
 				}
 
 				if path != s.currentFile {
-					l.Warn("bad file transfer: unexpected file", "received", path, "requested", s.currentFile)
-
-					return fmt.Errorf("bad file transfer: received file-message %q but requested %q", path, s.currentFile)
+					return fmt.Errorf("%w: received file-message %q but requested %q", ErrBadFileTransfer, path, s.currentFile)
 				}
 
 				l.Debug("received file from client", "name", path, "bytes", len(content))

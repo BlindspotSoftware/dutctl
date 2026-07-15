@@ -26,9 +26,12 @@ var (
 	ErrInvalidDuration = errors.New("lock duration must be positive")
 )
 
-// Slot identifies which of a device's two lock slots a Info refers to.
+// Slot identifies which of a device's two lock slots an Info refers to.
 type Slot string
 
+// ExplicitSlot and AutoSlot are the two independent lock slots a device can
+// hold. An explicit lock is user-requested and time-bounded; an auto lock is
+// taken automatically to guard a running command and never expires by time.
 const (
 	ExplicitSlot Slot = "explicit"
 	AutoSlot     Slot = "auto"
@@ -65,6 +68,10 @@ type DeviceState struct {
 // it lives in via Holder.Slot). Error unwraps to ErrWrongOwner so
 // callers can match the "different owner" case across acquire (Lock/AutoLock)
 // and release (ClearLock/ClearAutoLock) APIs with a single errors.Is check.
+//
+// It is always returned as a pointer (*Error) and uses a pointer receiver:
+// match the category with errors.Is(err, ErrWrongOwner) and reach the Holder
+// metadata with errors.As into a *Error.
 type Error struct {
 	Device string
 	Holder Info
@@ -201,8 +208,9 @@ func (l *Locker) Lock(device, owner string, dur time.Duration) (Info, error) {
 }
 
 // ClearLock releases the explicit-slot lock on device. Only the owner may
-// release it. ErrNotLocked / *Error as appropriate. The auto slot is
-// not touched.
+// release it: it returns ErrNotLocked when no explicit lock is held, or a
+// *Error (unwrapping to ErrWrongOwner) when a different owner holds the slot.
+// The auto slot is not touched.
 func (l *Locker) ClearLock(device, owner string) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -272,8 +280,9 @@ func (l *Locker) AutoLock(device, owner string) (Info, error) {
 }
 
 // ClearAutoLock releases the auto-slot lock on device. Only the owner may
-// release it. ErrNotLocked / *Error as appropriate. The explicit slot
-// is not touched.
+// release it: it returns ErrNotLocked when no auto lock is held, or a *Error
+// (unwrapping to ErrWrongOwner) when a different owner holds the slot. The
+// explicit slot is not touched.
 func (l *Locker) ClearAutoLock(device, owner string) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()

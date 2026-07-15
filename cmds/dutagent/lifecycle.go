@@ -21,7 +21,7 @@ func catchPanic(fn func() error) error {
 	func() {
 		defer func() {
 			if r := recover(); r != nil {
-				err = fmt.Errorf("panic: %v", r)
+				err = fmt.Errorf("module panicked: %v", r)
 			}
 		}()
 
@@ -31,8 +31,12 @@ func catchPanic(fn func() error) error {
 	return err
 }
 
-// moduleInitError is a container for errors that occur during module
-// initialization or de-initialization.
+// moduleInitError aggregates the errors that occur while initializing or
+// de-initializing modules: every module is still processed, and the ones that
+// failed are collected here. It is returned as a *moduleInitError and consumed
+// with errors.As; it has no Unwrap, since there is no single underlying cause to
+// match. msg names the phase ("module initialization failed" / "module
+// deinitialization failed") and Error renders it with the problem count.
 type moduleInitError struct {
 	Errs []moduleInitErrorDetails
 	msg  string
@@ -58,8 +62,7 @@ type moduleInitErrorDetails struct {
 // *moduleInitError aggregating every reported error is returned.
 //
 // ctx is the agent-lifetime context for startup; each module's Init receives a
-// child of it carrying the module-scoped logger. It is a plain background
-// context today — see the caller for where a startup deadline would attach.
+// child of it carrying the module-scoped logger.
 func initModules(ctx context.Context, devices dut.Devlist) error {
 	var ierr = &moduleInitError{
 		Errs: make([]moduleInitErrorDetails, 0),
@@ -98,12 +101,11 @@ func initModules(ctx context.Context, devices dut.Devlist) error {
 // *moduleInitError aggregating every reported error is returned.
 //
 // ctx is the shutdown context; each module's Deinit receives a child of it
-// carrying the module-scoped logger. It is a plain background context today —
-// see the caller for where a shutdown deadline would attach.
+// carrying the module-scoped logger.
 func deinitModules(ctx context.Context, devices dut.Devlist) error {
 	var derr = &moduleInitError{
 		Errs: make([]moduleInitErrorDetails, 0),
-		msg:  "bad clean-up",
+		msg:  "module deinitialization failed",
 	}
 
 	log.FromContext(ctx).Info("graceful shutdown: deinitializing modules")

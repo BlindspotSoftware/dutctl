@@ -3,7 +3,7 @@
 // license that can be found in the LICENSE file.
 
 // dutctl is the client application of the DUT Control system.
-// It provides a command line interface to issue task on remote devices (DUTs).
+// It provides a command line interface to issue tasks on remote devices (DUTs).
 package main
 
 import (
@@ -54,7 +54,7 @@ option to release a lock held by another user.
 When dutctl is run without any positional arguments, it defaults to the list command.
 `
 
-// Usage strings for the command-line flags, shown in the OPTIONS section of `dutctl -h`.
+// Usage strings for the command-line flags, shown in the OPTIONS section of dutctl -h.
 const (
 	serverAddrUsage   = `Address and port of the dutagent to connect to in the format: address:port`
 	outputFormatUsage = `Output format, text|json|yaml|oneline, default is text`
@@ -154,6 +154,9 @@ func (app *application) setupRPCClient() {
 	)
 }
 
+// errInvalidCmdline is returned by dispatch for a malformed command line.
+// exit() matches it with errors.Is and renders the usage synopsis alongside
+// the error message.
 var errInvalidCmdline = fmt.Errorf("invalid command line")
 
 // exitInterrupted is the conventional exit code for termination by a signal
@@ -173,6 +176,9 @@ func (app *application) start() {
 
 // dispatch decides which RPC to call based on app.args.
 // It is split out from start so it can be unit tested without os.Exit.
+//
+// It returns errInvalidCmdline for a malformed command line (exit() renders it
+// with the usage synopsis), or the error returned by the dispatched RPC.
 func (app *application) dispatch() error {
 	if len(app.args) == 0 {
 		return app.listRPC()
@@ -196,9 +202,9 @@ func (app *application) dispatch() error {
 
 	switch command {
 	case "lock":
-		app.exit(app.lockRPC(device, cmdArgs))
+		return app.lockRPC(device, cmdArgs)
 	case "unlock":
-		app.exit(app.unlockRPC(device))
+		return app.unlockRPC(device)
 	}
 
 	if len(cmdArgs) > 0 && cmdArgs[0] == "help" {
@@ -219,7 +225,7 @@ func (app *application) exit(err error) {
 
 	if err == nil {
 		if app.formatter != nil {
-			_ = app.formatter.Flush()
+			app.formatter.Flush()
 		}
 
 		app.exitFunc(0)
@@ -234,7 +240,7 @@ func (app *application) exit(err error) {
 			IsError: true,
 		})
 
-		_ = app.formatter.Flush()
+		app.formatter.Flush()
 		app.exitFunc(exitInterrupted)
 
 		return
@@ -243,7 +249,7 @@ func (app *application) exit(err error) {
 	// Render the terminating error through the formatter (stderr, format-aware).
 	app.formatter.WriteContent(output.Content{
 		Type:    output.TypeGeneral,
-		Data:    err.Error(),
+		Data:    userFacingError(err, app.serverAddr),
 		IsError: true,
 	})
 
@@ -252,8 +258,26 @@ func (app *application) exit(err error) {
 		app.printFlagDefaults()
 	}
 
-	_ = app.formatter.Flush()
+	app.formatter.Flush()
 	app.exitFunc(1)
+}
+
+// userFacingError renders err for display. For a connect RPC error it drops the
+// gRPC status-code prefix that err.Error() carries (e.g. "unavailable: ...") and
+// gives the common "agent unreachable" case a friendlier line; other errors —
+// including client-side ones like a bad command line or a missing local file —
+// render unchanged.
+func userFacingError(err error, serverAddr string) string {
+	var connErr *connect.Error
+	if !errors.As(err, &connErr) {
+		return err.Error()
+	}
+
+	if connErr.Code() == connect.CodeUnavailable {
+		return fmt.Sprintf("cannot reach dutagent at %s (%s)", serverAddr, connErr.Message())
+	}
+
+	return connErr.Message()
 }
 
 func (app *application) printVersion() {

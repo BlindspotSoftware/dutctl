@@ -5,8 +5,8 @@
 package dut
 
 import (
+	"errors"
 	"reflect"
-	"strings"
 	"testing"
 )
 
@@ -15,7 +15,7 @@ func TestTemplateValidation(t *testing.T) {
 		name      string
 		cmd       Command
 		expectErr bool
-		errMsg    string
+		wantErr   error
 	}{
 		{
 			name: "valid templates",
@@ -36,7 +36,7 @@ func TestTemplateValidation(t *testing.T) {
 				},
 			},
 			expectErr: true,
-			errMsg:    "references undefined argument",
+			wantErr:   ErrUndefinedArgReference,
 		},
 		{
 			name: "no args declared but templates used",
@@ -47,7 +47,7 @@ func TestTemplateValidation(t *testing.T) {
 				},
 			},
 			expectErr: true,
-			errMsg:    "references undefined argument",
+			wantErr:   ErrUndefinedArgReference,
 		},
 		{
 			name: "passthrough module with templates skipped",
@@ -106,8 +106,8 @@ func TestTemplateValidation(t *testing.T) {
 			if !tt.expectErr && err != nil {
 				t.Errorf("Unexpected error: %v", err)
 			}
-			if tt.expectErr && err != nil && !strings.Contains(err.Error(), tt.errMsg) {
-				t.Errorf("Error %q doesn't contain %q", err.Error(), tt.errMsg)
+			if tt.expectErr && err != nil && !errors.Is(err, tt.wantErr) {
+				t.Errorf("error %v is not %v", err, tt.wantErr)
 			}
 		})
 	}

@@ -52,8 +52,9 @@ func (a *agent) conn(ctx context.Context) dutctlv1connect.DeviceServiceClient {
 }
 
 // rpcService is the service implementation for the RPCs provided by dutserver.
-// It implements both, the DeviceService used by clients as they would use with dutagents
-// and the RelayService used by agents to register with the server.
+// It implements both the DeviceService that clients would otherwise call on a
+// dutagent directly and the RelayService that agents use to register with the
+// server.
 type rpcService struct {
 	// UnimplementedDeviceServiceHandler provides default CodeUnimplemented
 	// responses for DeviceService RPCs that dutserver does not forward,
@@ -75,7 +76,7 @@ func (s *rpcService) findAgent(device string) (*agent, error) {
 		return agent, nil
 	}
 
-	return nil, errors.New("device not found: " + device)
+	return nil, fmt.Errorf("device %q not found", device)
 }
 
 // addAgent tries to register devices handled by an agent with address.
@@ -103,7 +104,9 @@ func (s *rpcService) addAgent(ctx context.Context, address string, devices []str
 	return nil
 }
 
-// List is the handler for the List RPC.
+// List returns the names of all devices registered with dutserver. Unlike the
+// other handlers it aggregates the local registry rather than forwarding to an
+// agent, and reports no lock state because dutserver does not track locks.
 func (s *rpcService) List(
 	ctx context.Context,
 	_ *connect.Request[pb.ListRequest],
@@ -128,7 +131,8 @@ func (s *rpcService) List(
 	return res, nil
 }
 
-// Commands is the handler for the Commands RPC.
+// Commands forwards a Commands request to the agent that controls the requested
+// device and returns the agent's response.
 //
 //nolint:dupl // Commands and Details are parallel unary forwarders; dedup is tracked by the generic-forwarder TODO.
 func (s *rpcService) Commands(
@@ -142,12 +146,19 @@ func (s *rpcService) Commands(
 
 	agent, err := s.findAgent(device)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+		return nil, connect.NewError(connect.CodeNotFound, err)
 	}
 
 	res, err := forwardCommandsReq(log.WithScope(ctx, "relay"), agent.address, req)
 	if err != nil {
 		l.Error("forwarding to agent failed", "agent", agent.address, "err", err)
+
+		// Preserve the downstream agent's status code when the failure is already a
+		// connect error, instead of flattening every failure to CodeInternal.
+		var connectErr *connect.Error
+		if errors.As(err, &connectErr) {
+			return nil, err
+		}
 
 		return nil, connect.NewError(
 			connect.CodeInternal,
@@ -160,6 +171,9 @@ func (s *rpcService) Commands(
 	return res, nil
 }
 
+// Details forwards a Details request to the agent that controls the requested
+// device and returns the agent's response.
+//
 //nolint:dupl // Commands and Details are parallel unary forwarders; dedup is tracked by the generic-forwarder TODO.
 func (s *rpcService) Details(
 	ctx context.Context,
@@ -172,12 +186,19 @@ func (s *rpcService) Details(
 
 	agent, err := s.findAgent(device)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+		return nil, connect.NewError(connect.CodeNotFound, err)
 	}
 
 	res, err := forwardDetailsReq(log.WithScope(ctx, "relay"), agent.address, req)
 	if err != nil {
 		l.Error("forwarding to agent failed", "agent", agent.address, "err", err)
+
+		// Preserve the downstream agent's status code when the failure is already a
+		// connect error, instead of flattening every failure to CodeInternal.
+		var connectErr *connect.Error
+		if errors.As(err, &connectErr) {
+			return nil, err
+		}
 
 		return nil, connect.NewError(
 			connect.CodeInternal,
@@ -190,7 +211,9 @@ func (s *rpcService) Details(
 	return res, nil
 }
 
-// Run is the handler for the Run RPC.
+// Run relays a client's bidirectional Run stream to the agent that controls the
+// requested device, forwarding messages in both directions and bridging the
+// client and agent version headers.
 //
 //nolint:cyclop,gocognit,funlen
 func (s *rpcService) Run(
@@ -231,7 +254,7 @@ func (s *rpcService) Run(
 
 	agent, err := s.findAgent(device)
 	if err != nil {
-		return connect.NewError(connect.CodeInvalidArgument, err)
+		return connect.NewError(connect.CodeNotFound, err)
 	}
 
 	l.Info("routing to agent", "agent", agent.address)
@@ -247,13 +270,27 @@ func (s *rpcService) Run(
 
 	// Relay the client's version to the agent (which enforces it); add none of our own.
 	clientVersion := downstream.RequestHeader().Get(rpc.VersionHeader)
-	guardMajorMismatch(clientVersion)
+
+	mismatch := checkMajorMismatch(clientVersion)
+	if mismatch != nil {
+		l.Warn("rejecting client: incompatible version", "client", clientVersion)
+
+		return mismatch
+	}
+
 	upstream.RequestHeader().Set(rpc.VersionHeader, clientVersion)
 
 	// Forward the initial request to the DUT agent.
 	err = upstream.Send(downStreamRequest)
 	if err != nil {
 		l.Error("forwarding to agent failed", "agent", agent.address, "err", err)
+
+		// Preserve the downstream agent's status code when the failure is already a
+		// connect error, instead of flattening every failure to CodeInternal.
+		var connectErr *connect.Error
+		if errors.As(err, &connectErr) {
+			return err
+		}
 
 		return connect.NewError(
 			connect.CodeInternal,
@@ -301,11 +338,24 @@ func (s *rpcService) Run(
 				return
 			}
 
+			var versionErr error
+
 			relayAgentVersion.Do(func() {
 				agentVersion := upstream.ResponseHeader().Get(rpc.VersionHeader)
-				guardMajorMismatch(agentVersion)
+
+				versionErr = checkMajorMismatch(agentVersion)
+				if versionErr != nil {
+					return
+				}
+
 				downstream.ResponseHeader().Set(rpc.VersionHeader, agentVersion)
 			})
+
+			if versionErr != nil {
+				errChan <- versionErr
+
+				return
+			}
 
 			l.Debug("forwarding message to client", "kind", responseKind(res))
 
@@ -452,20 +502,26 @@ func forwardDetailsReq(
 	return client.Details(ctx, req)
 }
 
-// guardMajorMismatch panics on a major dutctl version gap between dutserver and a
-// peer: dutserver relays raw protobuf of its own schema and cannot bridge one.
-//
-// TODO: handle this properly (reject or translate) instead of panicking, once
-// dutserver is more than experimental.
-func guardMajorMismatch(peer string) {
+// checkMajorMismatch returns a CodeFailedPrecondition error when dutserver and a
+// peer differ in major dutctl version, and nil otherwise. dutserver relays raw
+// protobuf of its own schema and cannot bridge a major-version gap, so such a
+// pairing is rejected rather than forwarded (mirroring the agent-side enforcer in
+// internal/rpc).
+func checkMajorMismatch(peer string) error {
 	// Check the structural fact directly: dutserver can only bridge peers that
 	// share its major schema version.
-	if compat.Compare(buildinfo.Version, peer).Field == compat.Major {
-		panic(fmt.Sprintf("dutserver: unhandled major dutctl version mismatch (dutserver %s, peer %q)",
-			buildinfo.Version, peer))
+	if compat.Compare(buildinfo.Version, peer).Field != compat.Major {
+		return nil
 	}
+
+	return connect.NewError(connect.CodeFailedPrecondition,
+		fmt.Errorf("incompatible dutctl versions: dutserver %s, peer %q (major version mismatch)",
+			buildinfo.Version, peer))
 }
 
+// Register records the devices served by a registering agent. If any device
+// name is already registered the whole registration is rejected, so a partially
+// applied registration is never left behind.
 func (s *rpcService) Register(
 	ctx context.Context,
 	req *connect.Request[pb.RegisterRequest],

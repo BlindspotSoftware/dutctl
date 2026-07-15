@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"slices"
 	"strings"
@@ -17,11 +18,9 @@ import (
 )
 
 // TextFormatter implements Formatter with plain text formatting capabilities.
-// It supports:
-// - Separate stdout and stderr streams.
-// - Buffering mode for deferred output.
-// - Metadata handling with intelligent caching to avoid repetitive headers.
-// - Verbose mode to control metadata visibility.
+// It supports separate stdout and stderr streams, a buffering mode for
+// deferred output, metadata caching to avoid repeating unchanged headers, and
+// a verbose mode that controls metadata visibility.
 type TextFormatter struct {
 	stdout              io.Writer
 	stderr              io.Writer
@@ -132,32 +131,31 @@ func (f *TextFormatter) IsBuffering() bool {
 	return f.buffering
 }
 
-// Flush ensures all buffered output is written.
-func (f *TextFormatter) Flush() error {
+// Flush ensures all buffered output is written. A write failure is logged and the
+// affected buffer dropped; there is no error to act on.
+func (f *TextFormatter) Flush() {
 	if !f.buffering {
-		return nil
+		return
 	}
 
 	// Write all buffered content to the appropriate streams
 	if f.stdBuffer.Len() > 0 {
 		_, err := f.stdBuffer.WriteTo(f.stdout)
 		if err != nil {
-			return fmt.Errorf("error writing stdout buffer: %v", err)
+			slog.Warn("failed to write buffered output", "stream", "stdout", "err", err)
 		}
 	}
 
 	if f.errBuffer.Len() > 0 {
 		_, err := f.errBuffer.WriteTo(f.stderr)
 		if err != nil {
-			return fmt.Errorf("error writing stderr buffer: %v", err)
+			slog.Warn("failed to write buffered output", "stream", "stderr", "err", err)
 		}
 	}
 
 	// Reset buffering state and clear metadata cache
 	f.buffering = false
 	f.clearMetadataCache()
-
-	return nil
 }
 
 // Helper methods for different content types
@@ -515,5 +513,3 @@ func hasMetadataValueChanged(f *TextFormatter, metadata map[string]string) bool 
 	// No changes detected - don't print metadata again
 	return false
 }
-
-// Skip the separate metadataValuesChanged function to simplify the implementation

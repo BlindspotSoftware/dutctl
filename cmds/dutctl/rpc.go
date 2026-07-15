@@ -32,9 +32,9 @@ var errInterrupted = errors.New("interrupted")
 
 func (app *application) listRPC() error {
 	// TODO(ctx): unary RPCs run on a bare background context — no signal
-	// cancellation and no deadline. A later change should share an app-level
-	// context (see runRPC's signal.NotifyContext) and add a timeout. Applies to
-	// every unary RPC in this file (List/Lock/Unlock/Commands/Details).
+	// cancellation and no deadline. Share an app-level context (see runRPC's
+	// signal.NotifyContext) and add a timeout. Applies to every unary RPC in this
+	// file (List/Lock/Unlock/Commands/Details).
 	ctx := context.Background()
 	req := connect.NewRequest(&pb.ListRequest{})
 
@@ -74,7 +74,8 @@ const defaultLockDuration = 30 * time.Minute
 
 // parseLockDuration resolves the lock duration from the lock command's
 // arguments. An empty argument list yields defaultLockDuration. The duration
-// must be positive.
+// must be positive. On failure it returns an error whose message is user-facing
+// display text (an invalid or non-positive duration), not a sentinel to match.
 func parseLockDuration(cmdArgs []string) (time.Duration, error) {
 	if len(cmdArgs) == 0 || cmdArgs[0] == "" {
 		return defaultLockDuration, nil
@@ -199,6 +200,12 @@ func (app *application) detailsRPC(device, command, keyword string) error {
 	return nil
 }
 
+// runRPC executes command on device, streaming module output and forwarding
+// stdin and file transfers until the run ends. It returns nil on normal
+// completion, errInterrupted when a signal (Ctrl-C) ended the run, or a wrapped
+// error from a worker goroutine (stream send/receive or file I/O). A connect
+// status from the agent surfaces through the returned error; exit() renders it.
+//
 //nolint:funlen,cyclop,gocognit,maintidx // coordinates two streaming worker goroutines; inherently branchy
 func (app *application) runRPC(device, command string, cmdArgs []string) error {
 	const numWorkers = 2 // The send and receive worker goroutines

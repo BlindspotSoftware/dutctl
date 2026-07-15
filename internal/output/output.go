@@ -66,12 +66,13 @@ type Content struct {
 	IsError bool
 
 	// Metadata contains additional contextual information about the content.
-	// Common keys include:
-	// - "server": Address of the dutagent server
-	// - "msg": message or description of remote procedure call
-	// - "device": Target device identifier
-	// - "command": Command being executed
-	// - "args": Command arguments
+	// Common keys are:
+	//
+	//	server  - address of the dutagent server
+	//	msg     - message or description of the remote procedure call
+	//	device  - target device identifier
+	//	command - command being executed
+	//	args    - command arguments
 	Metadata map[string]string
 }
 
@@ -92,8 +93,10 @@ type Formatter interface {
 	// IsBuffering returns whether the formatter is currently in buffering mode.
 	IsBuffering() bool
 
-	// Flush writes all buffered content and returns to immediate mode.
-	Flush() error
+	// Flush writes all buffered content and returns to immediate mode. A write or
+	// marshal failure is logged as a client diagnostic and the affected content is
+	// dropped; there is no error for the caller to act on.
+	Flush()
 }
 
 // Config contains the configuration options for output formatters.

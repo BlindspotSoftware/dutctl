@@ -40,14 +40,16 @@ type runCmdArgs struct {
 // receiveCommandRPC is the first state of the Run RPC.
 //
 // It receives a message from the client. As the client could potentially send
-// messages of various types, it filters for a command message and returns a error
-// otherwise.
+// messages of various types, it filters for a command message and returns an
+// error otherwise.
+//
+// Errors: for a failed receive, a context cancellation maps to
+// CodeCanceled/CodeDeadlineExceeded (via cancelCode) and anything else is
+// CodeAborted; CodeInvalidArgument if the first message is not a command.
 func receiveCommandRPC(_ context.Context, args runCmdArgs) (runCmdArgs, fsm.State[runCmdArgs], error) {
 	req, err := args.stream.Receive()
 	if err != nil {
-		e := connect.NewError(connect.CodeAborted, err)
-
-		return args, nil, e
+		return args, nil, receiveError(err)
 	}
 
 	cmdMsg := req.GetCommand()
@@ -64,10 +66,14 @@ func receiveCommandRPC(_ context.Context, args runCmdArgs) (runCmdArgs, fsm.Stat
 
 // findDUTCmd is a state of the Run RPC.
 //
-// It finds the device under test (DUT) based on the device name in the command message.
-// and the command to run based on the command name in the command message.
-// If the device is not found, or the command is not available at the respective device,
-// it returns an error.
+// It finds the device under test (DUT) by the device name in the command
+// message and the command to run by the command name. If the device is not
+// found, or the command is not available at the respective device, it returns
+// an error.
+//
+// Errors: CodeNotFound for an unknown device or command
+// (dut.ErrDeviceNotFound / dut.ErrCommandNotFound); CodeInternal otherwise (the
+// defensive ErrNoModules / ErrMultiplePassthroughModules, unreachable after config load).
 func findDUTCmd(_ context.Context, args runCmdArgs) (runCmdArgs, fsm.State[runCmdArgs], error) {
 	wantDev := args.cmdMsg.GetDevice()
 	wantCmd := args.cmdMsg.GetCommand()
@@ -76,7 +82,7 @@ func findDUTCmd(_ context.Context, args runCmdArgs) (runCmdArgs, fsm.State[runCm
 	if err != nil {
 		var code connect.Code
 		if errors.Is(err, dut.ErrDeviceNotFound) || errors.Is(err, dut.ErrCommandNotFound) {
-			code = connect.CodeInvalidArgument
+			code = connect.CodeNotFound
 		} else {
 			code = connect.CodeInternal
 		}
@@ -100,6 +106,9 @@ func findDUTCmd(_ context.Context, args runCmdArgs) (runCmdArgs, fsm.State[runCm
 // It rejects the run if the device is held by a different owner in either
 // the explicit or auto lock slot. Otherwise the FSM proceeds to acquire the
 // command-scoped auto-lock.
+//
+// Errors: CodeFailedPrecondition when another owner holds the device
+// (locker.ErrWrongOwner); CodeInternal otherwise.
 func checkDeviceAccess(_ context.Context, args runCmdArgs) (runCmdArgs, fsm.State[runCmdArgs], error) {
 	err := args.locker.CheckAccess(args.cmdMsg.GetDevice(), args.user)
 	if err != nil {
@@ -118,6 +127,9 @@ func checkDeviceAccess(_ context.Context, args runCmdArgs) (runCmdArgs, fsm.Stat
 // It acquires the command-scoped auto-lock for the device. AutoLock is
 // idempotent for the same owner, so this is safe even if the same owner
 // already holds an auto-lock from a previous race-lost step.
+//
+// Errors: CodeFailedPrecondition when another owner holds the device
+// (locker.ErrWrongOwner); CodeInternal otherwise.
 func acquireAutoLock(_ context.Context, args runCmdArgs) (runCmdArgs, fsm.State[runCmdArgs], error) {
 	_, err := args.locker.AutoLock(args.cmdMsg.GetDevice(), args.user)
 	if err != nil {
@@ -161,10 +173,12 @@ func runModule(ctx context.Context, mod dut.Module, s module.Session, args ...st
 
 // executeModules is a state of the Run RPC.
 //
-// It starts the execution the current command's modules. The execution is done
-// in a separate goroutine, this state will not wait for the execution to finish.
-// Further, worker goroutines will be started to serve the module-to-client communication
-// during the module execution.
+// It starts the current command's modules in a separate goroutine and does not
+// wait for them to finish. It also starts worker goroutines that serve the
+// module-to-client communication during module execution.
+//
+// Errors: CodeInvalidArgument if the command's arguments cannot be resolved
+// (see Command.ModuleArgs). Module and broker failures surface later, in waitModules.
 func executeModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State[runCmdArgs], error) {
 	// Module execution is the agent's core orchestration: scope it "agent" and
 	// tag the device and command, which then descend to every record on this path.
@@ -220,6 +234,11 @@ func executeModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State
 			if err != nil {
 				args.moduleErrCh <- err
 
+				// Deliberate detail+summary logging (not log-and-return spam): this
+				// agent-scope line records which module failed (name/index/total) —
+				// metadata lost once waitModules flattens the error with %v and Run
+				// logs the rpc-scope summary. The error is still returned via
+				// moduleErrCh, not swallowed.
 				mlog.Error("module failed", "err", err)
 				modCtxCancel()
 
@@ -237,12 +256,19 @@ func executeModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State
 
 // waitModules is a state of the Run RPC.
 //
-// It waits for both module execution and broker workers to complete.
-// Both channels use the error-only pattern:
-// - Success: Channel closes without sending anything
-// - Failure: Sends error, then closes
-// If multiple events (errors, closures, context cancellation) happen simultaneously,
-// any of them may be processed first - this is acceptable.
+// It waits for both module execution and broker workers to complete. Both
+// channels use the error-only pattern:
+//
+//	Success: the channel closes without sending anything.
+//	Failure: the channel sends an error, then closes.
+//
+// If multiple events (errors, closures, context cancellation) happen
+// simultaneously, any of them may be processed first - this is acceptable.
+//
+// Errors: CodeCanceled/CodeDeadlineExceeded on context cancellation (via
+// cancelCode); CodeAborted on a module failure; and for a broker error,
+// CodeInvalidArgument for a client protocol violation (session.ErrBadFileTransfer),
+// an already-typed connect code preserved, else CodeInternal (via brokerError).
 func waitModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State[runCmdArgs], error) {
 	brokerDone := false
 	moduleDone := false
@@ -250,7 +276,7 @@ func waitModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State[ru
 	for !brokerDone || !moduleDone {
 		select {
 		case <-ctx.Done():
-			e := connect.NewError(connect.CodeAborted, fmt.Errorf("module execution aborted: %v", ctx.Err()))
+			e := connect.NewError(cancelCode(ctx.Err()), fmt.Errorf("module execution aborted: %v", ctx.Err()))
 
 			return args, nil, e
 
@@ -259,10 +285,8 @@ func waitModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State[ru
 				// Broker channel closed = success
 				brokerDone = true
 			} else {
-				// Broker only sends errors (never nil)
-				e := connect.NewError(connect.CodeInternal, fmt.Errorf("broker error: %v", brokerErr))
-
-				return args, nil, e
+				// Broker only sends errors (never nil).
+				return args, nil, brokerError(brokerErr)
 			}
 
 		case moduleErr, ok := <-args.moduleErrCh:
@@ -270,13 +294,67 @@ func waitModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State[ru
 				// Module channel closed = success
 				moduleDone = true
 			} else {
-				// Module only sends errors (never nil)
-				e := connect.NewError(connect.CodeAborted, fmt.Errorf("module failed: %v", moduleErr))
-
-				return args, nil, e
+				// Module only sends errors (never nil).
+				return args, nil, moduleError(moduleErr)
 			}
 		}
 	}
 
 	return args, releaseAutoLock, nil
+}
+
+// cancelCode maps a context cancellation error to its connect status code,
+// defaulting to CodeCanceled. It is used at every site that converts a cancelled
+// Run to a wire status, so cancellation maps to a single code across the RPC.
+func cancelCode(err error) connect.Code {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return connect.CodeDeadlineExceeded
+	}
+
+	return connect.CodeCanceled
+}
+
+// receiveError classifies an error from the initial stream Receive: a context
+// cancellation maps via cancelCode, an already cancellation-coded connect error
+// keeps its code, and anything else is CodeAborted (the run was aborted before it
+// began).
+func receiveError(err error) error {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return connect.NewError(cancelCode(err), err)
+	}
+
+	if code := connect.CodeOf(err); code == connect.CodeCanceled || code == connect.CodeDeadlineExceeded {
+		return err
+	}
+
+	return connect.NewError(connect.CodeAborted, err)
+}
+
+// moduleError maps a terminal module error to the connect error that fails the
+// Run: a context cancellation (e.g. a module that honors ctx and returns
+// ctx.Err()) maps via cancelCode, keeping cancellation single-valued across the
+// RPC; anything else is CodeAborted.
+func moduleError(err error) error {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return connect.NewError(cancelCode(err), err)
+	}
+
+	return connect.NewError(connect.CodeAborted, fmt.Errorf("module failed: %v", err))
+}
+
+// brokerError maps a terminal broker error to the connect error that fails the
+// Run: a client protocol violation (session.ErrBadFileTransfer) is
+// CodeInvalidArgument, an already-typed connect error (e.g. CodeCanceled on
+// client disconnect) keeps its code, and anything else is an internal fault.
+func brokerError(err error) error {
+	var connectErr *connect.Error
+
+	switch {
+	case errors.Is(err, session.ErrBadFileTransfer):
+		return connect.NewError(connect.CodeInvalidArgument, err)
+	case errors.As(err, &connectErr):
+		return err
+	default:
+		return connect.NewError(connect.CodeInternal, err)
+	}
 }

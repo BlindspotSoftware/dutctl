@@ -45,7 +45,7 @@ func rpcLogger(ctx context.Context, method string) *slog.Logger {
 	return log.Scope(log.FromContext(ctx), "rpc").With("rpc", method)
 }
 
-// List is the handler for the List RPC.
+// List is the handler for the List RPC. It never returns an error.
 func (a *rpcService) List(
 	ctx context.Context,
 	_ *connect.Request[pb.ListRequest],
@@ -82,6 +82,9 @@ func (a *rpcService) List(
 }
 
 // Commands is the handler for the Commands RPC.
+//
+// Errors: CodeNotFound for an unknown device (dut.ErrDeviceNotFound);
+// CodeInternal otherwise.
 func (a *rpcService) Commands(
 	ctx context.Context,
 	req *connect.Request[pb.CommandsRequest],
@@ -95,7 +98,7 @@ func (a *rpcService) Commands(
 	if err != nil {
 		var code connect.Code
 		if errors.Is(err, dut.ErrDeviceNotFound) {
-			code = connect.CodeInvalidArgument
+			code = connect.CodeNotFound
 		} else {
 			code = connect.CodeInternal
 		}
@@ -118,6 +121,10 @@ func (a *rpcService) Commands(
 }
 
 // Details is the handler for the Details RPC.
+//
+// Errors: CodeInvalidArgument for an unknown keyword; CodeNotFound for an unknown
+// device or command (dut.ErrDeviceNotFound / dut.ErrCommandNotFound); CodeInternal
+// otherwise.
 func (a *rpcService) Details(
 	ctx context.Context,
 	req *connect.Request[pb.DetailsRequest],
@@ -142,7 +149,7 @@ func (a *rpcService) Details(
 	if err != nil {
 		var code connect.Code
 		if errors.Is(err, dut.ErrDeviceNotFound) || errors.Is(err, dut.ErrCommandNotFound) {
-			code = connect.CodeInvalidArgument
+			code = connect.CodeNotFound
 		} else {
 			code = connect.CodeInternal
 		}
@@ -167,6 +174,11 @@ func (a *rpcService) Details(
 }
 
 // Lock is the handler for the Lock RPC.
+//
+// Errors: CodeNotFound for an unknown device (dut.ErrDeviceNotFound);
+// CodeInvalidArgument for a non-positive duration (locker.ErrInvalidDuration);
+// CodeFailedPrecondition when another owner holds the device (locker.ErrWrongOwner);
+// CodeInternal otherwise.
 func (a *rpcService) Lock(
 	ctx context.Context,
 	req *connect.Request[pb.LockRequest],
@@ -181,7 +193,7 @@ func (a *rpcService) Lock(
 	if err != nil {
 		code := connect.CodeInternal
 		if errors.Is(err, dut.ErrDeviceNotFound) {
-			code = connect.CodeInvalidArgument
+			code = connect.CodeNotFound
 		}
 
 		return nil, connect.NewError(code, fmt.Errorf("device %q: %w", device, err))
@@ -192,6 +204,9 @@ func (a *rpcService) Lock(
 	info, lockErr := a.locker.Lock(device, user, dur)
 	if lockErr != nil {
 		switch {
+		// ErrWrongOwner is CodeFailedPrecondition on acquire (the device is busy) —
+		// deliberately different from release in Unlock, which is CodePermissionDenied
+		// (you may not unlock another user's lock).
 		case errors.Is(lockErr, locker.ErrWrongOwner):
 			return nil, connect.NewError(connect.CodeFailedPrecondition, lockErr)
 		case errors.Is(lockErr, locker.ErrInvalidDuration):
@@ -219,6 +234,10 @@ func (a *rpcService) Lock(
 }
 
 // Unlock is the handler for the Unlock RPC.
+//
+// Errors: CodePermissionDenied when another owner holds the lock
+// (locker.ErrWrongOwner); CodeFailedPrecondition when the device is not locked
+// (locker.ErrNotLocked); CodeInternal otherwise.
 func (a *rpcService) Unlock(
 	ctx context.Context,
 	req *connect.Request[pb.UnlockRequest],
@@ -238,6 +257,9 @@ func (a *rpcService) Unlock(
 
 	if err != nil {
 		switch {
+		// ErrWrongOwner is CodePermissionDenied on release (you may not unlock
+		// another user's lock) — deliberately different from acquire in Lock/Run,
+		// where a device held by someone else is CodeFailedPrecondition (busy).
 		case errors.Is(err, locker.ErrWrongOwner):
 			return nil, connect.NewError(connect.CodePermissionDenied, err)
 		case errors.Is(err, locker.ErrNotLocked):
@@ -253,6 +275,12 @@ func (a *rpcService) Unlock(
 }
 
 // Run is the handler for the Run RPC.
+//
+// It drives the finite state machine (see states.go); each state maps its failure
+// to a connect.Code. Run passes an already-typed *connect.Error through unchanged,
+// maps a raw context cancellation to CodeCanceled/CodeDeadlineExceeded (via
+// cancelCode), and wraps anything else as CodeInternal, so every failure reaches
+// the client with a code.
 func (a *rpcService) Run(
 	ctx context.Context,
 	stream *connect.BidiStream[pb.RunRequest, pb.RunResponse],
@@ -285,8 +313,15 @@ func (a *rpcService) Run(
 
 	var connectErr *connect.Error
 	if err != nil && !errors.As(err, &connectErr) {
-		// Wrap the error in a connect.Error if not done yet.
-		err = connect.NewError(connect.CodeInternal, err)
+		// Wrap the error in a connect.Error if not done yet. A raw context error
+		// from the FSM boundary becomes the matching cancellation code (kept in
+		// sync with waitModules via cancelCode); anything else is internal.
+		switch {
+		case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+			err = connect.NewError(cancelCode(err), err)
+		default:
+			err = connect.NewError(connect.CodeInternal, err)
+		}
 	}
 
 	if err != nil {

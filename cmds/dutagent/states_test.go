@@ -126,7 +126,7 @@ func TestFindDUTCmd(t *testing.T) {
 			name:        "nil_cmdMsg",
 			cmdMsg:      nil,
 			devs:        dut.Devlist{},
-			wantErrCode: connect.CodeInvalidArgument,
+			wantErrCode: connect.CodeNotFound,
 		},
 		{
 			name:     "success_valid_command",
@@ -138,13 +138,13 @@ func TestFindDUTCmd(t *testing.T) {
 			name:        "device_not_found",
 			cmdMsg:      &validCmd,
 			devs:        dut.Devlist{},
-			wantErrCode: connect.CodeInvalidArgument,
+			wantErrCode: connect.CodeNotFound,
 		},
 		{
 			name:        "command_not_found",
 			cmdMsg:      &validCmd,
 			devs:        makeDevlist(false, 0, 0),
-			wantErrCode: connect.CodeInvalidArgument,
+			wantErrCode: connect.CodeNotFound,
 		},
 		{
 			name:        "invalid_command_no_modules",

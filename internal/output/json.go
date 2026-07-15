@@ -105,10 +105,11 @@ func (f *JSONFormatter) IsBuffering() bool {
 	return f.buffering
 }
 
-// Flush writes all buffered content and returns to immediate mode.
-func (f *JSONFormatter) Flush() error {
+// Flush writes all buffered content and returns to immediate mode. A marshal
+// failure is logged and the batch dropped; there is no error to act on.
+func (f *JSONFormatter) Flush() {
 	if !f.buffering || len(f.bufferList) == 0 {
-		return nil
+		return
 	}
 
 	// In JSON format, we can output an array of all buffered items
@@ -122,14 +123,12 @@ func (f *JSONFormatter) Flush() error {
 
 	bytes, err := json.MarshalIndent(wrapper, "", "  ")
 	if err != nil {
-		return fmt.Errorf("error marshaling JSON batch: %v", err)
+		slog.Warn("failed to render output", "format", "json", "err", err)
+	} else {
+		fmt.Fprintln(f.stdout, string(bytes))
 	}
-
-	fmt.Fprintln(f.stdout, string(bytes))
 
 	// Clear buffer and reset buffering state
 	f.bufferList = make([]JSONOutput, 0)
 	f.buffering = false
-
-	return nil
 }

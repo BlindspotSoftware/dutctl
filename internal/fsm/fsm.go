@@ -13,12 +13,19 @@ import "context"
 // It takes args as a set of arguments and returns the arguments for the next state,
 // the next State to run or an error.
 //
-// Returning a nil State indicates the successful end of the state machine.
+// Returning a nil State indicates the successful end of the state machine. A
+// returned error stops the machine and is passed through by Run unmodified, so a
+// State may return a domain sentinel or an already-typed error for the caller to
+// classify at its boundary.
 type State[T any] func(ctx context.Context, args T) (T, State[T], error)
 
-// Run executed the finite state machine with args of any type and start as the first state.
+// Run executes the finite state machine with args of any type and start as the first state.
 // It keeps executing the states until the current state is nil. In case a state returns an error,
-// the execution stops and the error is returned.
+// the execution stops and the error is returned unmodified.
+//
+// Run also checks ctx before each state and returns ctx.Err() (context.Canceled or
+// context.DeadlineExceeded) if it is done. Callers that need a specific status for
+// cancellation must classify the returned error at their boundary.
 func Run[T any](ctx context.Context, args T, start State[T]) (T, error) {
 	var err error
 
