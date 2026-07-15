@@ -65,6 +65,10 @@ func (w *WifiSocket) Help() string {
 	return help.String()
 }
 
+// Init validates the configuration and prepares the HTTP client. It returns an
+// error when Host is empty. A missing or non-positive Channel defaults to 1.
+// Init normalizes Host in place, prepending "http://" when no scheme is given,
+// and derives the Tasmota control URL from it.
 func (w *WifiSocket) Init(ctx context.Context) error {
 	if w.Host == "" {
 		return fmt.Errorf("wifisocket: host must be configured")
@@ -99,6 +103,10 @@ func (w *WifiSocket) Deinit(_ context.Context) error {
 	return nil
 }
 
+// Run dispatches the first argument as a socket command: on, off, toggle, or
+// status. An empty or unknown command is reported to the session and returns
+// nil; only failures talking to the device return a non-nil error. Init must
+// have run successfully first, otherwise Run returns an error.
 func (w *WifiSocket) Run(ctx context.Context, s module.Session, args ...string) error {
 	if w.client == nil {
 		return fmt.Errorf("wifisocket client not initialized")
@@ -163,7 +171,7 @@ func (w *WifiSocket) setPower(ctx context.Context, s module.Session, state strin
 		return err
 	}
 
-	// build URL copy
+	// Copy controlURL so setting query params does not mutate the shared value.
 	u := *w.controlURL
 	q := u.Query()
 	q.Set("cmnd", opCmd)

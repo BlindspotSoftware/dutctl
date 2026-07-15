@@ -45,7 +45,6 @@ const description1 = `
 Pass a duration as the first argument. If no duration is passed, the configured duration is used.
 `
 
-// According to time.ParseDuration.
 const description2 = `
 A duration string is a possibly signed sequence of decimal numbers, each with optional fraction
 and a unit suffix, such as "300ms", "-1.5h" or "2h45m".
@@ -62,6 +61,9 @@ func (w *Wait) Help() string {
 	return help.String()
 }
 
+// Init parses the configured Duration into an internal value, defaulting to
+// DefaultDuration when Duration is unset. It returns the error from
+// time.ParseDuration if the configured value is not a valid duration string.
 func (w *Wait) Init(ctx context.Context) error {
 	if w.Duration == "" {
 		w.Duration = DefaultDuration
@@ -82,6 +84,12 @@ func (w *Wait) Deinit(_ context.Context) error {
 	return nil
 }
 
+// Run waits for the given duration and then returns. If args[0] is present it is
+// parsed as the wait duration and overrides the value set during Init; otherwise
+// the configured (or default) duration is used.
+//
+// The wait is not interruptible: Run sleeps for the full duration and does not
+// observe cancellation of ctx.
 func (w *Wait) Run(_ context.Context, s module.Session, args ...string) error {
 	var duration time.Duration
 

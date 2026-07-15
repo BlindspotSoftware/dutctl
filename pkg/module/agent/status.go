@@ -38,6 +38,7 @@ func (m *Status) Deinit(_ context.Context) error {
 	return nil
 }
 
+// Run executes "uname -a" on the host running dutagent and prints its output to the session. Any arguments are ignored.
 func (m *Status) Run(_ context.Context, s module.Session, _ ...string) error {
 	var out strings.Builder
 

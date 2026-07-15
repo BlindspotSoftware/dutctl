@@ -355,7 +355,7 @@ func TestParsePaths(t *testing.T) {
 			wantDest:  "file.bin",
 		},
 
-		// No config - security: parent directory references rejected
+		// No config - source arg is kept verbatim (never sanitized), including a leading '..'; only wantDest is filepath.Base(arg)
 		{
 			name:      "paths with leading .. rejected",
 			arg:       "../parent/file.bin",

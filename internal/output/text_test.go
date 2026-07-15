@@ -172,13 +172,13 @@ func TestWriteMetadata(t *testing.T) {
 	}
 }
 
-// TestMetadataCaching tests the metadata caching mechanism for TextFormatter
-// This test verifies that:
-// 1. Metadata is printed on first write
-// 2. Same metadata is not printed on subsequent writes to the same writer
-// 3. Metadata is printed again when it changes
-// 4. Metadata is printed when switching between stdout and stderr
-// 5. Metadata is printed after cache is cleared
+// TestMetadataCaching verifies the TextFormatter metadata caching:
+//
+//	metadata is printed on the first write
+//	the same metadata is suppressed on later writes to the same writer
+//	metadata is printed again when it changes
+//	metadata is printed when switching between stdout and stderr
+//	metadata is printed after the cache is cleared
 func TestMetadataCaching(t *testing.T) {
 	// Create buffers for stdout and stderr
 	stdoutBuf := &bytes.Buffer{}

@@ -30,12 +30,12 @@ func init() {
 // PDU is a module that provides basic power management functions for a PDU (Power Distribution Unit).
 // NOTE: This implementation currently supports only Intellinet ATM PDUs.
 type PDU struct {
-	Host     string // Host is the address of the PDU
-	User     string // User is used for authentication, if supported by the PDU
-	Password string // Password is used for authentication, if supported by the PDU
+	Host     string // Host is the base address of the PDU.
+	User     string // User is used for authentication, if supported by the PDU.
+	Password string // Password is used for authentication, if supported by the PDU.
 	Outlet   int    // Outlet is the outlet to control, if the PDU supports multiple outlets. Defaults to 0 (first outlet).
 
-	client     *http.Client // internal HTTP client for request to the PDU
+	client     *http.Client // internal HTTP client for requests to the PDU
 	controlURL *url.URL     // controlURL is the URL for controlling the PDU outlet
 	statusURL  *url.URL     // statusURL is the URL for getting the PDU status
 }
@@ -125,7 +125,10 @@ func (p *PDU) Run(ctx context.Context, s module.Session, args ...string) error {
 	}
 }
 
-// doRequest creates and executes an HTTP request with authentication and validates the response.
+// doRequest performs an authenticated GET request against url and returns the
+// response. On success the caller owns the response and must close its Body; on
+// any error the returned response is nil (its body already closed if one
+// existed). A non-200 status is reported as an error.
 func (p *PDU) doRequest(ctx context.Context, url string) (*http.Response, error) {
 	log.FromContext(ctx).Debug("GET " + url)
 

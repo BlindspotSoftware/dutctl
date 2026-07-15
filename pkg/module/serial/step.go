@@ -29,7 +29,6 @@ type step struct {
 	expect  *regexp.Regexp // set for stepExpect
 	payload []byte         // set for stepSend / stepSendRaw (escapes decoded; EOL appended for stepSend)
 	src     string         // original argument; shown (truncated) via label() in markers and errors
-	// timeout time.Duration // FUTURE: per-step timeout override
 }
 
 // maxLabelLen bounds how many runes of a step's source argument appear in

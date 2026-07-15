@@ -16,11 +16,6 @@ import (
 //   - Enables unit tests to provide lightweight fakes without standing up a real
 //     RPC connection.
 //   - Provides only the minimal surface (Send / Receive).
-//
-// Extension Guidelines:
-//   - If future features need metadata (headers, trailers, cancellation hooks), add
-//     optional wrapper/adapters rather than expanding this interface prematurely.
-//   - Prefer composition over modification: keep Stream focused on message flow.
 type Stream interface {
 	Send(msg *pb.RunResponse) error
 	Receive() (*pb.RunRequest, error)

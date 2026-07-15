@@ -35,9 +35,8 @@ const readChunk = 4096
 // rolling match buffer (never reset on newline) and tees every byte read from
 // the port to an output sink (the client console in scripted mode).
 //
-// The same engine is intended to back a future interactive (session.Console)
-// mode: swap sink for the Console stdout writer and feed write() from the
-// Console stdin reader — the port abstraction and matching logic are shared.
+// The output sink is an io.Writer so the byte-forwarding and matching logic
+// stay independent of where the output ultimately goes.
 type engine struct {
 	p    port
 	sink io.Writer
@@ -53,8 +52,9 @@ func newEngine(p port, sink io.Writer, filter bool) *engine {
 	return &engine{p: p, sink: sink, buf: make([]byte, 0, readChunk), filter: filter}
 }
 
-// readUntil reads from the port, forwarding every byte to the sink, until re
-// matches the accumulated output or ctx is done (global timeout / cancel).
+// readUntil reads from the port, forwarding every byte to the sink, until
+// pattern matches the accumulated output or ctx is done (global timeout /
+// cancel).
 // On a match, the matched span and everything before it is consumed from the
 // buffer, so a later expect only sees subsequent output.
 func (e *engine) readUntil(ctx context.Context, pattern *regexp.Regexp) error {

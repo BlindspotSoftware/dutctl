@@ -33,8 +33,8 @@ func init() {
 	})
 }
 
-// localImagePath is the local path on the dutagent to temporally store the flash image
-// during read/write operations.
+// localImagePath is the local path on the dutagent used to temporarily store the flash
+// image during read/write operations.
 const localImagePath = "./image"
 
 // op represents the flash operation.
@@ -48,19 +48,20 @@ const (
 // Flash is a module that reads or writes the SPI flash on the DUT.
 type Flash struct {
 	// Tool is the path to the underlying flash-tool on the dutagent.
-	// It must be set to one of the following:
-	// - flashrom
-	// - flashprog
-	// - dpcmd
+	// It must name (or point to) one of these tools:
+	//
+	//  flashrom
+	//  flashprog
+	//  dpcmd
 	Tool string `yaml:"tool"`
 	// Programmer is the name of the flasher hardware.
 	// For flashrom/flashprog: passed via -p flag (e.g., "dediprog", "ch341a_spi").
 	// For dpcmd: optional, used with --device flag to select specific USB device number.
 	Programmer string `yaml:"programmer"`
 
-	op              op       // op holds the current flash operation
-	localImagePath  string   // localImagePath is the path to SPI image file at the dutagent
-	clientImagePath string   // clientImagePath is image path named by the client
+	op              op
+	localImagePath  string
+	clientImagePath string
 	supportedTools  []string // supportedTools is a list of base names of supported flash tools
 }
 
@@ -96,6 +97,9 @@ func (f *Flash) Help() string {
 	return help.String()
 }
 
+// Init validates the module configuration. Tool must name a supported flash tool that is
+// resolvable on the dutagent's PATH, and Programmer must be set unless the tool is dpcmd,
+// which auto-detects its hardware.
 func (f *Flash) Init(ctx context.Context) error {
 	if f.Tool == "" {
 		return fmt.Errorf("tool must be configured; supported tools are %v", f.supportedTools)
@@ -128,10 +132,15 @@ func (f *Flash) isSupported(tool string) bool {
 	return slices.Contains(f.supportedTools, base)
 }
 
+// Deinit removes the temporary flash image file stored locally on the dutagent.
 func (f *Flash) Deinit(_ context.Context) error {
 	return os.RemoveAll(f.localImagePath)
 }
 
+// Run performs a flash operation. args must be "read" or "write" followed by an image path.
+// For a write, the image is uploaded from the client before flashing; for a read, the image
+// is downloaded to the client afterward.
+//
 //nolint:cyclop
 func (f *Flash) Run(ctx context.Context, sesh module.Session, args ...string) error {
 	l := log.FromContext(ctx)
@@ -259,7 +268,7 @@ func (f *Flash) cmdline() []string {
 	return args
 }
 
-// uploadImage receives the flash image file from sesh and saves is locally.
+// uploadImage receives the flash image file from sesh and saves it locally.
 func uploadImage(sesh module.Session, remote, local string) error {
 	img, err := sesh.RequestFile(remote)
 	if err != nil {

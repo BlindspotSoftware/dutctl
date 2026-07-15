@@ -20,9 +20,9 @@ func ListenAndServe(addr string, h http.Handler) error {
 	return newH2CServer(addr, h).ListenAndServe()
 }
 
-// newH2CServer builds the h2c *http.Server. It is unexported: callers use
-// ListenAndServe. When graceful shutdown is introduced, expose a constructor
-// that returns the *http.Server so callers can drive Shutdown.
+// newH2CServer builds the h2c *http.Server. It is unexported because
+// ListenAndServe is the only intended entry point; returning the *http.Server
+// would be the seam for driving a graceful Shutdown.
 func newH2CServer(addr string, h http.Handler) *http.Server {
 	srv := &http.Server{
 		Addr:              addr,

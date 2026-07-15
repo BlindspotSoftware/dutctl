@@ -2,8 +2,10 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package lock defines constants shared between the dutctl client and the
-// dutagent for the per-device locking feature.
+// Package lock defines the identity conventions shared between the dutctl
+// client and the dutagent for the per-device locking feature: the HTTP header
+// that carries the requesting user's identity and the helpers that derive a
+// caller's identity.
 package lock
 
 // UserHeader is the HTTP header used to carry the requesting user's
