@@ -20,6 +20,16 @@ import (
 	pb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1"
 )
 
+// autoLockHold records the command-scoped auto-lock a Run has acquired, so the
+// handler can release it on every exit path — including a panic in a state
+// function that unwinds past the FSM before it releases the lock itself. The
+// FSM passes runCmdArgs by value, so the record is shared by pointer:
+// acquireAutoLock writes it and the deferred release in Run reads it.
+type autoLockHold struct {
+	device string
+	held   bool
+}
+
 // runCmdArgs are arguments for the finite state machine in the Run RPC.
 type runCmdArgs struct {
 	// dependencies of the state machine
@@ -27,6 +37,7 @@ type runCmdArgs struct {
 	deviceList dut.Devlist
 	locker     *locker.Locker
 	user       string
+	autoLock   *autoLockHold
 
 	// fields for the states used during execution
 	cmdMsg      *pb.Command
@@ -126,12 +137,15 @@ func checkDeviceAccess(_ context.Context, args runCmdArgs) (runCmdArgs, fsm.Stat
 //
 // It acquires the command-scoped auto-lock for the device. AutoLock is
 // idempotent for the same owner, so this is safe even if the same owner
-// already holds an auto-lock from a previous race-lost step.
+// already holds an auto-lock from a previous race-lost step. On success it
+// records the hold on args.autoLock so Run releases it on every exit path.
 //
 // Errors: CodeFailedPrecondition when another owner holds the device
 // (locker.ErrWrongOwner); CodeInternal otherwise.
 func acquireAutoLock(_ context.Context, args runCmdArgs) (runCmdArgs, fsm.State[runCmdArgs], error) {
-	_, err := args.locker.AutoLock(args.cmdMsg.GetDevice(), args.user)
+	device := args.cmdMsg.GetDevice()
+
+	_, err := args.locker.AutoLock(device, args.user)
 	if err != nil {
 		if errors.Is(err, locker.ErrWrongOwner) {
 			return args, nil, connect.NewError(connect.CodeFailedPrecondition, err)
@@ -140,22 +154,10 @@ func acquireAutoLock(_ context.Context, args runCmdArgs) (runCmdArgs, fsm.State[
 		return args, nil, connect.NewError(connect.CodeInternal, err)
 	}
 
+	args.autoLock.device = device
+	args.autoLock.held = true
+
 	return args, executeModules, nil
-}
-
-// releaseAutoLock is the final state of the Run RPC's happy path.
-//
-// It releases the command-scoped auto-lock acquired by acquireAutoLock. It
-// never touches the explicit lock slot, so an explicit Lock the same owner
-// holds for the device survives the run. ErrNotLocked is tolerated because
-// a forced unlock by an admin may have wiped the slot concurrently.
-func releaseAutoLock(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State[runCmdArgs], error) {
-	err := args.locker.ClearAutoLock(args.cmdMsg.GetDevice(), args.user)
-	if err != nil && !errors.Is(err, locker.ErrNotLocked) {
-		log.FromContext(ctx).Warn("failed to release auto-lock", "device", args.cmdMsg.GetDevice(), "err", err)
-	}
-
-	return args, nil, nil
 }
 
 // runModule runs a single module, recovering a panic into an error so a
@@ -300,7 +302,10 @@ func waitModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State[ru
 		}
 	}
 
-	return args, releaseAutoLock, nil
+	// Success: the auto-lock is released by the deferred cleanup in Run, which
+	// covers every exit path including a panic, so no explicit release state is
+	// needed here.
+	return args, nil, nil
 }
 
 // cancelCode maps a context cancellation error to its connect status code,
