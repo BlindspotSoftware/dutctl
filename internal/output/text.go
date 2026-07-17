@@ -200,10 +200,11 @@ func humanBytes(byteCount int) string {
 }
 
 // lockAnnotation renders the bracketed lock note for a locked device, e.g.
-// ` [locked by "alice@host" for 25m]`. ExpiresAt of 0 omits the duration.
+// ` [locked by "alice@host" for 25m]`. A lock with no expiry (ExpiresAt of 0),
+// such as a device busy with a running command, renders as "in use" instead.
 func lockAnnotation(entry DeviceEntry) string {
 	if entry.ExpiresAt == 0 {
-		return fmt.Sprintf(" [locked by %q]", entry.Owner)
+		return fmt.Sprintf(" [in use by %q]", entry.Owner)
 	}
 
 	remaining := humanDuration(time.Until(time.Unix(entry.ExpiresAt, 0)))
@@ -252,7 +253,7 @@ func (f *TextFormatter) writeLockResultTo(content Content, writer io.Writer) {
 	case !entry.Locked:
 		msg = fmt.Sprintf("Device %q unlocked", entry.Name)
 	case entry.ExpiresAt == 0:
-		msg = fmt.Sprintf("Device %q locked by %q", entry.Name, entry.Owner)
+		msg = fmt.Sprintf("Device %q in use by %q", entry.Name, entry.Owner)
 	default:
 		remaining := humanDuration(time.Until(time.Unix(entry.ExpiresAt, 0)))
 		msg = fmt.Sprintf("Device %q locked by %q for %s", entry.Name, entry.Owner, remaining)
