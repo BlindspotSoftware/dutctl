@@ -261,7 +261,8 @@ func TestAcquireAutoLock(t *testing.T) {
 
 	t.Run("acquires_and_proceeds_to_executeModules", func(t *testing.T) {
 		l := locker.New()
-		args := runCmdArgs{cmdMsg: cmdMsg, locker: l, user: "alice"}
+		hold := &autoLockHold{}
+		args := runCmdArgs{cmdMsg: cmdMsg, locker: l, user: "alice", autoLock: hold}
 
 		_, next, err := acquireAutoLock(context.Background(), args)
 		if err != nil {
@@ -276,6 +277,10 @@ func TestAcquireAutoLock(t *testing.T) {
 		if state.Auto == nil {
 			t.Error("auto-lock not taken")
 		}
+
+		if !hold.held || hold.device != device {
+			t.Errorf("hold = %+v, want held with device %q", hold, device)
+		}
 	})
 
 	t.Run("blocked_by_other_owner_returns_FailedPrecondition", func(t *testing.T) {
@@ -284,19 +289,22 @@ func TestAcquireAutoLock(t *testing.T) {
 			t.Fatalf("setup AutoLock: %v", err)
 		}
 
-		args := runCmdArgs{cmdMsg: cmdMsg, locker: l, user: "alice"}
+		hold := &autoLockHold{}
+		args := runCmdArgs{cmdMsg: cmdMsg, locker: l, user: "alice", autoLock: hold}
 
 		_, _, err := acquireAutoLock(context.Background(), args)
 		if connect.CodeOf(err) != connect.CodeFailedPrecondition {
 			t.Errorf("code = %v, want FailedPrecondition", connect.CodeOf(err))
 		}
+
+		if hold.held {
+			t.Error("hold recorded despite a failed acquire")
+		}
 	})
 }
 
-func TestReleaseAutoLock(t *testing.T) {
+func TestClearAutoLock(t *testing.T) {
 	const device = "dev1"
-
-	cmdMsg := &pb.Command{Device: device, Command: "echo"}
 
 	t.Run("clears_auto_slot_only", func(t *testing.T) {
 		l := locker.New()
@@ -308,35 +316,24 @@ func TestReleaseAutoLock(t *testing.T) {
 			t.Fatalf("setup AutoLock: %v", err)
 		}
 
-		args := runCmdArgs{cmdMsg: cmdMsg, locker: l, user: "alice"}
-
-		_, next, err := releaseAutoLock(context.Background(), args)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		if next != nil {
-			t.Errorf("next state = %p, want nil (terminal)", next)
-		}
+		clearAutoLock(context.Background(), l, device, "alice")
 
 		state := l.StatusAll()[device]
 		if state.Explicit == nil {
-			t.Error("releaseAutoLock wiped the explicit lock")
+			t.Error("clearAutoLock wiped the explicit lock")
 		}
 
 		if state.Auto != nil {
-			t.Error("auto lock still present after releaseAutoLock")
+			t.Error("auto lock still present after clearAutoLock")
 		}
 	})
 
 	t.Run("missing_auto_lock_is_tolerated", func(t *testing.T) {
 		l := locker.New()
-		args := runCmdArgs{cmdMsg: cmdMsg, locker: l, user: "alice"}
 
-		_, _, err := releaseAutoLock(context.Background(), args)
-		if err != nil {
-			t.Errorf("releaseAutoLock on empty slot: %v", err)
-		}
+		// Nothing held: ClearAutoLock returns ErrNotLocked, which clearAutoLock
+		// swallows. The test asserts it neither panics nor fails.
+		clearAutoLock(context.Background(), l, device, "alice")
 	})
 }
 
@@ -675,8 +672,8 @@ func TestWaitModules(t *testing.T) {
 				if err != nil {
 					t.Fatalf("expected success, got error: %v", err)
 				}
-				if !stateEqual(next, releaseAutoLock) {
-					t.Fatalf("expected next state releaseAutoLock, got %p", next)
+				if next != nil {
+					t.Fatalf("expected terminal (nil) next state, got %p", next)
 				}
 				return
 			}

@@ -282,6 +282,19 @@ func (a *rpcService) Unlock(
 	return connect.NewResponse(&pb.UnlockResponse{}), nil
 }
 
+// clearAutoLock releases the command-scoped auto-lock for device held by user.
+// It never touches the explicit lock slot, so an explicit Lock the same owner
+// holds for the device survives the run. ErrNotLocked is tolerated because a
+// forced unlock by an admin may have wiped the slot concurrently; any other
+// failure is logged rather than returned, as this runs during Run teardown
+// (including panic unwinding), where no caller is left to handle it.
+func clearAutoLock(ctx context.Context, lk *locker.Locker, device, user string) {
+	err := lk.ClearAutoLock(device, user)
+	if err != nil && !errors.Is(err, locker.ErrNotLocked) {
+		log.FromContext(ctx).Warn("failed to release auto-lock", "device", device, "err", err)
+	}
+}
+
 // Run is the handler for the Run RPC.
 //
 // It drives the finite state machine (see states.go); each state maps its failure
@@ -304,23 +317,29 @@ func (a *rpcService) Run(
 	l := log.FromContext(ctx)
 	l.Info("request received")
 
+	autoLock := &autoLockHold{}
+
+	// Release the command-scoped auto-lock on every exit path. Deferred so it
+	// runs even while a panic in a state function unwinds past the FSM (fsm.Run
+	// does not recover), which would otherwise leave the device auto-locked with
+	// no expiry until an agent restart. It fires only once the lock was acquired
+	// (acquireAutoLock sets held); ClearAutoLock tolerates a concurrent forced
+	// unlock.
+	defer func() {
+		if autoLock.held {
+			clearAutoLock(ctx, a.locker, autoLock.device, user)
+		}
+	}()
+
 	fsmArgs := runCmdArgs{
 		stream:     rpc.NewRunStream(stream),
 		deviceList: a.devices,
 		locker:     a.locker,
 		user:       user,
+		autoLock:   autoLock,
 	}
 
-	finalArgs, err := fsm.Run(ctx, fsmArgs, receiveCommandRPC)
-
-	// Safety net for error paths that short-circuit the FSM before
-	// releaseAutoLock runs. Delegating to the state function keeps the
-	// cleanup logic in one place. The state tolerates ErrNotLocked, so a
-	// happy-path call (where the FSM already released the auto-lock) is a
-	// harmless no-op.
-	if finalArgs.cmdMsg != nil {
-		releaseAutoLock(ctx, finalArgs) //nolint:errcheck // state never returns an error
-	}
+	_, err = fsm.Run(ctx, fsmArgs, receiveCommandRPC)
 
 	var connectErr *connect.Error
 	if err != nil && !errors.As(err, &connectErr) {
