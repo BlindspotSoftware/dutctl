@@ -9,16 +9,15 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"time"
 
 	"connectrpc.com/connect"
+	"github.com/BlindspotSoftware/dutctl/internal/auth"
 	"github.com/BlindspotSoftware/dutctl/internal/dutagent/locker"
 	"github.com/BlindspotSoftware/dutctl/internal/fsm"
 	"github.com/BlindspotSoftware/dutctl/internal/log"
 	"github.com/BlindspotSoftware/dutctl/internal/rpc"
 	"github.com/BlindspotSoftware/dutctl/pkg/dut"
-	"github.com/BlindspotSoftware/dutctl/pkg/lock"
 
 	pb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1"
 )
@@ -29,20 +28,22 @@ type rpcService struct {
 	locker  *locker.Locker
 }
 
-// userFromHeader returns the calling user's identity from a request header,
-// or a unique anonymous placeholder when the header is missing.
-func userFromHeader(h http.Header) string {
-	if user := h.Get(lock.UserHeader); user != "" {
-		return user
-	}
-
-	return lock.AnonymousUser()
-}
-
 // rpcLogger returns a logger scoped to the RPC subsystem and tagged with the
 // handler's method name, derived from the logger carried in ctx.
 func rpcLogger(ctx context.Context, method string) *slog.Logger {
 	return log.Scope(log.FromContext(ctx), "rpc").With("rpc", method)
+}
+
+// caller returns the identity of the RPC caller, attached to ctx by the
+// identity interceptor. A missing identity means the interceptor was not
+// installed on the service, which is a server bug, so it maps to CodeInternal.
+func caller(ctx context.Context) (string, error) {
+	id, ok := auth.FromContext(ctx)
+	if !ok {
+		return "", connect.NewError(connect.CodeInternal, errors.New("no caller identity in request context"))
+	}
+
+	return id.User(), nil
 }
 
 // List is the handler for the List RPC. It never returns an error.
@@ -187,9 +188,13 @@ func (a *rpcService) Lock(
 	l.Info("request received")
 
 	device := req.Msg.GetDevice()
-	user := userFromHeader(req.Header())
 
-	_, err := a.devices.Find(device)
+	user, err := caller(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = a.devices.Find(device)
 	if err != nil {
 		code := connect.CodeInternal
 		if errors.Is(err, dut.ErrDeviceNotFound) {
@@ -246,9 +251,12 @@ func (a *rpcService) Unlock(
 	l.Info("request received")
 
 	device := req.Msg.GetDevice()
-	user := userFromHeader(req.Header())
 
-	var err error
+	user, err := caller(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	if req.Msg.GetForce() {
 		err = a.locker.ForceClearLock(device)
 	} else {
@@ -285,7 +293,10 @@ func (a *rpcService) Run(
 	ctx context.Context,
 	stream *connect.BidiStream[pb.RunRequest, pb.RunResponse],
 ) error {
-	user := userFromHeader(stream.RequestHeader())
+	user, err := caller(ctx)
+	if err != nil {
+		return err
+	}
 
 	// Set the RPC scope once; it flows through the FSM, the session backend and
 	// the modules on ctx, so each only logs its own concern.

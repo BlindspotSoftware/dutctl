@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"github.com/BlindspotSoftware/dutctl/internal/auth"
 	"github.com/BlindspotSoftware/dutctl/internal/dutagent/locker"
 	"github.com/BlindspotSoftware/dutctl/pkg/dut"
-	"github.com/BlindspotSoftware/dutctl/pkg/lock"
 
 	pb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1"
 )
@@ -24,28 +24,29 @@ func newTestService() *rpcService {
 	}
 }
 
-func lockReq(device, user string, durSeconds int64) *connect.Request[pb.LockRequest] {
-	req := connect.NewRequest(&pb.LockRequest{Device: device, DurationSeconds: durSeconds})
-	if user != "" {
-		req.Header().Set(lock.UserHeader, user)
-	}
-
-	return req
+// userCtx seeds a context with the caller identity the way the header
+// interceptor does on the real request path, so the handlers under test read it
+// back via auth.FromContext.
+func userCtx(user string) context.Context {
+	return auth.NewContext(context.Background(), auth.Named(user))
 }
 
-func unlockReq(device, user string, force bool) *connect.Request[pb.UnlockRequest] {
-	req := connect.NewRequest(&pb.UnlockRequest{Device: device, Force: force})
-	if user != "" {
-		req.Header().Set(lock.UserHeader, user)
-	}
+func anonCtx() context.Context {
+	return auth.NewContext(context.Background(), auth.Anonymous())
+}
 
-	return req
+func lockReq(device string, durSeconds int64) *connect.Request[pb.LockRequest] {
+	return connect.NewRequest(&pb.LockRequest{Device: device, DurationSeconds: durSeconds})
+}
+
+func unlockReq(device string, force bool) *connect.Request[pb.UnlockRequest] {
+	return connect.NewRequest(&pb.UnlockRequest{Device: device, Force: force})
 }
 
 func TestLockRPC(t *testing.T) {
 	svc := newTestService()
 
-	res, err := svc.Lock(context.Background(), lockReq("devA", "alice", 60))
+	res, err := svc.Lock(userCtx("alice"), lockReq("devA", 60))
 	if err != nil {
 		t.Fatalf("Lock: unexpected error: %v", err)
 	}
@@ -62,7 +63,7 @@ func TestLockRPC(t *testing.T) {
 func TestLockRPCUnknownDevice(t *testing.T) {
 	svc := newTestService()
 
-	_, err := svc.Lock(context.Background(), lockReq("ghost", "alice", 60))
+	_, err := svc.Lock(userCtx("alice"), lockReq("ghost", 60))
 	if connect.CodeOf(err) != connect.CodeNotFound {
 		t.Errorf("code = %v, want NotFound", connect.CodeOf(err))
 	}
@@ -71,20 +72,23 @@ func TestLockRPCUnknownDevice(t *testing.T) {
 func TestLockRPCDifferentOwnerRejected(t *testing.T) {
 	svc := newTestService()
 
-	if _, err := svc.Lock(context.Background(), lockReq("devA", "alice", 60)); err != nil {
+	if _, err := svc.Lock(userCtx("alice"), lockReq("devA", 60)); err != nil {
 		t.Fatalf("first Lock: %v", err)
 	}
 
-	_, err := svc.Lock(context.Background(), lockReq("devA", "bob", 60))
+	_, err := svc.Lock(userCtx("bob"), lockReq("devA", 60))
 	if connect.CodeOf(err) != connect.CodeFailedPrecondition {
 		t.Errorf("code = %v, want FailedPrecondition", connect.CodeOf(err))
 	}
 }
 
-func TestLockRPCMissingUserHeader(t *testing.T) {
+func TestLockRPCAnonymousOwnersDoNotCollide(t *testing.T) {
 	svc := newTestService()
 
-	first, err := svc.Lock(context.Background(), lockReq("devA", "", 60))
+	// The interceptor mints a fresh anonymous identity per header-less caller;
+	// seed two of them and confirm the handler keeps them distinct so one cannot
+	// satisfy CheckAccess against the other's lock.
+	first, err := svc.Lock(anonCtx(), lockReq("devA", 60))
 	if err != nil {
 		t.Fatalf("Lock: %v", err)
 	}
@@ -93,9 +97,7 @@ func TestLockRPCMissingUserHeader(t *testing.T) {
 		t.Errorf("owner = %q, want unknown-<rand> prefix", first.Msg.GetOwner())
 	}
 
-	// A second anonymous caller must get a distinct identity so they cannot
-	// satisfy CheckAccess against the first caller's lock.
-	second, err := svc.Lock(context.Background(), lockReq("otherDev", "", 60))
+	second, err := svc.Lock(anonCtx(), lockReq("otherDev", 60))
 	if err != nil {
 		t.Fatalf("second Lock: %v", err)
 	}
@@ -108,11 +110,11 @@ func TestLockRPCMissingUserHeader(t *testing.T) {
 func TestUnlockRPC(t *testing.T) {
 	svc := newTestService()
 
-	if _, err := svc.Lock(context.Background(), lockReq("devA", "alice", 60)); err != nil {
+	if _, err := svc.Lock(userCtx("alice"), lockReq("devA", 60)); err != nil {
 		t.Fatalf("Lock: %v", err)
 	}
 
-	if _, err := svc.Unlock(context.Background(), unlockReq("devA", "alice", false)); err != nil {
+	if _, err := svc.Unlock(userCtx("alice"), unlockReq("devA", false)); err != nil {
 		t.Errorf("Unlock by owner: %v", err)
 	}
 }
@@ -120,11 +122,11 @@ func TestUnlockRPC(t *testing.T) {
 func TestUnlockRPCWrongOwner(t *testing.T) {
 	svc := newTestService()
 
-	if _, err := svc.Lock(context.Background(), lockReq("devA", "alice", 60)); err != nil {
+	if _, err := svc.Lock(userCtx("alice"), lockReq("devA", 60)); err != nil {
 		t.Fatalf("Lock: %v", err)
 	}
 
-	_, err := svc.Unlock(context.Background(), unlockReq("devA", "bob", false))
+	_, err := svc.Unlock(userCtx("bob"), unlockReq("devA", false))
 	if connect.CodeOf(err) != connect.CodePermissionDenied {
 		t.Errorf("code = %v, want PermissionDenied", connect.CodeOf(err))
 	}
@@ -133,7 +135,7 @@ func TestUnlockRPCWrongOwner(t *testing.T) {
 func TestUnlockRPCNotLocked(t *testing.T) {
 	svc := newTestService()
 
-	_, err := svc.Unlock(context.Background(), unlockReq("devA", "alice", false))
+	_, err := svc.Unlock(userCtx("alice"), unlockReq("devA", false))
 	if connect.CodeOf(err) != connect.CodeFailedPrecondition {
 		t.Errorf("code = %v, want FailedPrecondition", connect.CodeOf(err))
 	}
@@ -142,11 +144,11 @@ func TestUnlockRPCNotLocked(t *testing.T) {
 func TestUnlockRPCForce(t *testing.T) {
 	svc := newTestService()
 
-	if _, err := svc.Lock(context.Background(), lockReq("devA", "alice", 60)); err != nil {
+	if _, err := svc.Lock(userCtx("alice"), lockReq("devA", 60)); err != nil {
 		t.Fatalf("Lock: %v", err)
 	}
 
-	if _, err := svc.Unlock(context.Background(), unlockReq("devA", "bob", true)); err != nil {
+	if _, err := svc.Unlock(userCtx("bob"), unlockReq("devA", true)); err != nil {
 		t.Errorf("forced Unlock by non-owner: %v", err)
 	}
 }
@@ -155,7 +157,7 @@ func TestLockRPCZeroDurationRejected(t *testing.T) {
 	svc := newTestService()
 
 	for _, dur := range []int64{0, -5} {
-		_, err := svc.Lock(context.Background(), lockReq("devA", "alice", dur))
+		_, err := svc.Lock(userCtx("alice"), lockReq("devA", dur))
 		if connect.CodeOf(err) != connect.CodeInvalidArgument {
 			t.Errorf("dur=%d: code = %v, want InvalidArgument", dur, connect.CodeOf(err))
 		}
