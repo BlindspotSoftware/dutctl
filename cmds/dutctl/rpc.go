@@ -20,7 +20,7 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/BlindspotSoftware/dutctl/internal/output"
-	"github.com/BlindspotSoftware/dutctl/pkg/lock"
+	"github.com/BlindspotSoftware/dutctl/pkg/headers"
 
 	pb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1"
 )
@@ -104,7 +104,7 @@ func (app *application) lockRPC(device string, cmdArgs []string) error {
 		Device:          device,
 		DurationSeconds: int64(duration.Seconds()),
 	})
-	req.Header().Set(lock.UserHeader, app.user)
+	req.Header().Set(headers.User, app.user)
 
 	res, err := app.rpcClient.Lock(ctx, req)
 	if err != nil {
@@ -131,7 +131,7 @@ func (app *application) lockRPC(device string, cmdArgs []string) error {
 func (app *application) unlockRPC(device string) error {
 	ctx := context.Background()
 	req := connect.NewRequest(&pb.UnlockRequest{Device: device, Force: app.force})
-	req.Header().Set(lock.UserHeader, app.user)
+	req.Header().Set(headers.User, app.user)
 
 	_, err := app.rpcClient.Unlock(ctx, req)
 	if err != nil {
@@ -222,7 +222,7 @@ func (app *application) runRPC(device, command string, cmdArgs []string) error {
 	errChan := make(chan error, numWorkers)
 
 	stream := app.rpcClient.Run(runCtx)
-	stream.RequestHeader().Set(lock.UserHeader, app.user)
+	stream.RequestHeader().Set(headers.User, app.user)
 
 	req := &pb.RunRequest{
 		Msg: &pb.RunRequest_Command{

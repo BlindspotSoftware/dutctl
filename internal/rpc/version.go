@@ -14,11 +14,8 @@ import (
 	"connectrpc.com/connect"
 	"github.com/BlindspotSoftware/dutctl/internal/compat"
 	"github.com/BlindspotSoftware/dutctl/internal/log"
+	"github.com/BlindspotSoftware/dutctl/pkg/headers"
 )
-
-// VersionHeader is the header both sides use to advertise their dutctl build
-// version on every RPC: clients stamp it on the request, agents on the response.
-const VersionHeader = "X-Dutctl-Version"
 
 // reason renders a human-facing phrase for a compatibility result, derived from
 // the structural fields of the comparison. It lives here — with its only
@@ -69,7 +66,7 @@ type versionEnforcer struct {
 // happens before any handler runs and would otherwise leave no trace on the
 // agent.
 func (i *versionEnforcer) enforce(ctx context.Context, header http.Header) error {
-	peer := header.Get(VersionHeader)
+	peer := header.Get(headers.Version)
 
 	cmp := compat.Compare(i.version, peer)
 	if cmp.Verdict != compat.Incompatible {
@@ -92,7 +89,7 @@ func (i *versionEnforcer) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
 
 		res, err := next(ctx, req)
 		if res != nil {
-			res.Header().Set(VersionHeader, i.version)
+			res.Header().Set(headers.Version, i.version)
 		}
 
 		return res, err
@@ -105,7 +102,7 @@ func (i *versionEnforcer) WrapStreamingClient(next connect.StreamingClientFunc) 
 
 func (i *versionEnforcer) WrapStreamingHandler(next connect.StreamingHandlerFunc) connect.StreamingHandlerFunc {
 	return func(ctx context.Context, conn connect.StreamingHandlerConn) error {
-		conn.ResponseHeader().Set(VersionHeader, i.version)
+		conn.ResponseHeader().Set(headers.Version, i.version)
 
 		err := i.enforce(ctx, conn.RequestHeader())
 		if err != nil {
@@ -140,7 +137,7 @@ type versionAdvisor struct {
 // version plus any drift, at most once per client.
 func (i *versionAdvisor) report(l *slog.Logger, header http.Header) {
 	i.once.Do(func() {
-		peer := header.Get(VersionHeader)
+		peer := header.Get(headers.Version)
 
 		l.Info(fmt.Sprintf("dutagent version: %s", peer))
 
@@ -164,7 +161,7 @@ func (i *versionAdvisor) report(l *slog.Logger, header http.Header) {
 
 func (i *versionAdvisor) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
 	return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
-		req.Header().Set(VersionHeader, i.version)
+		req.Header().Set(headers.Version, i.version)
 
 		res, err := next(ctx, req)
 		if err != nil {
@@ -184,7 +181,7 @@ func (i *versionAdvisor) WrapStreamingHandler(next connect.StreamingHandlerFunc)
 func (i *versionAdvisor) WrapStreamingClient(next connect.StreamingClientFunc) connect.StreamingClientFunc {
 	return func(ctx context.Context, spec connect.Spec) connect.StreamingClientConn {
 		conn := next(ctx, spec)
-		conn.RequestHeader().Set(VersionHeader, i.version)
+		conn.RequestHeader().Set(headers.Version, i.version)
 
 		return &reportingClientConn{
 			StreamingClientConn: conn,
