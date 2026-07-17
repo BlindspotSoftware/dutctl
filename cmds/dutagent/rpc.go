@@ -174,10 +174,18 @@ func (a *rpcService) Details(
 	return res, nil
 }
 
+// defaultLockDuration is applied when a Lock request carries no duration
+// (duration_seconds == 0). Clients that omit the duration defer this policy to
+// the agent.
+const defaultLockDuration = 30 * time.Minute
+
 // Lock is the handler for the Lock RPC.
 //
+// A zero duration means "unset": the agent substitutes defaultLockDuration. A
+// negative duration is rejected.
+//
 // Errors: CodeNotFound for an unknown device (dut.ErrDeviceNotFound);
-// CodeInvalidArgument for a non-positive duration (locker.ErrInvalidDuration);
+// CodeInvalidArgument for a negative duration (locker.ErrInvalidDuration);
 // CodeFailedPrecondition when another owner holds the device (locker.ErrWrongOwner);
 // CodeInternal otherwise.
 func (a *rpcService) Lock(
@@ -205,6 +213,9 @@ func (a *rpcService) Lock(
 	}
 
 	dur := time.Duration(req.Msg.GetDurationSeconds()) * time.Second
+	if dur == 0 {
+		dur = defaultLockDuration
+	}
 
 	info, lockErr := a.locker.Lock(device, user, dur)
 	if lockErr != nil {

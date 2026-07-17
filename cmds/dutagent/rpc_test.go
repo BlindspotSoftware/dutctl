@@ -153,15 +153,31 @@ func TestUnlockRPCForce(t *testing.T) {
 	}
 }
 
-func TestLockRPCZeroDurationRejected(t *testing.T) {
-	svc := newTestService()
+func TestLockRPCDurationBoundaries(t *testing.T) {
+	t.Run("zero_applies_agent_default", func(t *testing.T) {
+		svc := newTestService()
 
-	for _, dur := range []int64{0, -5} {
-		_, err := svc.Lock(userCtx("alice"), lockReq("devA", dur))
-		if connect.CodeOf(err) != connect.CodeInvalidArgument {
-			t.Errorf("dur=%d: code = %v, want InvalidArgument", dur, connect.CodeOf(err))
+		before := time.Now()
+
+		res, err := svc.Lock(userCtx("alice"), lockReq("devA", 0))
+		if err != nil {
+			t.Fatalf("Lock with zero duration: unexpected error: %v", err)
 		}
-	}
+
+		got := time.Unix(res.Msg.GetExpiresAt(), 0).Sub(before)
+		if got < defaultLockDuration-time.Minute || got > defaultLockDuration+time.Minute {
+			t.Errorf("expiry in %v, want about the agent default %v", got, defaultLockDuration)
+		}
+	})
+
+	t.Run("negative_rejected", func(t *testing.T) {
+		svc := newTestService()
+
+		_, err := svc.Lock(userCtx("alice"), lockReq("devA", -5))
+		if connect.CodeOf(err) != connect.CodeInvalidArgument {
+			t.Errorf("code = %v, want InvalidArgument", connect.CodeOf(err))
+		}
+	})
 }
 
 func TestListRPCHidesAutoOnlyLock(t *testing.T) {
