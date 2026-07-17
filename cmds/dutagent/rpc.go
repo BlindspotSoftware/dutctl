@@ -46,6 +46,18 @@ func caller(ctx context.Context) (string, error) {
 	return id.User(), nil
 }
 
+// expiresAtUnix renders a lock's expiry as Unix seconds, mapping the zero time —
+// a lock with no time-based expiry, such as an auto-lock — to 0 rather than a
+// spurious year-1 timestamp. This matches the proto contract, where 0 on an
+// expires_at field means no expiry.
+func expiresAtUnix(t time.Time) int64 {
+	if t.IsZero() {
+		return 0
+	}
+
+	return t.Unix()
+}
+
 // List is the handler for the List RPC. It never returns an error.
 func (a *rpcService) List(
 	ctx context.Context,
@@ -62,11 +74,22 @@ func (a *rpcService) List(
 	for _, name := range names {
 		info := &pb.DeviceInfo{Name: name}
 
-		if explicit := locks[name].Explicit; explicit != nil {
+		// Report whichever slot holds the device so a busy device never reads as
+		// free. Explicit shadows auto: when both are held (necessarily by the same
+		// owner) the explicit lock carries the meaningful expiry, while an auto
+		// lock surfaces with a zero expiry, which the client renders as "in use".
+		state := locks[name]
+
+		held := state.Explicit
+		if held == nil {
+			held = state.Auto
+		}
+
+		if held != nil {
 			info.Lock = &pb.LockInfo{
-				Owner:     explicit.Owner,
-				LockedAt:  explicit.LockedAt.Unix(),
-				ExpiresAt: explicit.ExpiresAt.Unix(),
+				Owner:     held.Owner,
+				LockedAt:  held.LockedAt.Unix(),
+				ExpiresAt: expiresAtUnix(held.ExpiresAt),
 			}
 		}
 
@@ -232,16 +255,11 @@ func (a *rpcService) Lock(
 		}
 	}
 
-	var expiresAt int64
-	if !info.ExpiresAt.IsZero() {
-		expiresAt = info.ExpiresAt.Unix()
-	}
-
 	res := connect.NewResponse(&pb.LockResponse{
 		Device:    device,
 		Owner:     info.Owner,
 		LockedAt:  info.LockedAt.Unix(),
-		ExpiresAt: expiresAt,
+		ExpiresAt: expiresAtUnix(info.ExpiresAt),
 	})
 
 	l.Info("lock acquired", "device", device, "owner", info.Owner)

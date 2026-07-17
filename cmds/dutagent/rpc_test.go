@@ -180,7 +180,7 @@ func TestLockRPCDurationBoundaries(t *testing.T) {
 	})
 }
 
-func TestListRPCHidesAutoOnlyLock(t *testing.T) {
+func TestListRPCShowsAutoOnlyLock(t *testing.T) {
 	svc := newTestService()
 
 	if _, err := svc.locker.AutoLock("devA", "alice"); err != nil {
@@ -200,8 +200,17 @@ func TestListRPCHidesAutoOnlyLock(t *testing.T) {
 		}
 	}
 
-	if got != nil {
-		t.Errorf("auto-only lock surfaced in List: %+v, want no lock info", got)
+	if got == nil {
+		t.Fatal("auto-only lock hidden in List, want it surfaced as busy")
+	}
+
+	if got.GetOwner() != "alice" {
+		t.Errorf("owner = %q, want alice", got.GetOwner())
+	}
+
+	// An auto-lock has no time-based expiry; it surfaces as 0 ("in use").
+	if got.GetExpiresAt() != 0 {
+		t.Errorf("expires_at = %d, want 0 for an auto-lock", got.GetExpiresAt())
 	}
 }
 

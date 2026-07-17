@@ -329,7 +329,7 @@ func TestWriteDeviceList(t *testing.T) {
 
 	for _, want := range []string{
 		`- my-board [locked by "alice@host" for 25m]`,
-		`- auto-board [locked by "bob@host"]`,
+		`- auto-board [in use by "bob@host"]`,
 		"- free-board\n",
 	} {
 		if !strings.Contains(got, want) {
@@ -352,7 +352,7 @@ func TestWriteLockResult(t *testing.T) {
 		{
 			name: "auto lock without expiry",
 			data: DeviceEntry{Name: "my-board", Locked: true, Owner: "alice@host"},
-			want: `✓ Device "my-board" locked by "alice@host"` + "\n",
+			want: `✓ Device "my-board" in use by "alice@host"` + "\n",
 		},
 		{
 			name: "unlock",
