@@ -16,6 +16,7 @@ import (
 	"testing"
 
 	"connectrpc.com/connect"
+	"github.com/BlindspotSoftware/dutctl/pkg/headers"
 )
 
 // TestVersionEnforcerEnforce checks the agent-side guard: it rejects an
@@ -26,7 +27,7 @@ func TestVersionEnforcerEnforce(t *testing.T) {
 
 	header := func(v string) http.Header {
 		h := http.Header{}
-		h.Set(VersionHeader, v)
+		h.Set(headers.Version, v)
 
 		return h
 	}

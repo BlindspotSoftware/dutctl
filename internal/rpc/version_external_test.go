@@ -23,6 +23,7 @@ import (
 
 	"github.com/BlindspotSoftware/dutctl/internal/log"
 	"github.com/BlindspotSoftware/dutctl/internal/rpc"
+	"github.com/BlindspotSoftware/dutctl/pkg/headers"
 	pb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1"
 	"github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1/dutctlv1connect"
 )
@@ -140,7 +141,7 @@ func TestAgentAdvertisesVersion(t *testing.T) {
 		t.Fatalf("List: %v", err)
 	}
 
-	if got := res.Header().Get(rpc.VersionHeader); got != "9.9.9" {
-		t.Errorf("%s header = %q, want 9.9.9", rpc.VersionHeader, got)
+	if got := res.Header().Get(headers.Version); got != "9.9.9" {
+		t.Errorf("%s header = %q, want 9.9.9", headers.Version, got)
 	}
 }

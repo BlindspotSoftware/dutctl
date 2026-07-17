@@ -18,7 +18,7 @@ import (
 	"github.com/BlindspotSoftware/dutctl/internal/compat"
 	"github.com/BlindspotSoftware/dutctl/internal/log"
 	"github.com/BlindspotSoftware/dutctl/internal/rpc"
-	"github.com/BlindspotSoftware/dutctl/pkg/lock"
+	"github.com/BlindspotSoftware/dutctl/pkg/headers"
 	"github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1/dutctlv1connect"
 
 	pb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1"
@@ -220,7 +220,7 @@ func (s *rpcService) Run(
 	ctx context.Context,
 	downstream *connect.BidiStream[pb.RunRequest, pb.RunResponse],
 ) error {
-	user := downstream.RequestHeader().Get(lock.UserHeader)
+	user := downstream.RequestHeader().Get(headers.User)
 
 	// Set the RPC scope once; it flows to the relay forwarding goroutines on
 	// ctx, so each logs only its own concern.
@@ -266,10 +266,10 @@ func (s *rpcService) Run(
 	upstream := agent.conn(log.WithScope(ctx, "relay")).Run(ctx)
 
 	// Forward the requesting user's identity to the agent so it can enforce locking.
-	upstream.RequestHeader().Set(lock.UserHeader, user)
+	upstream.RequestHeader().Set(headers.User, user)
 
 	// Relay the client's version to the agent (which enforces it); add none of our own.
-	clientVersion := downstream.RequestHeader().Get(rpc.VersionHeader)
+	clientVersion := downstream.RequestHeader().Get(headers.Version)
 
 	mismatch := checkMajorMismatch(clientVersion)
 	if mismatch != nil {
@@ -278,7 +278,7 @@ func (s *rpcService) Run(
 		return mismatch
 	}
 
-	upstream.RequestHeader().Set(rpc.VersionHeader, clientVersion)
+	upstream.RequestHeader().Set(headers.Version, clientVersion)
 
 	// Forward the initial request to the DUT agent.
 	err = upstream.Send(downStreamRequest)
@@ -341,14 +341,14 @@ func (s *rpcService) Run(
 			var versionErr error
 
 			relayAgentVersion.Do(func() {
-				agentVersion := upstream.ResponseHeader().Get(rpc.VersionHeader)
+				agentVersion := upstream.ResponseHeader().Get(headers.Version)
 
 				versionErr = checkMajorMismatch(agentVersion)
 				if versionErr != nil {
 					return
 				}
 
-				downstream.ResponseHeader().Set(rpc.VersionHeader, agentVersion)
+				downstream.ResponseHeader().Set(headers.Version, agentVersion)
 			})
 
 			if versionErr != nil {
