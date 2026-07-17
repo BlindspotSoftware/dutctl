@@ -17,14 +17,14 @@ func TestParseLockDuration(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name: "no args uses default",
+			name: "no args defers to agent default",
 			args: nil,
-			want: defaultLockDuration,
+			want: 0,
 		},
 		{
-			name: "empty arg uses default",
+			name: "empty arg defers to agent default",
 			args: []string{""},
-			want: defaultLockDuration,
+			want: 0,
 		},
 		{
 			name: "explicit minutes",

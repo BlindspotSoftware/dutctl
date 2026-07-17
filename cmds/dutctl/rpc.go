@@ -69,16 +69,19 @@ func (app *application) listRPC() error {
 	return nil
 }
 
-// defaultLockDuration is used when the user runs "lock" without a duration.
-const defaultLockDuration = 30 * time.Minute
+// longLockWarnThreshold is the duration above which the client warns that a
+// lock is unusually long. It nudges cooperative use and never blocks the
+// request; the agent enforces no maximum.
+const longLockWarnThreshold = 8 * time.Hour
 
 // parseLockDuration resolves the lock duration from the lock command's
-// arguments. An empty argument list yields defaultLockDuration. The duration
-// must be positive. On failure it returns an error whose message is user-facing
-// display text (an invalid or non-positive duration), not a sentinel to match.
+// arguments. An empty argument list yields 0, which tells the agent to apply
+// its own default duration. An explicit duration must be positive. On failure
+// it returns an error whose message is user-facing display text (an invalid or
+// non-positive duration), not a sentinel to match.
 func parseLockDuration(cmdArgs []string) (time.Duration, error) {
 	if len(cmdArgs) == 0 || cmdArgs[0] == "" {
-		return defaultLockDuration, nil
+		return 0, nil
 	}
 
 	parsed, err := time.ParseDuration(cmdArgs[0])
@@ -97,6 +100,10 @@ func (app *application) lockRPC(device string, cmdArgs []string) error {
 	duration, err := parseLockDuration(cmdArgs)
 	if err != nil {
 		return err
+	}
+
+	if duration > longLockWarnThreshold {
+		slog.Warn("requested a long lock duration; release the device when you are done", "duration", duration)
 	}
 
 	ctx := context.Background()

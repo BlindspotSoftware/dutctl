@@ -940,10 +940,14 @@ func (x *File) GetContent() []byte {
 
 // LockRequest is sent by the client to acquire or extend a lock on a device.
 // The lock owner identity is carried in an HTTP header, not in this message.
+//
+// Locks are advisory: any caller may force-release another's lock
+// (UnlockRequest.force), so callers are expected to reserve a device only as
+// long as needed and to release it when done.
 type LockRequest struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	Device          string                 `protobuf:"bytes,1,opt,name=device,proto3" json:"device,omitempty"`
-	DurationSeconds int64                  `protobuf:"varint,2,opt,name=duration_seconds,json=durationSeconds,proto3" json:"duration_seconds,omitempty"` // 0 means a lock with no time-based expiry.
+	DurationSeconds int64                  `protobuf:"varint,2,opt,name=duration_seconds,json=durationSeconds,proto3" json:"duration_seconds,omitempty"` // 0 applies the agent's default duration; otherwise the lock expires after this many seconds.
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }

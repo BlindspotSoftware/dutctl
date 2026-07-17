@@ -47,9 +47,10 @@ dutctl list all available commands for the device.
 If a device, a command and the keyword help are provided, dutctl will show usage
 information for the command.
 
-The lock command reserves a device for the current user; the optional duration
-(e.g. 30m, 2h) defaults to 30m. The unlock command releases it; pass the -force
-option to release a lock held by another user.
+The lock command reserves a device for the current user for an optional duration
+(e.g. 30m, 2h); when omitted, the agent applies a default. The unlock command
+releases it; pass the -force option to release a lock held by another user.
+Locks are advisory, so reserve a device only as long as you need it.
 
 When dutctl is run without any positional arguments, it defaults to the list command.
 `
