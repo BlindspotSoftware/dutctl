@@ -173,7 +173,10 @@ func (agt *agent) startRPCService() error {
 	mux := http.NewServeMux()
 	path, handler := dutctlv1connect.NewDeviceServiceHandler(
 		service,
-		connect.WithInterceptors(rpc.NewVersionEnforcer(buildinfo.Version)),
+		connect.WithInterceptors(
+			rpc.NewVersionEnforcer(buildinfo.Version),
+			rpc.NewIdentifier(),
+		),
 	)
 	mux.Handle(path, handler)
 

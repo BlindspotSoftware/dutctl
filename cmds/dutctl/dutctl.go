@@ -15,10 +15,10 @@ import (
 	"os"
 
 	"connectrpc.com/connect"
+	"github.com/BlindspotSoftware/dutctl/internal/auth"
 	"github.com/BlindspotSoftware/dutctl/internal/buildinfo"
 	"github.com/BlindspotSoftware/dutctl/internal/output"
 	"github.com/BlindspotSoftware/dutctl/internal/rpc"
-	"github.com/BlindspotSoftware/dutctl/pkg/lock"
 	"github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1/dutctlv1connect"
 )
 
@@ -89,7 +89,7 @@ func newApp(stdin io.Reader, stdout, stderr io.Writer, exitFunc func(int), args 
 	fs.StringVar(&app.outputFormat, "f", "", outputFormatUsage)
 	fs.BoolVar(&app.verbose, "v", false, verboseUsage)
 	fs.BoolVar(&app.noColor, "no-color", false, noColorUsage)
-	fs.StringVar(&app.user, "u", lock.DefaultUser(), userUsage)
+	fs.StringVar(&app.user, "u", auth.Default().User(), userUsage)
 	fs.BoolVar(&app.force, "force", false, forceUsage)
 
 	mode := logModeWarn
