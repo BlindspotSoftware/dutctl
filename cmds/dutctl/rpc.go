@@ -135,9 +135,9 @@ func (app *application) lockRPC(device string, cmdArgs []string) error {
 	return nil
 }
 
-func (app *application) unlockRPC(device string) error {
+func (app *application) unlockRPC(device string, force bool) error {
 	ctx := context.Background()
-	req := connect.NewRequest(&pb.UnlockRequest{Device: device, Force: app.force})
+	req := connect.NewRequest(&pb.UnlockRequest{Device: device, Force: force})
 	req.Header().Set(headers.User, app.user)
 
 	_, err := app.rpcClient.Unlock(ctx, req)

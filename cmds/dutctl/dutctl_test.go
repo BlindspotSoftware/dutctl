@@ -28,10 +28,17 @@ type fakeDeviceServiceClient struct {
 	commandsCalls []string
 
 	detailsCalls []detailsCall
+
+	unlockCalls []unlockCall
 }
 
 type detailsCall struct {
 	device, cmd, keyword string
+}
+
+type unlockCall struct {
+	device string
+	force  bool
 }
 
 func (f *fakeDeviceServiceClient) List(
@@ -84,8 +91,13 @@ func (f *fakeDeviceServiceClient) Lock(
 }
 
 func (f *fakeDeviceServiceClient) Unlock(
-	_ context.Context, _ *connect.Request[pb.UnlockRequest],
+	_ context.Context, req *connect.Request[pb.UnlockRequest],
 ) (*connect.Response[pb.UnlockResponse], error) {
+	f.unlockCalls = append(f.unlockCalls, unlockCall{
+		device: req.Msg.GetDevice(),
+		force:  req.Msg.GetForce(),
+	})
+
 	return connect.NewResponse(&pb.UnlockResponse{}), nil
 }
 
@@ -117,6 +129,7 @@ func TestDispatch(t *testing.T) {
 		wantListHit  int
 		wantCmdHits  []string
 		wantDetailHi []detailsCall
+		wantUnlock   []unlockCall
 	}{
 		{
 			name:        "no args defaults to list",
@@ -144,6 +157,40 @@ func TestDispatch(t *testing.T) {
 			wantDetailHi: []detailsCall{
 				{device: "mydevice", cmd: "power", keyword: "help"},
 			},
+		},
+		{
+			name:      "help with trailing arg is invalid",
+			args:      []string{"mydevice", "power", "help", "extra"},
+			wantErrIs: errInvalidCmdline,
+		},
+		{
+			name: "lock with a duration is accepted",
+			args: []string{"mydevice", "lock", "30m"},
+		},
+		{
+			name:      "lock with extra args is invalid",
+			args:      []string{"mydevice", "lock", "30m", "junk"},
+			wantErrIs: errInvalidCmdline,
+		},
+		{
+			name:       "unlock releases without force",
+			args:       []string{"mydevice", "unlock"},
+			wantUnlock: []unlockCall{{device: "mydevice", force: false}},
+		},
+		{
+			name:       "unlock force breaks another lock",
+			args:       []string{"mydevice", "unlock", "force"},
+			wantUnlock: []unlockCall{{device: "mydevice", force: true}},
+		},
+		{
+			name:      "unlock with a dashed force flag is invalid",
+			args:      []string{"mydevice", "unlock", "--force"},
+			wantErrIs: errInvalidCmdline,
+		},
+		{
+			name:      "unlock with extra args is invalid",
+			args:      []string{"mydevice", "unlock", "force", "extra"},
+			wantErrIs: errInvalidCmdline,
 		},
 	}
 
@@ -173,6 +220,10 @@ func TestDispatch(t *testing.T) {
 			if !equalDetails(fake.detailsCalls, tt.wantDetailHi) {
 				t.Errorf("Details calls: want %v, got %v", tt.wantDetailHi, fake.detailsCalls)
 			}
+
+			if !equalUnlock(fake.unlockCalls, tt.wantUnlock) {
+				t.Errorf("Unlock calls: want %v, got %v", tt.wantUnlock, fake.unlockCalls)
+			}
 		})
 	}
 }
@@ -192,6 +243,20 @@ func equalStrings(a, b []string) bool {
 }
 
 func equalDetails(a, b []detailsCall) bool {
+	if len(a) != len(b) {
+		return false
+	}
+
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+
+	return true
+}
+
+func equalUnlock(a, b []unlockCall) bool {
 	if len(a) != len(b) {
 		return false
 	}
