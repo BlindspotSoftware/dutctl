@@ -127,15 +127,11 @@ type Record struct {
 // module package's init function, so a misuse is a programming error surfaced at
 // startup rather than a returned error (an init function cannot return one).
 //
-// Register panics if r.ID is empty, if r.ID is a reserved name ("help" or "info"),
-// if r.New is nil, or if a module with the same ID is already registered.
+// Register panics if r.ID is empty, if r.New is nil, or if a module with the
+// same ID is already registered.
 func Register(r Record) {
 	if r.ID == "" {
 		panic("module ID missing")
-	}
-
-	if r.ID == "help" || r.ID == "info" {
-		panic(fmt.Sprintf("module ID '%s' is reserved", r.ID))
 	}
 
 	if r.New == nil {
