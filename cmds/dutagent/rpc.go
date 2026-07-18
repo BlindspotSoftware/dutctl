@@ -88,22 +88,14 @@ func (a *rpcService) List(
 	for _, name := range names {
 		info := &pb.DeviceInfo{Name: name}
 
-		// Report whichever slot holds the device so a busy device never reads as
-		// free. Explicit shadows auto: when both are held (necessarily by the same
-		// owner) the explicit lock carries the meaningful expiry, while an auto
-		// lock surfaces with a zero expiry, which the client renders as "in use".
-		state := locks[name]
-
-		held := state.Explicit
-		if held == nil {
-			held = state.Auto
-		}
-
-		if held != nil {
+		// StatusAll already collapses to the effective hold, so a busy device
+		// never reads as free: a reservation surfaces with its expiry, while a
+		// Busy hold carries a zero expiry, which the client renders as "in use".
+		if hold, held := locks[name]; held {
 			info.Lock = &pb.LockInfo{
-				Owner:     held.Owner,
-				LockedAt:  held.LockedAt.Unix(),
-				ExpiresAt: expiresAtUnix(held.ExpiresAt),
+				Owner:     hold.Owner,
+				LockedAt:  hold.LockedAt.Unix(),
+				ExpiresAt: expiresAtUnix(hold.ExpiresAt),
 			}
 		}
 

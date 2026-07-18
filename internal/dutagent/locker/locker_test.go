@@ -87,8 +87,8 @@ func TestLockBlockedByDifferentOwnerExplicit(t *testing.T) {
 		t.Fatalf("Lock by other owner: err = %v, want *Error", err)
 	}
 
-	if le.Holder.Slot != ExplicitSlot || le.Holder.Owner != "alice" {
-		t.Errorf("Error = %+v, want slot=explicit owner=alice", le)
+	if le.Holder.Kind != Reserved || le.Holder.Owner != "alice" {
+		t.Errorf("Error = %+v, want kind=reserved owner=alice", le)
 	}
 }
 
@@ -106,8 +106,8 @@ func TestLockBlockedByDifferentOwnerAuto(t *testing.T) {
 		t.Fatalf("Lock blocked by auto: err = %v, want *Error", err)
 	}
 
-	if le.Holder.Slot != AutoSlot || le.Holder.Owner != "alice" {
-		t.Errorf("Error = %+v, want slot=auto owner=alice", le)
+	if le.Holder.Kind != Busy || le.Holder.Owner != "alice" {
+		t.Errorf("Error = %+v, want kind=busy owner=alice", le)
 	}
 }
 
@@ -167,13 +167,9 @@ func TestAutoLockNoExpiry(t *testing.T) {
 		t.Errorf("auto-lock ExpiresAt = %v, want zero", info.ExpiresAt)
 	}
 
-	state, ok := l.StatusAll()["dev"]
-	if !ok || state.Auto == nil {
-		t.Fatal("auto-lock missing from StatusAll")
-	}
-
-	if state.Explicit != nil {
-		t.Error("AutoLock unexpectedly populated the explicit slot")
+	hold, ok := l.StatusAll()["dev"]
+	if !ok || hold.Kind != Busy {
+		t.Fatalf("StatusAll[dev] = %+v (ok=%v), want a Busy hold", hold, ok)
 	}
 }
 
@@ -209,8 +205,8 @@ func TestAutoLockBlockedByExplicitOtherOwner(t *testing.T) {
 		t.Fatalf("AutoLock blocked by explicit: err = %v, want *Error", err)
 	}
 
-	if le.Holder.Slot != ExplicitSlot {
-		t.Errorf("blocking slot = %q, want explicit", le.Holder.Slot)
+	if le.Holder.Kind != Reserved {
+		t.Errorf("blocking kind = %q, want reserved", le.Holder.Kind)
 	}
 }
 
@@ -229,13 +225,19 @@ func TestClearAutoLockLeavesExplicitIntact(t *testing.T) {
 		t.Fatalf("ClearAutoLock: %v", err)
 	}
 
-	state, ok := l.StatusAll()["dev"]
-	if !ok || state.Explicit == nil {
-		t.Fatal("explicit lock was wiped by ClearAutoLock")
+	hold, ok := l.StatusAll()["dev"]
+	if !ok || hold.Kind != Reserved {
+		t.Fatalf("StatusAll[dev] = %+v (ok=%v), want the reservation intact", hold, ok)
 	}
 
-	if state.Auto != nil {
-		t.Error("auto lock still present after ClearAutoLock")
+	// Releasing the reservation must leave the device free, proving the Busy
+	// hold really was cleared rather than merely shadowed by the reservation.
+	if err := l.ClearLock("dev", "alice"); err != nil {
+		t.Fatalf("ClearLock: %v", err)
+	}
+
+	if _, ok := l.StatusAll()["dev"]; ok {
+		t.Error("Busy hold still present after ClearAutoLock")
 	}
 }
 
@@ -279,7 +281,7 @@ func TestForceClearLockWipesBothSlots(t *testing.T) {
 	}
 }
 
-func TestStatusAllReportsBothSlotsIndependently(t *testing.T) {
+func TestStatusAllReportsEffectiveHold(t *testing.T) {
 	l := New()
 
 	if _, err := l.Lock("alpha", "alice", time.Hour); err != nil {
@@ -290,6 +292,7 @@ func TestStatusAllReportsBothSlotsIndependently(t *testing.T) {
 		t.Fatalf("AutoLock beta: %v", err)
 	}
 
+	// gamma is both reserved and busy by the same owner.
 	if _, err := l.Lock("gamma", "carol", time.Hour); err != nil {
 		t.Fatalf("Lock gamma: %v", err)
 	}
@@ -300,16 +303,17 @@ func TestStatusAllReportsBothSlotsIndependently(t *testing.T) {
 
 	status := l.StatusAll()
 
-	if got := status["alpha"]; got.Explicit == nil || got.Auto != nil {
-		t.Errorf("alpha = %+v, want explicit-only", got)
+	if got := status["alpha"]; got.Kind != Reserved || got.Owner != "alice" {
+		t.Errorf("alpha = %+v, want a Reserved hold owned by alice", got)
 	}
 
-	if got := status["beta"]; got.Auto == nil || got.Explicit != nil {
-		t.Errorf("beta = %+v, want auto-only", got)
+	if got := status["beta"]; got.Kind != Busy || got.Owner != "bob" {
+		t.Errorf("beta = %+v, want a Busy hold owned by bob", got)
 	}
 
-	if got := status["gamma"]; got.Explicit == nil || got.Auto == nil {
-		t.Errorf("gamma = %+v, want both slots populated", got)
+	// A live reservation shadows the concurrent Busy hold in the report.
+	if got := status["gamma"]; got.Kind != Reserved || got.Owner != "carol" {
+		t.Errorf("gamma = %+v, want the reservation to shadow the Busy hold", got)
 	}
 }
 
