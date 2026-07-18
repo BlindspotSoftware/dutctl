@@ -13,8 +13,23 @@ import (
 	"time"
 )
 
-// OneLineFormatter formats output as single lines in a CSV-like format.
-// It's designed for dense, machine-readable output.
+// OneLineFormatter formats each Content as a single dense line, selected via
+// -f oneline or its alias -f csv. The format is line-oriented and grep/awk
+// friendly; it is not strict RFC-4180 CSV, and -f json or -f yaml should be
+// used when a lossless, structured record is needed.
+//
+// Each line has the form
+//
+//	timestamp,type,level[,key=value...],data
+//
+// where timestamp is RFC3339, type is the ContentType, and level is INFO or
+// ERROR. The key=value context columns are emitted only in verbose mode and
+// sit before the data column, so data's position is not fixed across lines.
+//
+// Fields are separated by a comma; any field containing a comma or a space is
+// wrapped in double quotes with embedded quotes doubled. The data column packs
+// structured payloads: a device list is a '|'-joined list of device tokens
+// (see deviceEntryString) and a file transfer is "direction bytes path".
 type OneLineFormatter struct {
 	stdout    io.Writer
 	stderr    io.Writer
@@ -137,14 +152,22 @@ func formatDataValue(data interface{}, separator string) string {
 	}
 }
 
-// deviceEntryString renders a DeviceEntry as a compact "name" or
-// "name=locked:owner" token for single-line output.
-func deviceEntryString(d DeviceEntry) string {
-	if !d.Locked {
-		return d.Name
+// deviceEntryString renders a DeviceEntry as a compact token for single-line
+// output: "name" when free, "name=in-use:owner" when held with no expiry (a
+// device busy with a running command), or "name=locked:owner" when explicitly
+// reserved. The expiry is deliberately not encoded here; a consumer needing the
+// lossless lock state should use -f json or -f yaml.
+func deviceEntryString(entry DeviceEntry) string {
+	if !entry.Locked {
+		return entry.Name
 	}
 
-	return fmt.Sprintf("%s=locked:%s", d.Name, d.Owner)
+	state := "locked"
+	if entry.ExpiresAt == 0 {
+		state = "in-use"
+	}
+
+	return fmt.Sprintf("%s=%s:%s", entry.Name, state, entry.Owner)
 }
 
 // output writes the formatted line to the appropriate destination.
