@@ -37,13 +37,27 @@ func rpcLogger(ctx context.Context, method string) *slog.Logger {
 // caller returns the identity of the RPC caller, attached to ctx by the
 // identity interceptor. A missing identity means the interceptor was not
 // installed on the service, which is a server bug, so it maps to CodeInternal.
-func caller(ctx context.Context) (string, error) {
+func caller(ctx context.Context) (auth.Identity, error) {
 	id, ok := auth.FromContext(ctx)
 	if !ok {
-		return "", connect.NewError(connect.CodeInternal, errors.New("no caller identity in request context"))
+		return auth.Identity{}, connect.NewError(connect.CodeInternal, errors.New("no caller identity in request context"))
 	}
 
-	return id.User(), nil
+	return id, nil
+}
+
+// requireNamed rejects an anonymous (header-less) caller with CodeUnauthenticated.
+// Lock and a normal Unlock require a stable identity: an anonymous caller is
+// minted a fresh identity per request, so it could never release a lock it took.
+// Run and a forced Unlock do not call this — Run's auto-lock lives within one
+// request, and force-release is the cooperative escape hatch open to anyone.
+func requireNamed(id auth.Identity) error {
+	if id.IsAnonymous() {
+		return connect.NewError(connect.CodeUnauthenticated,
+			errors.New("operation requires an identified caller; set the From header"))
+	}
+
+	return nil
 }
 
 // expiresAtUnix renders a lock's expiry as Unix seconds, mapping the zero time —
@@ -205,12 +219,13 @@ const defaultLockDuration = 30 * time.Minute
 // Lock is the handler for the Lock RPC.
 //
 // A zero duration means "unset": the agent substitutes defaultLockDuration. A
-// negative duration is rejected.
+// negative duration is rejected. An anonymous caller is rejected: a lock must be
+// releasable by its taker, which an anonymous, per-request identity cannot be.
 //
-// Errors: CodeNotFound for an unknown device (dut.ErrDeviceNotFound);
-// CodeInvalidArgument for a negative duration (locker.ErrInvalidDuration);
-// CodeFailedPrecondition when another owner holds the device (locker.ErrWrongOwner);
-// CodeInternal otherwise.
+// Errors: CodeUnauthenticated for an anonymous caller; CodeNotFound for an unknown
+// device (dut.ErrDeviceNotFound); CodeInvalidArgument for a negative duration
+// (locker.ErrInvalidDuration); CodeFailedPrecondition when another owner holds the
+// device (locker.ErrWrongOwner); CodeInternal otherwise.
 func (a *rpcService) Lock(
 	ctx context.Context,
 	req *connect.Request[pb.LockRequest],
@@ -220,10 +235,17 @@ func (a *rpcService) Lock(
 
 	device := req.Msg.GetDevice()
 
-	user, err := caller(ctx)
+	identity, err := caller(ctx)
 	if err != nil {
 		return nil, err
 	}
+
+	err = requireNamed(identity)
+	if err != nil {
+		return nil, err
+	}
+
+	user := identity.User()
 
 	_, err = a.devices.Find(device)
 	if err != nil {
@@ -267,11 +289,13 @@ func (a *rpcService) Lock(
 	return res, nil
 }
 
-// Unlock is the handler for the Unlock RPC.
+// Unlock is the handler for the Unlock RPC. A normal release requires a named
+// caller; a forced release (the cooperative override) does not.
 //
-// Errors: CodePermissionDenied when another owner holds the lock
-// (locker.ErrWrongOwner); CodeFailedPrecondition when the device is not locked
-// (locker.ErrNotLocked); CodeInternal otherwise.
+// Errors: CodeUnauthenticated for an anonymous non-force release;
+// CodePermissionDenied when another owner holds the lock (locker.ErrWrongOwner);
+// CodeFailedPrecondition when the device is not locked (locker.ErrNotLocked);
+// CodeInternal otherwise.
 func (a *rpcService) Unlock(
 	ctx context.Context,
 	req *connect.Request[pb.UnlockRequest],
@@ -281,14 +305,21 @@ func (a *rpcService) Unlock(
 
 	device := req.Msg.GetDevice()
 
-	user, err := caller(ctx)
+	identity, err := caller(ctx)
 	if err != nil {
 		return nil, err
 	}
 
+	user := identity.User()
+
 	if req.Msg.GetForce() {
 		err = a.locker.ForceClearLock(device)
 	} else {
+		err = requireNamed(identity)
+		if err != nil {
+			return nil, err
+		}
+
 		err = a.locker.ClearLock(device, user)
 	}
 
@@ -335,10 +366,12 @@ func (a *rpcService) Run(
 	ctx context.Context,
 	stream *connect.BidiStream[pb.RunRequest, pb.RunResponse],
 ) error {
-	user, err := caller(ctx)
+	identity, err := caller(ctx)
 	if err != nil {
 		return err
 	}
+
+	user := identity.User()
 
 	// Set the RPC scope once; it flows through the FSM, the session backend and
 	// the modules on ctx, so each only logs its own concern.
