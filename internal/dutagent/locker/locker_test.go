@@ -125,6 +125,20 @@ func TestLockExplicitExpires(t *testing.T) {
 	}
 }
 
+func TestStatusAllPrunesExpired(t *testing.T) {
+	l := New()
+
+	if _, err := l.Lock("dev", "alice", time.Millisecond); err != nil {
+		t.Fatalf("Lock: %v", err)
+	}
+
+	time.Sleep(10 * time.Millisecond)
+
+	if _, ok := l.StatusAll()["dev"]; ok {
+		t.Error("StatusAll still reports the device after its explicit lock expired")
+	}
+}
+
 func TestClearLockErrors(t *testing.T) {
 	l := New()
 
