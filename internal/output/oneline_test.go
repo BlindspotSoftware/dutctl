@@ -10,6 +10,38 @@ import (
 	"testing"
 )
 
+func TestDeviceEntryString(t *testing.T) {
+	tests := []struct {
+		name string
+		data DeviceEntry
+		want string
+	}{
+		{
+			name: "free",
+			data: DeviceEntry{Name: "board1"},
+			want: "board1",
+		},
+		{
+			name: "in use without expiry",
+			data: DeviceEntry{Name: "board2", Locked: true, Owner: "bob@host"},
+			want: "board2=in-use:bob@host",
+		},
+		{
+			name: "explicitly locked",
+			data: DeviceEntry{Name: "board3", Locked: true, Owner: "alice@host", ExpiresAt: 1784500000},
+			want: "board3=locked:alice@host",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := deviceEntryString(tt.data); got != tt.want {
+				t.Errorf("deviceEntryString(%+v) = %q, want %q", tt.data, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestOneLineFormatter(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
