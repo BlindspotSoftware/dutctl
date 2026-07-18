@@ -146,6 +146,9 @@ func (l *Locker) hasExplicitLock(device string) (Info, bool) {
 
 	if info.isExpired(time.Now()) {
 		delete(l.explicit, device)
+		// The only lock-lifecycle event a caller never drives explicitly: the
+		// reservation ends here, lazily, and the device becomes free to others.
+		l.log.Info("explicit lock expired", "device", device, "owner", info.Owner)
 
 		return Info{}, false
 	}
@@ -275,6 +278,7 @@ func (l *Locker) AutoLock(device, owner string) (Info, error) {
 
 	info := Info{Owner: owner, LockedAt: time.Now(), Slot: AutoSlot}
 	l.auto[device] = info
+	l.log.Debug("auto-lock acquired", "device", device, "owner", owner)
 
 	return info, nil
 }
@@ -297,6 +301,7 @@ func (l *Locker) ClearAutoLock(device, owner string) error {
 	}
 
 	delete(l.auto, device)
+	l.log.Debug("auto-lock released", "device", device, "owner", owner)
 
 	return nil
 }
