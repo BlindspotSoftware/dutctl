@@ -5,7 +5,6 @@ package main
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
@@ -82,29 +81,39 @@ func TestLockRPCDifferentOwnerRejected(t *testing.T) {
 	}
 }
 
-func TestLockRPCAnonymousOwnersDoNotCollide(t *testing.T) {
+func TestLockRPCRejectsAnonymous(t *testing.T) {
 	svc := newTestService()
 
-	// The interceptor mints a fresh anonymous identity per header-less caller;
-	// seed two of them and confirm the handler keeps them distinct so one cannot
-	// satisfy CheckAccess against the other's lock.
-	first, err := svc.Lock(anonCtx(), lockReq("devA", 60))
-	if err != nil {
-		t.Fatalf("Lock: %v", err)
+	// An anonymous caller gets a fresh identity per request, so it could never
+	// release a lock it took; Lock rejects it rather than create a stuck lock.
+	_, err := svc.Lock(anonCtx(), lockReq("devA", 60))
+	if connect.CodeOf(err) != connect.CodeUnauthenticated {
+		t.Errorf("code = %v, want Unauthenticated", connect.CodeOf(err))
 	}
+}
 
-	if !strings.HasPrefix(first.Msg.GetOwner(), "unknown-") {
-		t.Errorf("owner = %q, want unknown-<rand> prefix", first.Msg.GetOwner())
-	}
+func TestUnlockRPCAnonymous(t *testing.T) {
+	t.Run("non_force_rejected", func(t *testing.T) {
+		svc := newTestService()
 
-	second, err := svc.Lock(anonCtx(), lockReq("otherDev", 60))
-	if err != nil {
-		t.Fatalf("second Lock: %v", err)
-	}
+		_, err := svc.Unlock(anonCtx(), unlockReq("devA", false))
+		if connect.CodeOf(err) != connect.CodeUnauthenticated {
+			t.Errorf("code = %v, want Unauthenticated", connect.CodeOf(err))
+		}
+	})
 
-	if first.Msg.GetOwner() == second.Msg.GetOwner() {
-		t.Errorf("two anonymous callers shared identity %q", first.Msg.GetOwner())
-	}
+	t.Run("force_allowed", func(t *testing.T) {
+		svc := newTestService()
+
+		// alice holds the lock; an anonymous caller may still force-release it.
+		if _, err := svc.Lock(userCtx("alice"), lockReq("devA", 60)); err != nil {
+			t.Fatalf("setup Lock: %v", err)
+		}
+
+		if _, err := svc.Unlock(anonCtx(), unlockReq("devA", true)); err != nil {
+			t.Errorf("anonymous force-unlock: unexpected error: %v", err)
+		}
+	})
 }
 
 func TestUnlockRPC(t *testing.T) {
