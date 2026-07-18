@@ -32,7 +32,7 @@ SYNOPSIS:
 	dutctl [options] <device> <command> [args...]
 	dutctl [options] <device> <command> help
 	dutctl [options] <device> lock [duration]
-	dutctl [options] <device> unlock
+	dutctl [options] <device> unlock [force]
 	dutctl version
 
 `
@@ -49,7 +49,7 @@ information for the command.
 
 The lock command reserves a device for the current user for an optional duration
 (e.g. 30m, 2h); when omitted, the agent applies a default. The unlock command
-releases it; pass the -force option to release a lock held by another user.
+releases it; add the force keyword to release a lock held by another user.
 Locks are advisory, so reserve a device only as long as you need it.
 
 When dutctl is run without any positional arguments, it defaults to the list command.
@@ -62,7 +62,6 @@ const (
 	verboseUsage      = `Annotate output with connection/RPC context (metadata)`
 	noColorUsage      = `Disable colored output`
 	userUsage         = `User Identity of the user of the device, defaults to <user>@<host>`
-	forceUsage        = `Force unlock a device locked by another user`
 	logUsage          = `Client-side diagnostic logging (on stderr), debug|warn|none, default is warn`
 )
 
@@ -91,7 +90,6 @@ func newApp(stdin io.Reader, stdout, stderr io.Writer, exitFunc func(int), args 
 	fs.BoolVar(&app.verbose, "v", false, verboseUsage)
 	fs.BoolVar(&app.noColor, "no-color", false, noColorUsage)
 	fs.StringVar(&app.user, "u", auth.Default().User(), userUsage)
-	fs.BoolVar(&app.force, "force", false, forceUsage)
 
 	mode := logModeWarn
 	fs.Var(&mode, "log", logUsage)
@@ -134,7 +132,6 @@ type application struct {
 	verbose           bool
 	noColor           bool
 	user              string
-	force             bool
 	args              []string
 	printFlagDefaults func()
 
@@ -197,22 +194,58 @@ func (app *application) dispatch() error {
 		return app.commandsRPC(app.args[0])
 	}
 
-	device := app.args[0]
-	command := app.args[1]
-	cmdArgs := app.args[2:]
+	return app.dispatchCommand(app.args[0], app.args[1], app.args[2:])
+}
 
+// dispatchCommand handles the "<device> <command> [args...]" forms: the built-in
+// lock/unlock keywords, the help keyword, and otherwise a module run. It returns
+// errInvalidCmdline for a malformed invocation.
+func (app *application) dispatchCommand(device, command string, cmdArgs []string) error {
 	switch command {
 	case "lock":
+		// lock takes an optional single duration argument.
+		if len(cmdArgs) > 1 {
+			return errInvalidCmdline
+		}
+
 		return app.lockRPC(device, cmdArgs)
 	case "unlock":
-		return app.unlockRPC(device)
+		// unlock takes nothing, or the single keyword "force".
+		force, err := parseUnlockArgs(cmdArgs)
+		if err != nil {
+			return err
+		}
+
+		return app.unlockRPC(device, force)
 	}
 
+	// help is a keyword only as the sole argument: "<device> <command> help".
+	// Trailing arguments after it are a malformed command line, not silently
+	// dropped.
 	if len(cmdArgs) > 0 && cmdArgs[0] == "help" {
+		if len(cmdArgs) > 1 {
+			return errInvalidCmdline
+		}
+
 		return app.detailsRPC(device, command, "help")
 	}
 
 	return app.runRPC(device, command, cmdArgs)
+}
+
+// parseUnlockArgs interprets the arguments to the unlock command. Unlock accepts
+// no arguments for a normal, owner-only release, or the single keyword "force"
+// to break a lock held by another user. Any other argument is a command-line
+// error (errInvalidCmdline), which renders the usage synopsis.
+func parseUnlockArgs(cmdArgs []string) (bool, error) {
+	switch {
+	case len(cmdArgs) == 0:
+		return false, nil
+	case len(cmdArgs) == 1 && cmdArgs[0] == "force":
+		return true, nil
+	default:
+		return false, errInvalidCmdline
+	}
 }
 
 // exit terminates the application. Buffered diagnostics (the warning summary)
