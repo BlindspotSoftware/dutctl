@@ -123,8 +123,8 @@ func (app *application) lockRPC(device string, cmdArgs []string) error {
 		Data: output.DeviceEntry{
 			Name:      res.Msg.GetDevice(),
 			Locked:    true,
-			Owner:     res.Msg.GetOwner(),
-			ExpiresAt: res.Msg.GetExpiresAt(),
+			Owner:     res.Msg.GetLock().GetOwner(),
+			ExpiresAt: res.Msg.GetLock().GetExpiresAt(),
 		},
 		Metadata: map[string]string{
 			"server": app.serverAddr,
@@ -183,7 +183,7 @@ func (app *application) detailsRPC(device, command, keyword string) error {
 	ctx := context.Background()
 	req := connect.NewRequest(&pb.DetailsRequest{
 		Device:  device,
-		Cmd:     command,
+		Command: command,
 		Keyword: keyword,
 	})
 

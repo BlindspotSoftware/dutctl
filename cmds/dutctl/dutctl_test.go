@@ -71,7 +71,7 @@ func (f *fakeDeviceServiceClient) Details(
 ) (*connect.Response[pb.DetailsResponse], error) {
 	f.detailsCalls = append(f.detailsCalls, detailsCall{
 		device:  req.Msg.GetDevice(),
-		cmd:     req.Msg.GetCmd(),
+		cmd:     req.Msg.GetCommand(),
 		keyword: req.Msg.GetKeyword(),
 	})
 

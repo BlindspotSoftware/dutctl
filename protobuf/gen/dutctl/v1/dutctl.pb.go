@@ -107,7 +107,7 @@ func (x *ListResponse) GetDevices() []*DeviceInfo {
 type DeviceInfo struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	Lock          *LockInfo              `protobuf:"bytes,2,opt,name=lock,proto3" json:"lock,omitempty"` // Unset when the device is not locked.
+	Lock          *LockState             `protobuf:"bytes,2,opt,name=lock,proto3" json:"lock,omitempty"` // Unset when the device is not locked.
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -149,17 +149,17 @@ func (x *DeviceInfo) GetName() string {
 	return ""
 }
 
-func (x *DeviceInfo) GetLock() *LockInfo {
+func (x *DeviceInfo) GetLock() *LockState {
 	if x != nil {
 		return x.Lock
 	}
 	return nil
 }
 
-// LockInfo describes the lock state of a device. The enclosing DeviceInfo
+// LockState describes the lock state of a device. The enclosing DeviceInfo
 // leaves its lock field unset when the device is not locked, so this message
 // does not repeat that signal as a separate boolean.
-type LockInfo struct {
+type LockState struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Owner         string                 `protobuf:"bytes,1,opt,name=owner,proto3" json:"owner,omitempty"`
 	LockedAt      int64                  `protobuf:"varint,2,opt,name=locked_at,json=lockedAt,proto3" json:"locked_at,omitempty"`    // Unix seconds.
@@ -168,20 +168,20 @@ type LockInfo struct {
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *LockInfo) Reset() {
-	*x = LockInfo{}
+func (x *LockState) Reset() {
+	*x = LockState{}
 	mi := &file_dutctl_v1_dutctl_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *LockInfo) String() string {
+func (x *LockState) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*LockInfo) ProtoMessage() {}
+func (*LockState) ProtoMessage() {}
 
-func (x *LockInfo) ProtoReflect() protoreflect.Message {
+func (x *LockState) ProtoReflect() protoreflect.Message {
 	mi := &file_dutctl_v1_dutctl_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -193,26 +193,26 @@ func (x *LockInfo) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use LockInfo.ProtoReflect.Descriptor instead.
-func (*LockInfo) Descriptor() ([]byte, []int) {
+// Deprecated: Use LockState.ProtoReflect.Descriptor instead.
+func (*LockState) Descriptor() ([]byte, []int) {
 	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{3}
 }
 
-func (x *LockInfo) GetOwner() string {
+func (x *LockState) GetOwner() string {
 	if x != nil {
 		return x.Owner
 	}
 	return ""
 }
 
-func (x *LockInfo) GetLockedAt() int64 {
+func (x *LockState) GetLockedAt() int64 {
 	if x != nil {
 		return x.LockedAt
 	}
 	return 0
 }
 
-func (x *LockInfo) GetExpiresAt() int64 {
+func (x *LockState) GetExpiresAt() int64 {
 	if x != nil {
 		return x.ExpiresAt
 	}
@@ -315,7 +315,7 @@ func (x *CommandsResponse) GetCommands() []string {
 type DetailsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Device        string                 `protobuf:"bytes,1,opt,name=device,proto3" json:"device,omitempty"`
-	Cmd           string                 `protobuf:"bytes,2,opt,name=cmd,proto3" json:"cmd,omitempty"`
+	Command       string                 `protobuf:"bytes,2,opt,name=command,proto3" json:"command,omitempty"`
 	Keyword       string                 `protobuf:"bytes,3,opt,name=keyword,proto3" json:"keyword,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -358,9 +358,9 @@ func (x *DetailsRequest) GetDevice() string {
 	return ""
 }
 
-func (x *DetailsRequest) GetCmd() string {
+func (x *DetailsRequest) GetCommand() string {
 	if x != nil {
-		return x.Cmd
+		return x.Command
 	}
 	return ""
 }
@@ -1000,9 +1000,7 @@ func (x *LockRequest) GetDurationSeconds() int64 {
 type LockResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Device        string                 `protobuf:"bytes,1,opt,name=device,proto3" json:"device,omitempty"`
-	Owner         string                 `protobuf:"bytes,2,opt,name=owner,proto3" json:"owner,omitempty"`
-	LockedAt      int64                  `protobuf:"varint,3,opt,name=locked_at,json=lockedAt,proto3" json:"locked_at,omitempty"`    // Unix seconds.
-	ExpiresAt     int64                  `protobuf:"varint,4,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"` // Unix seconds, 0 means no expiry.
+	Lock          *LockState             `protobuf:"bytes,2,opt,name=lock,proto3" json:"lock,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1044,25 +1042,11 @@ func (x *LockResponse) GetDevice() string {
 	return ""
 }
 
-func (x *LockResponse) GetOwner() string {
+func (x *LockResponse) GetLock() *LockState {
 	if x != nil {
-		return x.Owner
+		return x.Lock
 	}
-	return ""
-}
-
-func (x *LockResponse) GetLockedAt() int64 {
-	if x != nil {
-		return x.LockedAt
-	}
-	return 0
-}
-
-func (x *LockResponse) GetExpiresAt() int64 {
-	if x != nil {
-		return x.ExpiresAt
-	}
-	return 0
+	return nil
 }
 
 // UnlockRequest is sent by the client to release a lock on a device.
@@ -1255,12 +1239,12 @@ const file_dutctl_v1_dutctl_proto_rawDesc = "" +
 	"\x16dutctl/v1/dutctl.proto\x12\tdutctl.v1\"\r\n" +
 	"\vListRequest\"?\n" +
 	"\fListResponse\x12/\n" +
-	"\adevices\x18\x01 \x03(\v2\x15.dutctl.v1.DeviceInfoR\adevices\"I\n" +
+	"\adevices\x18\x01 \x03(\v2\x15.dutctl.v1.DeviceInfoR\adevices\"J\n" +
 	"\n" +
 	"DeviceInfo\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12'\n" +
-	"\x04lock\x18\x02 \x01(\v2\x13.dutctl.v1.LockInfoR\x04lock\"\\\n" +
-	"\bLockInfo\x12\x14\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12(\n" +
+	"\x04lock\x18\x02 \x01(\v2\x14.dutctl.v1.LockStateR\x04lock\"]\n" +
+	"\tLockState\x12\x14\n" +
 	"\x05owner\x18\x01 \x01(\tR\x05owner\x12\x1b\n" +
 	"\tlocked_at\x18\x02 \x01(\x03R\blockedAt\x12\x1d\n" +
 	"\n" +
@@ -1268,10 +1252,10 @@ const file_dutctl_v1_dutctl_proto_rawDesc = "" +
 	"\x0fCommandsRequest\x12\x16\n" +
 	"\x06device\x18\x01 \x01(\tR\x06device\".\n" +
 	"\x10CommandsResponse\x12\x1a\n" +
-	"\bcommands\x18\x01 \x03(\tR\bcommands\"T\n" +
+	"\bcommands\x18\x01 \x03(\tR\bcommands\"\\\n" +
 	"\x0eDetailsRequest\x12\x16\n" +
-	"\x06device\x18\x01 \x01(\tR\x06device\x12\x10\n" +
-	"\x03cmd\x18\x02 \x01(\tR\x03cmd\x12\x18\n" +
+	"\x06device\x18\x01 \x01(\tR\x06device\x12\x18\n" +
+	"\acommand\x18\x02 \x01(\tR\acommand\x12\x18\n" +
 	"\akeyword\x18\x03 \x01(\tR\akeyword\"+\n" +
 	"\x0fDetailsResponse\x12\x18\n" +
 	"\adetails\x18\x01 \x01(\tR\adetails\"\x9a\x01\n" +
@@ -1305,13 +1289,10 @@ const file_dutctl_v1_dutctl_proto_rawDesc = "" +
 	"\acontent\x18\x02 \x01(\fR\acontent\"P\n" +
 	"\vLockRequest\x12\x16\n" +
 	"\x06device\x18\x01 \x01(\tR\x06device\x12)\n" +
-	"\x10duration_seconds\x18\x02 \x01(\x03R\x0fdurationSeconds\"x\n" +
+	"\x10duration_seconds\x18\x02 \x01(\x03R\x0fdurationSeconds\"P\n" +
 	"\fLockResponse\x12\x16\n" +
-	"\x06device\x18\x01 \x01(\tR\x06device\x12\x14\n" +
-	"\x05owner\x18\x02 \x01(\tR\x05owner\x12\x1b\n" +
-	"\tlocked_at\x18\x03 \x01(\x03R\blockedAt\x12\x1d\n" +
-	"\n" +
-	"expires_at\x18\x04 \x01(\x03R\texpiresAt\"=\n" +
+	"\x06device\x18\x01 \x01(\tR\x06device\x12(\n" +
+	"\x04lock\x18\x02 \x01(\v2\x14.dutctl.v1.LockStateR\x04lock\"=\n" +
 	"\rUnlockRequest\x12\x16\n" +
 	"\x06device\x18\x01 \x01(\tR\x06device\x12\x14\n" +
 	"\x05force\x18\x02 \x01(\bR\x05force\"\x10\n" +
@@ -1347,7 +1328,7 @@ var file_dutctl_v1_dutctl_proto_goTypes = []any{
 	(*ListRequest)(nil),      // 0: dutctl.v1.ListRequest
 	(*ListResponse)(nil),     // 1: dutctl.v1.ListResponse
 	(*DeviceInfo)(nil),       // 2: dutctl.v1.DeviceInfo
-	(*LockInfo)(nil),         // 3: dutctl.v1.LockInfo
+	(*LockState)(nil),        // 3: dutctl.v1.LockState
 	(*CommandsRequest)(nil),  // 4: dutctl.v1.CommandsRequest
 	(*CommandsResponse)(nil), // 5: dutctl.v1.CommandsResponse
 	(*DetailsRequest)(nil),   // 6: dutctl.v1.DetailsRequest
@@ -1368,7 +1349,7 @@ var file_dutctl_v1_dutctl_proto_goTypes = []any{
 }
 var file_dutctl_v1_dutctl_proto_depIdxs = []int32{
 	2,  // 0: dutctl.v1.ListResponse.devices:type_name -> dutctl.v1.DeviceInfo
-	3,  // 1: dutctl.v1.DeviceInfo.lock:type_name -> dutctl.v1.LockInfo
+	3,  // 1: dutctl.v1.DeviceInfo.lock:type_name -> dutctl.v1.LockState
 	10, // 2: dutctl.v1.RunRequest.command:type_name -> dutctl.v1.Command
 	12, // 3: dutctl.v1.RunRequest.console:type_name -> dutctl.v1.Console
 	14, // 4: dutctl.v1.RunRequest.file:type_name -> dutctl.v1.File
@@ -1376,25 +1357,26 @@ var file_dutctl_v1_dutctl_proto_depIdxs = []int32{
 	12, // 6: dutctl.v1.RunResponse.console:type_name -> dutctl.v1.Console
 	13, // 7: dutctl.v1.RunResponse.file_request:type_name -> dutctl.v1.FileRequest
 	14, // 8: dutctl.v1.RunResponse.file:type_name -> dutctl.v1.File
-	0,  // 9: dutctl.v1.DeviceService.List:input_type -> dutctl.v1.ListRequest
-	4,  // 10: dutctl.v1.DeviceService.Commands:input_type -> dutctl.v1.CommandsRequest
-	6,  // 11: dutctl.v1.DeviceService.Details:input_type -> dutctl.v1.DetailsRequest
-	8,  // 12: dutctl.v1.DeviceService.Run:input_type -> dutctl.v1.RunRequest
-	15, // 13: dutctl.v1.DeviceService.Lock:input_type -> dutctl.v1.LockRequest
-	17, // 14: dutctl.v1.DeviceService.Unlock:input_type -> dutctl.v1.UnlockRequest
-	19, // 15: dutctl.v1.RelayService.Register:input_type -> dutctl.v1.RegisterRequest
-	1,  // 16: dutctl.v1.DeviceService.List:output_type -> dutctl.v1.ListResponse
-	5,  // 17: dutctl.v1.DeviceService.Commands:output_type -> dutctl.v1.CommandsResponse
-	7,  // 18: dutctl.v1.DeviceService.Details:output_type -> dutctl.v1.DetailsResponse
-	9,  // 19: dutctl.v1.DeviceService.Run:output_type -> dutctl.v1.RunResponse
-	16, // 20: dutctl.v1.DeviceService.Lock:output_type -> dutctl.v1.LockResponse
-	18, // 21: dutctl.v1.DeviceService.Unlock:output_type -> dutctl.v1.UnlockResponse
-	20, // 22: dutctl.v1.RelayService.Register:output_type -> dutctl.v1.RegisterResponse
-	16, // [16:23] is the sub-list for method output_type
-	9,  // [9:16] is the sub-list for method input_type
-	9,  // [9:9] is the sub-list for extension type_name
-	9,  // [9:9] is the sub-list for extension extendee
-	0,  // [0:9] is the sub-list for field type_name
+	3,  // 9: dutctl.v1.LockResponse.lock:type_name -> dutctl.v1.LockState
+	0,  // 10: dutctl.v1.DeviceService.List:input_type -> dutctl.v1.ListRequest
+	4,  // 11: dutctl.v1.DeviceService.Commands:input_type -> dutctl.v1.CommandsRequest
+	6,  // 12: dutctl.v1.DeviceService.Details:input_type -> dutctl.v1.DetailsRequest
+	8,  // 13: dutctl.v1.DeviceService.Run:input_type -> dutctl.v1.RunRequest
+	15, // 14: dutctl.v1.DeviceService.Lock:input_type -> dutctl.v1.LockRequest
+	17, // 15: dutctl.v1.DeviceService.Unlock:input_type -> dutctl.v1.UnlockRequest
+	19, // 16: dutctl.v1.RelayService.Register:input_type -> dutctl.v1.RegisterRequest
+	1,  // 17: dutctl.v1.DeviceService.List:output_type -> dutctl.v1.ListResponse
+	5,  // 18: dutctl.v1.DeviceService.Commands:output_type -> dutctl.v1.CommandsResponse
+	7,  // 19: dutctl.v1.DeviceService.Details:output_type -> dutctl.v1.DetailsResponse
+	9,  // 20: dutctl.v1.DeviceService.Run:output_type -> dutctl.v1.RunResponse
+	16, // 21: dutctl.v1.DeviceService.Lock:output_type -> dutctl.v1.LockResponse
+	18, // 22: dutctl.v1.DeviceService.Unlock:output_type -> dutctl.v1.UnlockResponse
+	20, // 23: dutctl.v1.RelayService.Register:output_type -> dutctl.v1.RegisterResponse
+	17, // [17:24] is the sub-list for method output_type
+	10, // [10:17] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_dutctl_v1_dutctl_proto_init() }

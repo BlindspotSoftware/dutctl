@@ -93,7 +93,7 @@ func (a *rpcService) List(
 		// never reads as free: a reservation surfaces with its expiry, while a
 		// Busy hold carries a zero expiry, which the client renders as "in use".
 		if hold, held := locks[name]; held {
-			info.Lock = &pb.LockInfo{
+			info.Lock = &pb.LockState{
 				Owner:     hold.Owner,
 				LockedAt:  hold.LockedAt.Unix(),
 				ExpiresAt: expiresAtUnix(hold.ExpiresAt),
@@ -164,7 +164,7 @@ func (a *rpcService) Details(
 	l.Info("request received")
 
 	wantDev := req.Msg.GetDevice()
-	wantCmd := req.Msg.GetCmd()
+	wantCmd := req.Msg.GetCommand()
 	wantKeyword := req.Msg.GetKeyword()
 
 	if wantKeyword != keyword.Help {
@@ -271,10 +271,12 @@ func (a *rpcService) Lock(
 	}
 
 	res := connect.NewResponse(&pb.LockResponse{
-		Device:    device,
-		Owner:     info.Owner,
-		LockedAt:  info.LockedAt.Unix(),
-		ExpiresAt: expiresAtUnix(info.ExpiresAt),
+		Device: device,
+		Lock: &pb.LockState{
+			Owner:     info.Owner,
+			LockedAt:  info.LockedAt.Unix(),
+			ExpiresAt: expiresAtUnix(info.ExpiresAt),
+		},
 	})
 
 	l.Info("lock acquired", "device", device, "owner", info.Owner)

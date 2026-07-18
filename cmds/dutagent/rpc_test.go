@@ -50,11 +50,11 @@ func TestLockRPC(t *testing.T) {
 		t.Fatalf("Lock: unexpected error: %v", err)
 	}
 
-	if res.Msg.GetOwner() != "alice" {
-		t.Errorf("owner = %q, want alice", res.Msg.GetOwner())
+	if res.Msg.GetLock().GetOwner() != "alice" {
+		t.Errorf("owner = %q, want alice", res.Msg.GetLock().GetOwner())
 	}
 
-	if res.Msg.GetExpiresAt() == 0 {
+	if res.Msg.GetLock().GetExpiresAt() == 0 {
 		t.Error("expires_at = 0, want a timed expiry")
 	}
 }
@@ -173,7 +173,7 @@ func TestLockRPCDurationBoundaries(t *testing.T) {
 			t.Fatalf("Lock with zero duration: unexpected error: %v", err)
 		}
 
-		got := time.Unix(res.Msg.GetExpiresAt(), 0).Sub(before)
+		got := time.Unix(res.Msg.GetLock().GetExpiresAt(), 0).Sub(before)
 		if got < defaultLockDuration-time.Minute || got > defaultLockDuration+time.Minute {
 			t.Errorf("expiry in %v, want about the agent default %v", got, defaultLockDuration)
 		}
@@ -201,7 +201,7 @@ func TestListRPCShowsAutoOnlyLock(t *testing.T) {
 		t.Fatalf("List: %v", err)
 	}
 
-	var got *pb.LockInfo
+	var got *pb.LockState
 
 	for _, info := range res.Msg.GetDevices() {
 		if info.GetName() == "devA" {
@@ -239,7 +239,7 @@ func TestListRPCExplicitShadowsAuto(t *testing.T) {
 		t.Fatalf("List: %v", err)
 	}
 
-	var got *pb.LockInfo
+	var got *pb.LockState
 
 	for _, info := range res.Msg.GetDevices() {
 		if info.GetName() == "devA" {
