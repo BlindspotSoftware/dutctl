@@ -51,23 +51,15 @@ func newTextFormatter(config Config) *TextFormatter {
 // selectWriter returns the writer for content based on buffering mode and
 // error state.
 func (f *TextFormatter) selectWriter(content Content) io.Writer {
-	var writer io.Writer
-
 	if f.buffering {
 		if content.IsError {
-			writer = &f.errBuffer
-		} else {
-			writer = &f.stdBuffer
+			return &f.errBuffer
 		}
-	} else {
-		if content.IsError {
-			writer = f.stderr
-		} else {
-			writer = f.stdout
-		}
+
+		return &f.stdBuffer
 	}
 
-	return writer
+	return streamFor(f.stdout, f.stderr, content.IsError)
 }
 
 // WriteContent formats and outputs structured content.

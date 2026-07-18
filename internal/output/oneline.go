@@ -156,12 +156,7 @@ func (f *OneLineFormatter) output(line string, isError bool) {
 			f.stdBuffer.WriteString(line)
 		}
 	} else {
-		writer := f.stdout
-		if isError {
-			writer = f.stderr
-		}
-
-		fmt.Fprint(writer, line)
+		fmt.Fprint(streamFor(f.stdout, f.stderr, isError), line)
 	}
 }
 

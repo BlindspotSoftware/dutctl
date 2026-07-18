@@ -63,10 +63,7 @@ func (f *YAMLFormatter) WriteContent(content Content) {
 		return
 	}
 
-	writer := f.stdout
-	if content.IsError {
-		writer = f.stderr
-	}
+	writer := streamFor(f.stdout, f.stderr, content.IsError)
 
 	bytes, err := yaml.Marshal(output)
 	if err != nil {
