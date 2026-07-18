@@ -65,10 +65,7 @@ func (f *JSONFormatter) WriteContent(content Content) {
 	}
 
 	// Immediate output
-	writer := f.stdout
-	if content.IsError {
-		writer = f.stderr
-	}
+	writer := streamFor(f.stdout, f.stderr, content.IsError)
 
 	bytes, err := json.MarshalIndent(output, "", "  ")
 	if err != nil {

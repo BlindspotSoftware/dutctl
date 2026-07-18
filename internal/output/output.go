@@ -132,6 +132,17 @@ func withDefaultWriters(config Config) Config {
 	return config
 }
 
+// streamFor returns the writer for immediate (non-buffered) output: stderr when
+// isError is set, otherwise stdout. Buffered output is routed by each formatter
+// separately, as the buffer shapes differ.
+func streamFor(stdout, stderr io.Writer, isError bool) io.Writer {
+	if isError {
+		return stderr
+	}
+
+	return stdout
+}
+
 // New creates an appropriate output formatter based on the provided configuration.
 func New(config Config) Formatter {
 	switch config.Format {
