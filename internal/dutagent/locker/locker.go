@@ -16,57 +16,60 @@ import (
 
 // Sentinel errors returned by Locker.
 var (
-	// ErrNotLocked is returned when releasing a slot that is not held.
+	// ErrNotLocked is returned when releasing a hold that is not held.
 	ErrNotLocked = errors.New("device is not locked")
-	// ErrWrongOwner is returned when a non-owner tries to release a slot.
+	// ErrWrongOwner is returned when a non-owner tries to release a hold.
 	ErrWrongOwner = errors.New("device is locked by another owner")
 	// ErrInvalidDuration is returned when Lock is called with a non-positive
-	// duration. Explicit locks always require a positive expiry; the
-	// no-expiry semantic is reserved for the auto-lock slot.
+	// duration. A reservation always requires a positive expiry; the no-expiry
+	// semantic belongs to a Busy hold.
 	ErrInvalidDuration = errors.New("lock duration must be positive")
 )
 
-// Slot identifies which of a device's two lock slots an Info refers to.
-type Slot string
+// Kind is the sort of hold a device carries.
+type Kind int
 
-// ExplicitSlot and AutoSlot are the two independent lock slots a device can
-// hold. An explicit lock is user-requested and time-bounded; an auto lock is
-// taken automatically to guard a running command and never expires by time.
 const (
-	ExplicitSlot Slot = "explicit"
-	AutoSlot     Slot = "auto"
+	// Reserved is an explicit, user-requested lock with a time bound (the
+	// `lock` command). It carries the device's meaningful expiry.
+	Reserved Kind = iota
+	// Busy is a transient hold taken automatically while a command runs. It
+	// has no time expiry and is released when the command finishes.
+	Busy
 )
 
-// Info describes the state of a single lock slot.
-type Info struct {
-	Owner    string
-	LockedAt time.Time
-	// ExpiresAt is the time the lock expires. The zero value means the lock
-	// never expires by time; only auto-locks may carry a zero ExpiresAt.
+// String renders a Kind for logs and diagnostics.
+func (k Kind) String() string {
+	switch k {
+	case Reserved:
+		return "reserved"
+	case Busy:
+		return "busy"
+	default:
+		return "unknown"
+	}
+}
+
+// Hold describes a single hold on a device: who owns it, when it was taken,
+// when it expires (the zero value for a Busy hold, which never expires by
+// time), and its Kind. The Locker sets Kind on every Hold it produces.
+type Hold struct {
+	Owner     string
+	LockedAt  time.Time
 	ExpiresAt time.Time
-	// Slot reports which slot this Info was read from. Set by the
-	// Locker on every value it produces.
-	Slot Slot
+	Kind      Kind
 }
 
-// isExpired reports whether a slot has a time-based expiry that has passed.
+// isExpired reports whether a hold has a time-based expiry that has passed.
 // A zero ExpiresAt never expires.
-func (li Info) isExpired(now time.Time) bool {
-	return !li.ExpiresAt.IsZero() && !now.Before(li.ExpiresAt)
+func (h Hold) isExpired(now time.Time) bool {
+	return !h.ExpiresAt.IsZero() && !now.Before(h.ExpiresAt)
 }
 
-// DeviceState is a snapshot of both slot states for a single device.
-// Each pointer is nil when the corresponding slot is empty.
-type DeviceState struct {
-	Explicit *Info
-	Auto     *Info
-}
-
-// Error is returned when an operation is denied because the device is
-// held by a different owner. Holder is the Info of the lock that blocks
-// the operation (its owner, when it was taken, its expiry, and which slot
-// it lives in via Holder.Slot). Error unwraps to ErrWrongOwner so
-// callers can match the "different owner" case across acquire (Lock/AutoLock)
+// Error is returned when an operation is denied because the device is held by
+// a different owner. Holder is the Hold that blocks the operation (its owner,
+// when it was taken, its expiry, and its Kind). Error unwraps to ErrWrongOwner
+// so callers can match the "different owner" case across acquire (Lock/AutoLock)
 // and release (ClearLock/ClearAutoLock) APIs with a single errors.Is check.
 //
 // It is always returned as a pointer (*Error) and uses a pointer receiver:
@@ -74,7 +77,7 @@ type DeviceState struct {
 // metadata with errors.As into a *Error.
 type Error struct {
 	Device string
-	Holder Info
+	Holder Hold
 }
 
 // humanRemaining renders dur as a compact "1h30m"-style string, rounded to
@@ -100,7 +103,7 @@ func humanRemaining(dur time.Duration) string {
 }
 
 func (e *Error) Error() string {
-	if e.Holder.Slot == ExplicitSlot {
+	if e.Holder.Kind == Reserved {
 		remaining := humanRemaining(time.Until(e.Holder.ExpiresAt))
 
 		return fmt.Sprintf("device %q is locked by %q for %s", e.Device, e.Holder.Owner, remaining)
@@ -113,72 +116,72 @@ func (e *Error) Unwrap() error {
 	return ErrWrongOwner
 }
 
-// Locker tracks per-device locks with two independent slots: an explicit
-// slot driven by Lock/ClearLock/ForceClearLock and an auto slot driven by
-// AutoLock/ClearAutoLock. The two slots are stored separately so a normal
-// clear of one never affects the other. ForceClearLock is the one exception:
-// it is an admin escape hatch that wipes both slots. Locker is safe for
-// concurrent use. Lock state is held in memory only and is lost on agent
-// restart.
+// Locker tracks per-device holds of two kinds: a Reserved hold driven by
+// Lock/ClearLock/ForceClearLock and a Busy hold driven by AutoLock/
+// ClearAutoLock. The two are stored separately so a normal clear of one never
+// affects the other. ForceClearLock is the one exception: it is an admin
+// escape hatch that clears both. Locker is safe for concurrent use. Hold state
+// is held in memory only and is lost on agent restart.
 type Locker struct {
-	mu       sync.Mutex
-	explicit map[string]Info
-	auto     map[string]Info
+	mu sync.Mutex
+	// reserved holds Reserved-kind holds (the `lock` command); busy holds
+	// Busy-kind holds taken automatically while a command runs.
+	reserved map[string]Hold
+	busy     map[string]Hold
 	log      *slog.Logger
 }
 
 // New returns a ready-to-use Locker.
 func New() *Locker {
 	return &Locker{
-		explicit: make(map[string]Info),
-		auto:     make(map[string]Info),
+		reserved: make(map[string]Hold),
+		busy:     make(map[string]Hold),
 		log:      log.Scope(slog.Default(), "locker"),
 	}
 }
 
-// hasExplicitLock returns the live explicit-slot lock for device, pruning it
-// first if it has expired. The caller must hold l.mu.
-func (l *Locker) hasExplicitLock(device string) (Info, bool) {
-	info, ok := l.explicit[device]
+// liveReservation returns the live Reserved hold for device, pruning it first
+// if it has expired. The caller must hold l.mu.
+func (l *Locker) liveReservation(device string) (Hold, bool) {
+	hold, ok := l.reserved[device]
 	if !ok {
-		return Info{}, false
+		return Hold{}, false
 	}
 
-	if info.isExpired(time.Now()) {
-		delete(l.explicit, device)
-		// The only lock-lifecycle event a caller never drives explicitly: the
+	if hold.isExpired(time.Now()) {
+		delete(l.reserved, device)
+		// The only lifecycle event a caller never drives explicitly: the
 		// reservation ends here, lazily, and the device becomes free to others.
-		l.log.Info("explicit lock expired", "device", device, "owner", info.Owner)
+		l.log.Info("reservation expired", "device", device, "owner", hold.Owner)
 
-		return Info{}, false
+		return Hold{}, false
 	}
 
-	return info, true
+	return hold, true
 }
 
-// checkLocked returns a *Error describing whichever slot would block
-// owner from operating on device, or nil if owner has access. The caller
-// must hold l.mu.
+// checkLocked returns a *Error describing whichever hold would block owner from
+// operating on device, or nil if owner has access. The caller must hold l.mu.
 func (l *Locker) checkLocked(device, owner string) *Error {
-	if info, held := l.hasExplicitLock(device); held && info.Owner != owner {
-		return &Error{Device: device, Holder: info}
+	if hold, held := l.liveReservation(device); held && hold.Owner != owner {
+		return &Error{Device: device, Holder: hold}
 	}
 
-	if info, held := l.auto[device]; held && info.Owner != owner {
-		return &Error{Device: device, Holder: info}
+	if hold, held := l.busy[device]; held && hold.Owner != owner {
+		return &Error{Device: device, Holder: hold}
 	}
 
 	return nil
 }
 
-// Lock acquires the explicit-slot lock on device for owner. dur must be
-// positive; ErrInvalidDuration is returned otherwise. If the device is
-// already explicit-locked by the same owner, the lock is extended: the new
-// expiry is the later of the current and now+dur. If either slot is held by
-// a different owner, a *Error is returned.
-func (l *Locker) Lock(device, owner string, dur time.Duration) (Info, error) {
+// Lock acquires the Reserved hold on device for owner. dur must be positive;
+// ErrInvalidDuration is returned otherwise. If the device is already reserved
+// by the same owner, the reservation is extended: the new expiry is the later
+// of the current and now+dur. If either hold is held by a different owner, a
+// *Error is returned.
+func (l *Locker) Lock(device, owner string, dur time.Duration) (Hold, error) {
 	if dur <= 0 {
-		return Info{}, ErrInvalidDuration
+		return Hold{}, ErrInvalidDuration
 	}
 
 	l.mu.Lock()
@@ -186,129 +189,129 @@ func (l *Locker) Lock(device, owner string, dur time.Duration) (Info, error) {
 
 	blocker := l.checkLocked(device, owner)
 	if blocker != nil {
-		return Info{}, blocker
+		return Hold{}, blocker
 	}
 
 	now := time.Now()
 	newExpiry := now.Add(dur)
 
-	if existing, held := l.hasExplicitLock(device); held {
+	if existing, held := l.liveReservation(device); held {
 		// Same-owner re-lock extends but never shrinks the expiry.
 		updated := existing
 		if newExpiry.After(existing.ExpiresAt) {
 			updated.ExpiresAt = newExpiry
 		}
 
-		l.explicit[device] = updated
+		l.reserved[device] = updated
 
 		return updated, nil
 	}
 
-	info := Info{Owner: owner, LockedAt: now, ExpiresAt: newExpiry, Slot: ExplicitSlot}
-	l.explicit[device] = info
+	hold := Hold{Owner: owner, LockedAt: now, ExpiresAt: newExpiry, Kind: Reserved}
+	l.reserved[device] = hold
 
-	return info, nil
+	return hold, nil
 }
 
-// ClearLock releases the explicit-slot lock on device. Only the owner may
-// release it: it returns ErrNotLocked when no explicit lock is held, or a
-// *Error (unwrapping to ErrWrongOwner) when a different owner holds the slot.
-// The auto slot is not touched.
+// ClearLock releases the Reserved hold on device. Only the owner may release
+// it: it returns ErrNotLocked when no reservation is held, or a *Error
+// (unwrapping to ErrWrongOwner) when a different owner holds it. The Busy hold
+// is not touched.
 func (l *Locker) ClearLock(device, owner string) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	info, ok := l.hasExplicitLock(device)
+	hold, ok := l.liveReservation(device)
 	if !ok {
 		return ErrNotLocked
 	}
 
-	if info.Owner != owner {
-		return &Error{Device: device, Holder: info}
+	if hold.Owner != owner {
+		return &Error{Device: device, Holder: hold}
 	}
 
-	delete(l.explicit, device)
+	delete(l.reserved, device)
 
 	return nil
 }
 
-// ForceClearLock releases both slots on device regardless of owner. As an
-// admin escape hatch, it intentionally wipes any auto-lock as well so a
-// stuck command holder cannot survive a forced unlock. Returns ErrNotLocked
-// only when neither slot was held.
+// ForceClearLock releases both holds on device regardless of owner. As an admin
+// escape hatch, it intentionally clears any Busy hold as well so a stuck command
+// holder cannot survive a forced unlock. Returns ErrNotLocked only when neither
+// hold was held.
 func (l *Locker) ForceClearLock(device string) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	explicitInfo, hadExplicit := l.hasExplicitLock(device)
-	autoInfo, hadAuto := l.auto[device]
+	reservation, hadReservation := l.liveReservation(device)
+	busyHold, hadBusy := l.busy[device]
 
-	if !hadExplicit && !hadAuto {
+	if !hadReservation && !hadBusy {
 		return ErrNotLocked
 	}
 
-	if hadExplicit {
-		l.log.Warn("force-clearing lock", "kind", "explicit", "device", device, "previous_owner", explicitInfo.Owner)
-		delete(l.explicit, device)
+	if hadReservation {
+		l.log.Warn("force-clearing hold", "kind", Reserved, "device", device, "previous_owner", reservation.Owner)
+		delete(l.reserved, device)
 	}
 
-	if hadAuto {
-		l.log.Warn("force-clearing lock", "kind", "auto", "device", device, "previous_owner", autoInfo.Owner)
-		delete(l.auto, device)
+	if hadBusy {
+		l.log.Warn("force-clearing hold", "kind", Busy, "device", device, "previous_owner", busyHold.Owner)
+		delete(l.busy, device)
 	}
 
 	return nil
 }
 
-// AutoLock acquires the auto-slot lock on device for owner. Auto locks carry
-// no expiry. Re-AutoLock by the same owner is a no-op. If either slot is
-// held by a different owner, a *Error is returned.
-func (l *Locker) AutoLock(device, owner string) (Info, error) {
+// AutoLock acquires the Busy hold on device for owner. Busy holds carry no
+// expiry. Re-acquiring by the same owner is a no-op. If either hold is held by
+// a different owner, a *Error is returned.
+func (l *Locker) AutoLock(device, owner string) (Hold, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
 	blocker := l.checkLocked(device, owner)
 	if blocker != nil {
-		return Info{}, blocker
+		return Hold{}, blocker
 	}
 
-	if existing, held := l.auto[device]; held {
+	if existing, held := l.busy[device]; held {
 		return existing, nil
 	}
 
-	info := Info{Owner: owner, LockedAt: time.Now(), Slot: AutoSlot}
-	l.auto[device] = info
+	hold := Hold{Owner: owner, LockedAt: time.Now(), Kind: Busy}
+	l.busy[device] = hold
 	l.log.Debug("auto-lock acquired", "device", device, "owner", owner)
 
-	return info, nil
+	return hold, nil
 }
 
-// ClearAutoLock releases the auto-slot lock on device. Only the owner may
-// release it: it returns ErrNotLocked when no auto lock is held, or a *Error
-// (unwrapping to ErrWrongOwner) when a different owner holds the slot. The
-// explicit slot is not touched.
+// ClearAutoLock releases the Busy hold on device. Only the owner may release
+// it: it returns ErrNotLocked when no Busy hold is held, or a *Error
+// (unwrapping to ErrWrongOwner) when a different owner holds it. The Reserved
+// hold is not touched.
 func (l *Locker) ClearAutoLock(device, owner string) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	info, ok := l.auto[device]
+	hold, ok := l.busy[device]
 	if !ok {
 		return ErrNotLocked
 	}
 
-	if info.Owner != owner {
-		return &Error{Device: device, Holder: info}
+	if hold.Owner != owner {
+		return &Error{Device: device, Holder: hold}
 	}
 
-	delete(l.auto, device)
+	delete(l.busy, device)
 	l.log.Debug("auto-lock released", "device", device, "owner", owner)
 
 	return nil
 }
 
 // CheckAccess reports whether owner may operate on device. It returns nil if
-// neither slot is held or if every held slot is owned by owner; otherwise it
-// returns a *Error carrying the blocking slot's holder.
+// neither hold is held or if every held hold is owned by owner; otherwise it
+// returns a *Error carrying the blocking holder.
 func (l *Locker) CheckAccess(device, owner string) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -321,28 +324,27 @@ func (l *Locker) CheckAccess(device, owner string) error {
 	return nil
 }
 
-// StatusAll returns a snapshot of both slot states for every device that has
-// at least one slot held. Expired explicit slots are pruned and not included.
-func (l *Locker) StatusAll() map[string]DeviceState {
+// StatusAll returns the effective hold for every device that currently has one.
+// A device with a live reservation reports that Reserved hold (it carries the
+// meaningful expiry); a device that is only busy reports its Busy hold. Expired
+// reservations are pruned and omitted; free devices are absent.
+func (l *Locker) StatusAll() map[string]Hold {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	out := make(map[string]DeviceState)
+	out := make(map[string]Hold)
 
-	for device := range l.explicit {
-		if info, ok := l.hasExplicitLock(device); ok {
-			explicit := info
-			state := out[device]
-			state.Explicit = &explicit
-			out[device] = state
-		}
+	// Busy holds first, then let a live reservation shadow it: when a device
+	// has both (necessarily the same owner), the reservation is the meaningful
+	// holder to report.
+	for device, hold := range l.busy {
+		out[device] = hold
 	}
 
-	for device, info := range l.auto {
-		auto := info
-		state := out[device]
-		state.Auto = &auto
-		out[device] = state
+	for device := range l.reserved {
+		if hold, ok := l.liveReservation(device); ok {
+			out[device] = hold
+		}
 	}
 
 	return out

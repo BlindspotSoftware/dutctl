@@ -273,9 +273,9 @@ func TestAcquireAutoLock(t *testing.T) {
 			t.Fatalf("next state = %p, want executeModules", next)
 		}
 
-		state := l.StatusAll()[device]
-		if state.Auto == nil {
-			t.Error("auto-lock not taken")
+		got, ok := l.StatusAll()[device]
+		if !ok || got.Kind != locker.Busy {
+			t.Errorf("StatusAll[%s] = %+v (ok=%v), want a Busy hold", device, got, ok)
 		}
 
 		if !hold.held || hold.device != device {
@@ -318,13 +318,19 @@ func TestClearAutoLock(t *testing.T) {
 
 		clearAutoLock(context.Background(), l, device, "alice")
 
-		state := l.StatusAll()[device]
-		if state.Explicit == nil {
-			t.Error("clearAutoLock wiped the explicit lock")
+		got, ok := l.StatusAll()[device]
+		if !ok || got.Kind != locker.Reserved {
+			t.Errorf("StatusAll[%s] = %+v (ok=%v), want the reservation intact", device, got, ok)
 		}
 
-		if state.Auto != nil {
-			t.Error("auto lock still present after clearAutoLock")
+		// Releasing the reservation must leave the device free, proving the Busy
+		// hold really was cleared rather than merely shadowed by the reservation.
+		if err := l.ClearLock(device, "alice"); err != nil {
+			t.Fatalf("ClearLock: %v", err)
+		}
+
+		if _, ok := l.StatusAll()[device]; ok {
+			t.Error("Busy hold still present after clearAutoLock")
 		}
 	})
 
