@@ -25,13 +25,13 @@ message ListResponse {
 // DeviceInfo describes a single device and its current lock state.
 message DeviceInfo {
   string name = 1;
-  LockInfo lock = 2; // Unset when the device is not locked.
+  LockState lock = 2; // Unset when the device is not locked.
 }
 
-// LockInfo describes the lock state of a device. The enclosing DeviceInfo
+// LockState describes the lock state of a device. The enclosing DeviceInfo
 // leaves its lock field unset when the device is not locked, so this message
 // does not repeat that signal as a separate boolean.
-message LockInfo {
+message LockState {
   string owner = 1;
   int64 locked_at = 2; // Unix seconds.
   int64 expires_at = 3; // Unix seconds, 0 means no expiry.
@@ -52,7 +52,7 @@ message CommandsResponse {
 // device or a specific command. The type of information is defined by keyword.
 message DetailsRequest {
   string device = 1;
-  string cmd = 2;
+  string command = 2;
   string keyword = 3;
 }
 
@@ -130,9 +130,7 @@ message LockRequest {
 // LockResponse is sent by the agent in response to a successful LockRequest.
 message LockResponse {
   string device = 1;
-  string owner = 2;
-  int64 locked_at = 3; // Unix seconds.
-  int64 expires_at = 4; // Unix seconds, 0 means no expiry.
+  LockState lock = 2;
 }
 
 // UnlockRequest is sent by the client to release a lock on a device.
