@@ -200,7 +200,7 @@ func decodeCmds(node *yaml.Node) (map[string]Command, error) {
 		cmdName := node.Content[idx].Value
 
 		if cmdName == "lock" || cmdName == "unlock" {
-			return nil, &ConfigError{Command: cmdName, Err: ErrReservedCommand}
+			return nil, &ConfigError{Command: cmdName, Line: node.Content[idx].Line, Err: ErrReservedCommand}
 		}
 
 		var cmd Command
