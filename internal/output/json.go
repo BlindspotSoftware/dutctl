@@ -32,6 +32,8 @@ type JSONOutput struct {
 
 // newJSONFormatter creates a new JSON formatter.
 func newJSONFormatter(config Config) *JSONFormatter {
+	config = withDefaultWriters(config)
+
 	return &JSONFormatter{
 		stdout:     config.Stdout,
 		stderr:     config.Stderr,

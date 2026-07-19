@@ -33,6 +33,8 @@ type YAMLOutput struct {
 
 // newYAMLFormatter creates a new YAML formatter.
 func newYAMLFormatter(config Config) *YAMLFormatter {
+	config = withDefaultWriters(config)
+
 	return &YAMLFormatter{
 		stdout:     config.Stdout,
 		stderr:     config.Stderr,

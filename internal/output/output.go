@@ -7,6 +7,7 @@ package output
 
 import (
 	"io"
+	"os"
 )
 
 // ContentType is an identifier for different kinds of formatted output.
@@ -115,6 +116,20 @@ type Config struct {
 
 	// Verbose enables additional details in the output.
 	Verbose bool
+}
+
+// withDefaultWriters fills in os.Stdout / os.Stderr for any writer the caller
+// left nil, so a formatter never writes to a nil io.Writer.
+func withDefaultWriters(config Config) Config {
+	if config.Stdout == nil {
+		config.Stdout = os.Stdout
+	}
+
+	if config.Stderr == nil {
+		config.Stderr = os.Stderr
+	}
+
+	return config
 }
 
 // New creates an appropriate output formatter based on the provided configuration.
