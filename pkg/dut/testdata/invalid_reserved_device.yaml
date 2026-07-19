@@ -1,0 +1,7 @@
+version:
+  desc: "Device named like a reserved keyword"
+  cmds:
+    status:
+      desc: "Report status"
+      uses:
+        - module: dummy-status

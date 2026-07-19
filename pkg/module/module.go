@@ -24,6 +24,12 @@ var (
 
 // Module is a building block of a command running on a device-under-test (DUT).
 // Implementations of this interface are the actual steps that are executed on a DUT.
+//
+// Reserved names: "lock", "unlock", and "help" cannot be used as command names
+// in a device configuration — they collide with dutctl's command-line dispatch,
+// so the dutagent rejects such a config at startup. A module also must not
+// expect "help" as the first argument to Run: the dutctl client intercepts it
+// as the help keyword and never forwards it.
 type Module interface {
 	// Help provides usage information.
 	// The returned string should contain a description of the module, the supported

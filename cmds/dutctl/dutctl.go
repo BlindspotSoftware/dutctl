@@ -17,6 +17,7 @@ import (
 	"connectrpc.com/connect"
 	"github.com/BlindspotSoftware/dutctl/internal/auth"
 	"github.com/BlindspotSoftware/dutctl/internal/buildinfo"
+	"github.com/BlindspotSoftware/dutctl/internal/keyword"
 	"github.com/BlindspotSoftware/dutctl/internal/output"
 	"github.com/BlindspotSoftware/dutctl/internal/rpc"
 	"github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1/dutctlv1connect"
@@ -163,7 +164,7 @@ const exitInterrupted = 130
 
 // start is the entry point of the application.
 func (app *application) start() {
-	if len(app.args) > 0 && app.args[0] == "version" {
+	if len(app.args) > 0 && app.args[0] == keyword.Version {
 		app.printVersion()
 		app.exit(nil)
 	}
@@ -182,7 +183,7 @@ func (app *application) dispatch() error {
 		return app.listRPC()
 	}
 
-	if app.args[0] == "list" {
+	if app.args[0] == keyword.List {
 		if len(app.args) > 1 {
 			return errInvalidCmdline
 		}
@@ -202,14 +203,14 @@ func (app *application) dispatch() error {
 // errInvalidCmdline for a malformed invocation.
 func (app *application) dispatchCommand(device, command string, cmdArgs []string) error {
 	switch command {
-	case "lock":
+	case keyword.Lock:
 		// lock takes an optional single duration argument.
 		if len(cmdArgs) > 1 {
 			return errInvalidCmdline
 		}
 
 		return app.lockRPC(device, cmdArgs)
-	case "unlock":
+	case keyword.Unlock:
 		// unlock takes nothing, or the single keyword "force".
 		force, err := parseUnlockArgs(cmdArgs)
 		if err != nil {
@@ -222,12 +223,12 @@ func (app *application) dispatchCommand(device, command string, cmdArgs []string
 	// help is a keyword only as the sole argument: "<device> <command> help".
 	// Trailing arguments after it are a malformed command line, not silently
 	// dropped.
-	if len(cmdArgs) > 0 && cmdArgs[0] == "help" {
+	if len(cmdArgs) > 0 && cmdArgs[0] == keyword.Help {
 		if len(cmdArgs) > 1 {
 			return errInvalidCmdline
 		}
 
-		return app.detailsRPC(device, command, "help")
+		return app.detailsRPC(device, command, keyword.Help)
 	}
 
 	return app.runRPC(device, command, cmdArgs)
@@ -241,7 +242,7 @@ func parseUnlockArgs(cmdArgs []string) (bool, error) {
 	switch {
 	case len(cmdArgs) == 0:
 		return false, nil
-	case len(cmdArgs) == 1 && cmdArgs[0] == "force":
+	case len(cmdArgs) == 1 && cmdArgs[0] == keyword.Force:
 		return true, nil
 	default:
 		return false, errInvalidCmdline
