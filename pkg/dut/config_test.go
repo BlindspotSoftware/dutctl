@@ -147,6 +147,7 @@ func TestInvalidConfig(t *testing.T) {
 			wantSentinel: ErrReservedCommand,
 			wantDevice:   "device1",
 			wantCommand:  "lock",
+			wantLine:     4,
 		},
 
 		// Null device value
