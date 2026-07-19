@@ -326,15 +326,17 @@ func (l *Locker) StatusAll() map[string]DeviceState {
 
 	for device := range l.explicit {
 		if info, ok := l.hasExplicitLock(device); ok {
+			explicit := info
 			state := out[device]
-			state.Explicit = &Info{Owner: info.Owner, LockedAt: info.LockedAt, ExpiresAt: info.ExpiresAt, Slot: ExplicitSlot}
+			state.Explicit = &explicit
 			out[device] = state
 		}
 	}
 
 	for device, info := range l.auto {
+		auto := info
 		state := out[device]
-		state.Auto = &Info{Owner: info.Owner, LockedAt: info.LockedAt, ExpiresAt: info.ExpiresAt, Slot: AutoSlot}
+		state.Auto = &auto
 		out[device] = state
 	}
 
