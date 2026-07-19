@@ -107,7 +107,7 @@ func (i *IPMI) Init(ctx context.Context) error {
 	// the dutagent treats a failed Init() as fatal — it shuts down and
 	// systemd crash-loops the whole agent, taking down every other device on
 	// the worker too. The session is opened lazily on the first command and
-	// re-opened automatically if it goes stale (see connect / withSession).
+	// re-opened automatically if it goes stale (see connect / withReconnect).
 	l.Debug(fmt.Sprintf("init completed for %s:%d (BMC session deferred to first use)", i.Host, i.Port))
 
 	return nil
@@ -153,13 +153,13 @@ func (i *IPMI) disconnect(ctx context.Context) {
 	i.connected = false
 }
 
-// withSession runs op against a live IPMI session, transparently re-opening the
+// withReconnect runs op against a live IPMI session, transparently re-opening the
 // session once if op fails. IPMI/RMCP sessions idle-time-out and the BMC drops
 // inactive ones, so a cached session goes stale between commands; without this
 // the module would keep using the dead session and every command would time out
 // until the agent was restarted. On the first failure the session is dropped,
 // reconnected, and op is retried once so a stale session self-heals.
-func (i *IPMI) withSession(ctx context.Context, op func() error) error {
+func (i *IPMI) withReconnect(ctx context.Context, op func() error) error {
 	err := i.connect(ctx)
 	if err != nil {
 		return err
@@ -193,13 +193,11 @@ func (i *IPMI) Deinit(ctx context.Context) error {
 	}
 
 	err := i.client.Close(ctx)
-	if err != nil {
-		log.FromContext(ctx).Debug(fmt.Sprintf("Deinit failed to close client: %v", err))
-	}
-
 	i.client = nil
 	i.connected = false
 
+	// Return the close error rather than logging it here; deinitModules
+	// aggregates and reports it with the module's device/command identity.
 	return err
 }
 
@@ -250,7 +248,7 @@ func (i *IPMI) handlePowerCommand(ctx context.Context, s module.Session, command
 		message = "Power RESET command sent"
 	}
 
-	err := i.withSession(ctx, func() error {
+	err := i.withReconnect(ctx, func() error {
 		_, cerr := i.client.ChassisControl(ctx, controlType)
 
 		return cerr
@@ -268,7 +266,7 @@ func (i *IPMI) handlePowerCommand(ctx context.Context, s module.Session, command
 func (i *IPMI) handleStatusCommand(ctx context.Context, s module.Session) error {
 	var powerIsOn bool
 
-	err := i.withSession(ctx, func() error {
+	err := i.withReconnect(ctx, func() error {
 		chassis, cerr := i.client.GetChassisStatus(ctx)
 		if cerr != nil {
 			return cerr
