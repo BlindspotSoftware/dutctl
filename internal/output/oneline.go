@@ -27,6 +27,8 @@ type OneLineFormatter struct {
 
 // newOneLineFormatter creates a new formatter that outputs content in a single-line CSV-like format.
 func newOneLineFormatter(config Config) *OneLineFormatter {
+	config = withDefaultWriters(config)
+
 	return &OneLineFormatter{
 		stdout:    config.Stdout,
 		stderr:    config.Stderr,

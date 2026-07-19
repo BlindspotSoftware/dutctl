@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
 	"slices"
 	"strings"
 	"time"
@@ -33,17 +32,11 @@ type TextFormatter struct {
 	useColor            bool              // Whether colored output is enabled
 }
 
-// newTextFormatter creates a new TextFormatter instance configured according to the provided Config.
-// If config.Stdout or config.Stderr are nil, it defaults to os.Stdout and os.Stderr respectively.
-// The formatter starts in non-buffered mode with an empty metadata cache.
+// newTextFormatter creates a new TextFormatter instance configured according to
+// the provided Config. The formatter starts in non-buffered mode with an empty
+// metadata cache.
 func newTextFormatter(config Config) *TextFormatter {
-	if config.Stdout == nil {
-		config.Stdout = os.Stdout
-	}
-
-	if config.Stderr == nil {
-		config.Stderr = os.Stderr
-	}
+	config = withDefaultWriters(config)
 
 	return &TextFormatter{
 		stdout:        config.Stdout,
