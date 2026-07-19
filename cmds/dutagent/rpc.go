@@ -15,6 +15,7 @@ import (
 	"github.com/BlindspotSoftware/dutctl/internal/auth"
 	"github.com/BlindspotSoftware/dutctl/internal/dutagent/locker"
 	"github.com/BlindspotSoftware/dutctl/internal/fsm"
+	"github.com/BlindspotSoftware/dutctl/internal/keyword"
 	"github.com/BlindspotSoftware/dutctl/internal/log"
 	"github.com/BlindspotSoftware/dutctl/internal/rpc"
 	"github.com/BlindspotSoftware/dutctl/pkg/dut"
@@ -164,12 +165,12 @@ func (a *rpcService) Details(
 
 	wantDev := req.Msg.GetDevice()
 	wantCmd := req.Msg.GetCmd()
-	keyword := req.Msg.GetKeyword()
+	wantKeyword := req.Msg.GetKeyword()
 
-	if keyword != "help" {
+	if wantKeyword != keyword.Help {
 		e := connect.NewError(
 			connect.CodeInvalidArgument,
-			fmt.Errorf("unknown keyword %q, possible values are: 'help'", keyword),
+			fmt.Errorf("unknown keyword %q, possible values are: %q", wantKeyword, keyword.Help),
 		)
 
 		return nil, e
