@@ -7,6 +7,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"log/slog"
 	"net/http"
@@ -66,22 +67,11 @@ func (svr *server) cleanup(code exitCode) {
 	svr.exit(int(code))
 }
 
-// watchInterrupt listens for interrupt signals, usually triggered by the user
-// terminating the process with Ctrl-C.
-func (svr *server) watchInterrupt() {
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, os.Interrupt, syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
-
-	go func() {
-		sig := <-c
-		slog.Info("captured signal", "signal", sig)
-		svr.cleanup(exit0)
-	}()
-}
-
-// startRPCService starts the RPC service, which ideally listens for incoming
-// connections forever. It always returns a non-nil error.
-func (svr *server) startRPCService() error {
+// startRPCService starts the RPC service and serves until ctx is cancelled (a
+// signal), draining in-flight requests, or until the server stops on its own. It
+// returns the server error, if any; the caller classifies a graceful stop via
+// ctx.Err().
+func (svr *server) startRPCService(ctx context.Context) error {
 	// TODO: load registered DUTs from a file.
 	service := &rpcService{
 		agents: make(map[string]*agent),
@@ -100,7 +90,7 @@ func (svr *server) startRPCService() error {
 
 	slog.Info("rpc service listening", "addr", svr.address)
 
-	return rpc.ListenAndServe(svr.address, mux)
+	return rpc.ListenAndServe(ctx, svr.address, mux)
 }
 
 // start orchestrates the dutserver execution.
@@ -111,14 +101,31 @@ func (svr *server) start() {
 	base := log.New(os.Stderr, log.ParseLevel(svr.logLevel), svr.logJSON)
 	slog.SetDefault(log.Scope(base, "server"))
 
-	svr.watchInterrupt()
+	// A signal (Ctrl-C / SIGTERM / SIGQUIT) cancels ctx, which drives a graceful
+	// shutdown: the RPC service drains in-flight requests before returning. This
+	// replaces an out-of-band signal handler, so shutdown runs on this goroutine
+	// rather than racing the running service.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
+	defer stop()
 
 	// TODO: Load registered agents and their list of DUTs from a file.
 	// - Handle name conflicts, e.g., if the same device name is present on multiple registered agents.
 	// - The device names over all registered agents should be unique in the for they are maintained in the server.
 
-	err := svr.startRPCService() // runs forever
+	err := svr.startRPCService(ctx)
+	if ctx.Err() != nil {
+		// A signal cancelled ctx: graceful shutdown. A non-nil err means the drain
+		// did not fully complete within the grace period, which we accept — the
+		// process exit closes what remains.
+		if err != nil {
+			slog.Warn("graceful shutdown did not fully drain in time", "err", err)
+		}
 
+		slog.Info("shutting down")
+		svr.cleanup(exit0)
+	}
+
+	// Reached only if the server stopped on its own (e.g. failed to bind).
 	slog.Error("rpc service stopped", "err", err)
 	svr.cleanup(exit1)
 }
