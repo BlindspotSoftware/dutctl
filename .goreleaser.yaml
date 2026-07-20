@@ -125,8 +125,16 @@ nfpms:
     priority: extra
     contents:
       # systemd services
-      - src: ./.firmwareci/dutagent.service
+      - src: packaging/dutagent.service
         dst: /usr/lib/systemd/system/dutagent.service
+
+      # use systemd-sysusers to create a user and group
+      - src: packaging/dutagent.sysusers
+        dst: /usr/lib/sysusers.d/dutagent.conf
+
+      # use systemd-tmpfiles to create directories
+      - src: packaging/dutagent.tmpfiles
+        dst: /usr/lib/tmpfiles.d/dutagent.conf
 
     rpm:
       packager: "Jens Topp <jens.topp@blindspot.software>"

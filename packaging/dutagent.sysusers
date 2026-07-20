@@ -1,0 +1,9 @@
+# Add dutagent user
+u dutagent - "dutagent user" /var/lib/dutagent
+# Add dutagent group
+g dutagent -
+# Add user to the group
+m dutagent dutagent
+
+# Access to serial
+m dutagent uucp

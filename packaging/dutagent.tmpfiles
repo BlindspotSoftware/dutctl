@@ -1,0 +1,2 @@
+d /var/lib/dutagent 0750 dutagent dutagent -
+d /var/log/dutagent 0755 dutagent dutagent -
