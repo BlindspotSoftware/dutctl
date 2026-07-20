@@ -1,0 +1,58 @@
+[Unit]
+Description=DUT Agent Service to run on SBC attached to a devices under test
+Documentation=https://github.com/BlindspotSoftware/dutctl
+Wants=network-online.target
+After=network-online.target
+
+# To prevent endless restart cycle
+StartLimitInterval=15
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=dutagent
+Group=dutagent
+Restart=always
+RestartSec=3s
+ExecStart=/usr/bin/dutagent -a 0.0.0.0:2024 -c /etc/dutagent/config.yaml
+# The port 2024 is unused
+#   see https://en.wikipedia.org/wiki/List_of_TCP_and_UDP_port_numbers
+WorkingDirectory=/var/lib/dutagent
+Environment=TMPDIR=/var/lib/dutagent/tmp
+# Writable scratch dir for flash images and temp files.
+Environment=HOME=/var/lib/dutagent
+# em100 (flash-emulate) reads its chip/firmware DB from $HOME/.em100. A systemd
+# service gets an empty HOME and em100 fails with "Can't find chip configs",
+# so pin HOME to where the DB lives.
+
+# Hardening
+## Filesystem protection
+ProtectSystem=strict
+ProtectHome=read-only
+## Need access to serial and flash programmer
+PrivateDevices=no
+## Prevent other service reading our TMP
+PrivateTmp=yes
+## Things this should not touch anyway
+KeyringMode=private
+ProtectClock=yes
+ProtectHostname=yes
+ProtectKernel=yes
+## Prevent privilege escalation
+RestrictSUIDSGID=true
+NoNewPrivileges=true
+LockPersonality=yes
+SystemCallArchitectures=native
+## Restrict access to filesystem
+NoExecPaths=/
+ExecPaths=/usr/bin/dutagent
+ReadOnlyPaths=/
+ReadWritePaths=/var/lib/dutagent /var/log/dutagent
+
+# Networking
+SocketBindDeny=any
+SocketBindAllow=tcp:2024
+SocketBindAllow=udp:2024
+
+[Install]
+WantedBy=multi-user.target
