@@ -7,12 +7,15 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"connectrpc.com/connect"
 	"github.com/BlindspotSoftware/dutctl/internal/auth"
@@ -179,8 +182,22 @@ func (app *application) start() {
 // It returns errInvalidCmdline for a malformed command line (exit() renders it
 // with the usage synopsis), or the error returned by the dispatched RPC.
 func (app *application) dispatch() error {
+	// A single signal context for the whole invocation: Ctrl-C / SIGTERM cancels
+	// the in-flight RPC so the client tears down cleanly (flushing the warning
+	// summary) instead of being killed. Every RPC path shares it — unary calls
+	// wrap it in a per-call timeout, while Run uses it directly, since a stream
+	// has no overall deadline.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	return asInterrupt(ctx, app.route(ctx))
+}
+
+// route selects and runs the RPC for app.args. It returns errInvalidCmdline for a
+// malformed command line, or the dispatched RPC's error.
+func (app *application) route(ctx context.Context) error {
 	if len(app.args) == 0 {
-		return app.listRPC()
+		return app.listRPC(ctx)
 	}
 
 	if app.args[0] == keyword.List {
@@ -188,20 +205,35 @@ func (app *application) dispatch() error {
 			return errInvalidCmdline
 		}
 
-		return app.listRPC()
+		return app.listRPC(ctx)
 	}
 
 	if len(app.args) == 1 {
-		return app.commandsRPC(app.args[0])
+		return app.commandsRPC(ctx, app.args[0])
 	}
 
-	return app.dispatchCommand(app.args[0], app.args[1], app.args[2:])
+	return app.dispatchCommand(ctx, app.args[0], app.args[1], app.args[2:])
+}
+
+// asInterrupt maps an RPC error to errInterrupted when the shared signal context
+// ctx was cancelled by a signal (Ctrl-C / SIGTERM), so exit() reports the
+// conventional "interrupted" status (exit 130) uniformly across every RPC. A
+// cancelled unary call otherwise surfaces a connect CodeCanceled error that reads
+// as a generic failure (exit 1); only runRPC maps its own teardown. A per-call
+// timeout does NOT cancel the signal context, so a genuine deadline stays a normal
+// error.
+func asInterrupt(ctx context.Context, err error) error {
+	if err != nil && ctx.Err() != nil {
+		return errInterrupted
+	}
+
+	return err
 }
 
 // dispatchCommand handles the "<device> <command> [args...]" forms: the built-in
 // lock/unlock keywords, the help keyword, and otherwise a module run. It returns
 // errInvalidCmdline for a malformed invocation.
-func (app *application) dispatchCommand(device, command string, cmdArgs []string) error {
+func (app *application) dispatchCommand(ctx context.Context, device, command string, cmdArgs []string) error {
 	switch command {
 	case keyword.Lock:
 		// lock takes an optional single duration argument.
@@ -209,7 +241,7 @@ func (app *application) dispatchCommand(device, command string, cmdArgs []string
 			return errInvalidCmdline
 		}
 
-		return app.lockRPC(device, cmdArgs)
+		return app.lockRPC(ctx, device, cmdArgs)
 	case keyword.Unlock:
 		// unlock takes nothing, or the single keyword "force".
 		force, err := parseUnlockArgs(cmdArgs)
@@ -217,7 +249,7 @@ func (app *application) dispatchCommand(device, command string, cmdArgs []string
 			return err
 		}
 
-		return app.unlockRPC(device, force)
+		return app.unlockRPC(ctx, device, force)
 	}
 
 	// help is a keyword only as the sole argument: "<device> <command> help".
@@ -228,10 +260,10 @@ func (app *application) dispatchCommand(device, command string, cmdArgs []string
 			return errInvalidCmdline
 		}
 
-		return app.detailsRPC(device, command, keyword.Help)
+		return app.detailsRPC(ctx, device, command, keyword.Help)
 	}
 
-	return app.runRPC(device, command, cmdArgs)
+	return app.runRPC(ctx, device, command, cmdArgs)
 }
 
 // parseUnlockArgs interprets the arguments to the unlock command. Unlock accepts

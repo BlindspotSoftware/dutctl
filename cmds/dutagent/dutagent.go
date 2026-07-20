@@ -19,6 +19,7 @@ import (
 	"os/signal"
 	"runtime/debug"
 	"syscall"
+	"time"
 
 	"connectrpc.com/connect"
 	"github.com/BlindspotSoftware/dutctl/internal/buildinfo"
@@ -96,6 +97,11 @@ const (
 	exit0 exitCode = 0
 	exit1 exitCode = 1
 )
+
+// registerTimeout bounds the one-shot registration RPC to the dutserver. Connect
+// propagates it as a grpc-timeout header and the transport honors it, so an
+// unreachable or slow server fails fast instead of hanging agent startup.
+const registerTimeout = 10 * time.Second
 
 // cleanup takes care of a graceful shutdown of the agent and its running service.
 // Afterwards agt.exit is called. If clean-up fails, agt.exit is called with code 1,
@@ -194,9 +200,10 @@ func (agt *agent) registerWithServer() error {
 		Address: agt.address,
 	})
 
-	// TODO(ctx): registration runs on a background context with no deadline or
-	// cancellation; bound it with a timeout.
-	_, err := client.Register(context.Background(), req)
+	ctx, cancel := context.WithTimeout(context.Background(), registerTimeout)
+	defer cancel()
+
+	_, err := client.Register(ctx, req)
 	if err != nil {
 		return fmt.Errorf("registering with server %q failed: %w", agt.server, err)
 	}

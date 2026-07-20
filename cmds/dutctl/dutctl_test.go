@@ -30,6 +30,20 @@ type fakeDeviceServiceClient struct {
 	detailsCalls []detailsCall
 
 	unlockCalls []unlockCall
+
+	// respectCtx makes the unary methods return ctx.Err() when the received
+	// context is already done, mimicking how connect aborts a cancelled or
+	// expired call.
+	respectCtx bool
+	// sawDeadline records, per unary call, whether the received context carried a
+	// deadline — the per-call timeout the RPC methods are expected to attach.
+	sawDeadline []bool
+}
+
+// recordCtx notes whether the unary call arrived with a deadline attached.
+func (f *fakeDeviceServiceClient) recordCtx(ctx context.Context) {
+	_, ok := ctx.Deadline()
+	f.sawDeadline = append(f.sawDeadline, ok)
 }
 
 type detailsCall struct {
@@ -42,8 +56,14 @@ type unlockCall struct {
 }
 
 func (f *fakeDeviceServiceClient) List(
-	_ context.Context, _ *connect.Request[pb.ListRequest],
+	ctx context.Context, _ *connect.Request[pb.ListRequest],
 ) (*connect.Response[pb.ListResponse], error) {
+	f.recordCtx(ctx)
+
+	if f.respectCtx && ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
 	f.listCalls++
 
 	if f.listErr != nil {
@@ -59,16 +79,28 @@ func (f *fakeDeviceServiceClient) List(
 }
 
 func (f *fakeDeviceServiceClient) Commands(
-	_ context.Context, req *connect.Request[pb.CommandsRequest],
+	ctx context.Context, req *connect.Request[pb.CommandsRequest],
 ) (*connect.Response[pb.CommandsResponse], error) {
+	f.recordCtx(ctx)
+
+	if f.respectCtx && ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
 	f.commandsCalls = append(f.commandsCalls, req.Msg.GetDevice())
 
 	return connect.NewResponse(&pb.CommandsResponse{}), nil
 }
 
 func (f *fakeDeviceServiceClient) Details(
-	_ context.Context, req *connect.Request[pb.DetailsRequest],
+	ctx context.Context, req *connect.Request[pb.DetailsRequest],
 ) (*connect.Response[pb.DetailsResponse], error) {
+	f.recordCtx(ctx)
+
+	if f.respectCtx && ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
 	f.detailsCalls = append(f.detailsCalls, detailsCall{
 		device:  req.Msg.GetDevice(),
 		cmd:     req.Msg.GetCommand(),
@@ -85,14 +117,26 @@ func (f *fakeDeviceServiceClient) Run(
 }
 
 func (f *fakeDeviceServiceClient) Lock(
-	_ context.Context, _ *connect.Request[pb.LockRequest],
+	ctx context.Context, _ *connect.Request[pb.LockRequest],
 ) (*connect.Response[pb.LockResponse], error) {
+	f.recordCtx(ctx)
+
+	if f.respectCtx && ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
 	return connect.NewResponse(&pb.LockResponse{}), nil
 }
 
 func (f *fakeDeviceServiceClient) Unlock(
-	_ context.Context, req *connect.Request[pb.UnlockRequest],
+	ctx context.Context, req *connect.Request[pb.UnlockRequest],
 ) (*connect.Response[pb.UnlockResponse], error) {
+	f.recordCtx(ctx)
+
+	if f.respectCtx && ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
 	f.unlockCalls = append(f.unlockCalls, unlockCall{
 		device: req.Msg.GetDevice(),
 		force:  req.Msg.GetForce(),
@@ -223,6 +267,108 @@ func TestDispatch(t *testing.T) {
 
 			if !equalUnlock(fake.unlockCalls, tt.wantUnlock) {
 				t.Errorf("Unlock calls: want %v, got %v", tt.wantUnlock, fake.unlockCalls)
+			}
+		})
+	}
+}
+
+// TestUnaryRPCsSetDeadline verifies every unary RPC attaches a per-call deadline
+// to the context it hands the client (see unaryTimeout). The streaming Run is
+// intentionally excluded — it has no overall deadline.
+func TestUnaryRPCsSetDeadline(t *testing.T) {
+	fake := &fakeDeviceServiceClient{}
+	app := newTestApp(t, fake)
+	ctx := context.Background()
+
+	calls := []struct {
+		name string
+		call func() error
+	}{
+		{"list", func() error { return app.listRPC(ctx) }},
+		{"commands", func() error { return app.commandsRPC(ctx, "dev") }},
+		{"details", func() error { return app.detailsRPC(ctx, "dev", "cmd", "help") }},
+		{"lock", func() error { return app.lockRPC(ctx, "dev", nil) }},
+		{"unlock", func() error { return app.unlockRPC(ctx, "dev", false) }},
+	}
+
+	for _, c := range calls {
+		if err := c.call(); err != nil {
+			t.Fatalf("%s: unexpected error: %v", c.name, err)
+		}
+	}
+
+	if len(fake.sawDeadline) != len(calls) {
+		t.Fatalf("recorded %d calls, want %d", len(fake.sawDeadline), len(calls))
+	}
+
+	for i, c := range calls {
+		if !fake.sawDeadline[i] {
+			t.Errorf("%s: RPC context has no deadline", c.name)
+		}
+	}
+}
+
+// TestUnaryRPCHonorsCancellation verifies every unary RPC runs under the caller's
+// (signal) context: a cancelled parent aborts the call instead of proceeding on a
+// fresh background context. Covering all five guards against an incomplete refactor
+// where one method wraps context.Background() rather than the passed ctx — which
+// would still show a deadline (so TestUnaryRPCsSetDeadline stays green) yet drop
+// the caller's cancellation.
+func TestUnaryRPCHonorsCancellation(t *testing.T) {
+	calls := []struct {
+		name string
+		call func(app *application, ctx context.Context) error
+	}{
+		{"list", func(app *application, ctx context.Context) error { return app.listRPC(ctx) }},
+		{"commands", func(app *application, ctx context.Context) error { return app.commandsRPC(ctx, "dev") }},
+		{"details", func(app *application, ctx context.Context) error { return app.detailsRPC(ctx, "dev", "cmd", "help") }},
+		{"lock", func(app *application, ctx context.Context) error { return app.lockRPC(ctx, "dev", nil) }},
+		{"unlock", func(app *application, ctx context.Context) error { return app.unlockRPC(ctx, "dev", false) }},
+	}
+
+	for _, c := range calls {
+		t.Run(c.name, func(t *testing.T) {
+			fake := &fakeDeviceServiceClient{respectCtx: true}
+			app := newTestApp(t, fake)
+
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel() // already cancelled before the call
+
+			err := c.call(app, ctx)
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("%s: want context.Canceled, got %v", c.name, err)
+			}
+		})
+	}
+}
+
+// TestAsInterrupt covers the signal-to-errInterrupted mapping: an error is
+// reported as an interrupt only when the shared signal context was cancelled (a
+// fired signal), while a per-call timeout — which does not cancel that context —
+// and a successful call are left untouched.
+func TestAsInterrupt(t *testing.T) {
+	signaled, cancel := context.WithCancel(context.Background())
+	cancel() // mimics a fired SIGINT/SIGTERM
+
+	live := context.Background() // no signal
+	rpcErr := errors.New("boom")
+
+	tests := []struct {
+		name      string
+		err       error
+		signalCtx context.Context
+		want      error
+	}{
+		{"signal fired with error maps to interrupted", rpcErr, signaled, errInterrupted},
+		{"signal fired without error stays nil", nil, signaled, nil},
+		{"no signal keeps the original error", rpcErr, live, rpcErr},
+		{"no signal, no error", nil, live, nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := asInterrupt(tt.signalCtx, tt.err); got != tt.want {
+				t.Fatalf("asInterrupt = %v, want %v", got, tt.want)
 			}
 		})
 	}
