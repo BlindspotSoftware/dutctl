@@ -479,8 +479,10 @@ func forwardCommandsReq(
 	// For now, we spawn a new client for each request.
 	client := rpc.NewDeviceClient(url)
 
-	// TODO(ctx): ctx carries the caller's cancellation but no deadline (the
-	// client sets none). A per-RPC timeout would attach here.
+	// ctx carries the caller's cancellation and, since the dutctl client now sets a
+	// per-call deadline that connect propagates as a grpc-timeout header, an
+	// inherited deadline on request.Context() too. TODO(ctx): consider a
+	// relay-owned bound independent of the inherited client deadline.
 	return client.Commands(ctx, req)
 }
 
@@ -497,8 +499,10 @@ func forwardDetailsReq(
 	// For now, we spawn a new client for each request.
 	client := rpc.NewDeviceClient(url)
 
-	// TODO(ctx): ctx carries the caller's cancellation but no deadline (the
-	// client sets none). A per-RPC timeout would attach here.
+	// ctx carries the caller's cancellation and, since the dutctl client now sets a
+	// per-call deadline that connect propagates as a grpc-timeout header, an
+	// inherited deadline on request.Context() too. TODO(ctx): consider a
+	// relay-owned bound independent of the inherited client deadline.
 	return client.Details(ctx, req)
 }
 

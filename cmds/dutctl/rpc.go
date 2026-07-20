@@ -13,9 +13,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"os"
-	"os/signal"
 	"strings"
-	"syscall"
 	"time"
 
 	"connectrpc.com/connect"
@@ -30,12 +28,17 @@ import (
 // "interrupted" status with exit code 130, not as a failure.
 var errInterrupted = errors.New("interrupted")
 
-func (app *application) listRPC() error {
-	// TODO(ctx): unary RPCs run on a bare background context — no signal
-	// cancellation and no deadline. Share an app-level context (see runRPC's
-	// signal.NotifyContext) and add a timeout. Applies to every unary RPC in this
-	// file (List/Lock/Unlock/Commands/Details).
-	ctx := context.Background()
+// unaryTimeout bounds each non-streaming RPC. List/Lock/Unlock/Commands/Details
+// are quick request/response round-trips, so a modest per-call deadline catches
+// an unresponsive agent without cutting legitimate work. Connect encodes it as a
+// grpc-timeout header, so the agent handler inherits the same deadline. The
+// streaming Run deliberately has no overall deadline (see runRPC).
+const unaryTimeout = 30 * time.Second
+
+func (app *application) listRPC(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
+	defer cancel()
+
 	req := connect.NewRequest(&pb.ListRequest{})
 
 	res, err := app.rpcClient.List(ctx, req)
@@ -96,7 +99,7 @@ func parseLockDuration(cmdArgs []string) (time.Duration, error) {
 	return parsed, nil
 }
 
-func (app *application) lockRPC(device string, cmdArgs []string) error {
+func (app *application) lockRPC(ctx context.Context, device string, cmdArgs []string) error {
 	duration, err := parseLockDuration(cmdArgs)
 	if err != nil {
 		return err
@@ -106,7 +109,9 @@ func (app *application) lockRPC(device string, cmdArgs []string) error {
 		slog.Warn("requested a long lock duration; release the device when you are done", "duration", duration)
 	}
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
+	defer cancel()
+
 	req := connect.NewRequest(&pb.LockRequest{
 		Device:          device,
 		DurationSeconds: int64(duration.Seconds()),
@@ -135,8 +140,10 @@ func (app *application) lockRPC(device string, cmdArgs []string) error {
 	return nil
 }
 
-func (app *application) unlockRPC(device string, force bool) error {
-	ctx := context.Background()
+func (app *application) unlockRPC(ctx context.Context, device string, force bool) error {
+	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
+	defer cancel()
+
 	req := connect.NewRequest(&pb.UnlockRequest{Device: device, Force: force})
 	req.Header().Set(headers.User, app.user)
 
@@ -157,8 +164,10 @@ func (app *application) unlockRPC(device string, force bool) error {
 	return nil
 }
 
-func (app *application) commandsRPC(device string) error {
-	ctx := context.Background()
+func (app *application) commandsRPC(ctx context.Context, device string) error {
+	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
+	defer cancel()
+
 	req := connect.NewRequest(&pb.CommandsRequest{Device: device})
 
 	res, err := app.rpcClient.Commands(ctx, req)
@@ -179,8 +188,10 @@ func (app *application) commandsRPC(device string) error {
 	return nil
 }
 
-func (app *application) detailsRPC(device, command, keyword string) error {
-	ctx := context.Background()
+func (app *application) detailsRPC(ctx context.Context, device, command, keyword string) error {
+	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
+	defer cancel()
+
 	req := connect.NewRequest(&pb.DetailsRequest{
 		Device:  device,
 		Command: command,
@@ -214,16 +225,14 @@ func (app *application) detailsRPC(device, command, keyword string) error {
 // status from the agent surfaces through the returned error; exit() renders it.
 //
 //nolint:funlen,cyclop,gocognit,maintidx // coordinates two streaming worker goroutines; inherently branchy
-func (app *application) runRPC(device, command string, cmdArgs []string) error {
+func (app *application) runRPC(ctx context.Context, device, command string, cmdArgs []string) error {
 	const numWorkers = 2 // The send and receive worker goroutines
 
-	// appCtx is cancelled on SIGINT/SIGTERM so Ctrl-C terminates gracefully
-	// (running the normal teardown and flushing the warning summary) instead of
-	// killing the process. runCtx is the child the workers cancel on completion.
-	appCtx, cancelAppCtx := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer cancelAppCtx()
-
-	runCtx, cancelRunCtx := context.WithCancel(appCtx)
+	// ctx is the shared signal context from dispatch, cancelled on SIGINT/SIGTERM
+	// so Ctrl-C terminates gracefully (running the normal teardown and flushing the
+	// warning summary) instead of killing the process. A stream has no overall
+	// deadline. runCtx is the child the workers cancel on completion.
+	runCtx, cancelRunCtx := context.WithCancel(ctx)
 	defer cancelRunCtx()
 
 	errChan := make(chan error, numWorkers)
@@ -420,10 +429,10 @@ func (app *application) runRPC(device, command string, cmdArgs []string) error {
 	// Wait for completion or error
 	select {
 	case <-runCtx.Done():
-		// appCtx.Err() is non-nil only if a signal fired (the deferred
-		// cancelAppCtx has not run yet), distinguishing Ctrl-C from a normal
-		// stream-closed teardown.
-		if appCtx.Err() != nil {
+		// ctx.Err() is non-nil only if a signal fired (dispatch's deferred stop
+		// has not run yet), distinguishing Ctrl-C from a normal stream-closed
+		// teardown.
+		if ctx.Err() != nil {
 			return errInterrupted
 		}
 

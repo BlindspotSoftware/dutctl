@@ -6,7 +6,9 @@ package rpc
 
 import (
 	"fmt"
+	"net"
 	"net/http"
+	"time"
 
 	"connectrpc.com/connect"
 	"github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1/dutctlv1connect"
@@ -34,21 +36,35 @@ func clientOptions(opts []connect.ClientOption) []connect.ClientOption {
 	return append([]connect.ClientOption{connect.WithGRPC()}, opts...)
 }
 
+// dialTimeout bounds establishing a new TCP connection. It is stream-safe — it
+// caps connection setup only, never the lifetime of a streaming RPC — and it is
+// the one transport-level bound that matters to the one-shot dutctl CLI: a
+// per-RPC context deadline (see cmds/dutctl) already bounds a unary dial, but the
+// deadline-less streaming Run relies on this to fail fast on an unreachable agent.
+const dialTimeout = 10 * time.Second
+
 // newH2CClient builds the shared HTTP/2-cleartext client used for every RPC
 // connection. It is unexported: callers obtain a typed client via NewDeviceClient
 // or NewRelayClient rather than the raw transport.
 func newH2CClient() *http.Client {
 	// Use the HTTP/2 protocol without TLS (h2c).
-	transport := &http.Transport{}
+	transport := &http.Transport{
+		// Bound connection establishment only; safe for the streaming Run.
+		DialContext: (&net.Dialer{Timeout: dialTimeout}).DialContext,
+	}
 	transport.Protocols = new(http.Protocols)
 	transport.Protocols.SetUnencryptedHTTP2(true)
 
 	return &http.Client{
 		Transport: transport,
-		// TODO: Don't forget timeouts! http.Client.Timeout must not be used here:
-		// it bounds the entire exchange including the response body, which would
-		// abort long-lived streaming RPCs. Instead use per-RPC context deadlines
-		// on unary calls and/or transport timeouts (DialContext,
-		// TLSHandshakeTimeout, ResponseHeaderTimeout, IdleConnTimeout).
+		// No http.Client.Timeout: it bounds the whole exchange including the
+		// response body, which would abort the long-lived streaming Run. The same
+		// reasoning rules out transport.ResponseHeaderTimeout here — this client is
+		// shared with Run, whose server writes response headers lazily (on its
+		// first Send), so a slow-to-first-output stream would be killed. The real
+		// per-call bound is a context deadline on the unary RPCs (see cmds/dutctl),
+		// which connect propagates to the agent as a grpc-timeout header.
+		// IdleConnTimeout (daemon-side pool hygiene for the long-lived relay) is
+		// deferred to the dutserver work.
 	}
 }
