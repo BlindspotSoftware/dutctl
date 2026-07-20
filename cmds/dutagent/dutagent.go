@@ -103,14 +103,21 @@ const (
 // unreachable or slow server fails fast instead of hanging agent startup.
 const registerTimeout = 10 * time.Second
 
+// deinitTimeout bounds module de-initialization during shutdown so a wedged module
+// cannot hang teardown indefinitely.
+const deinitTimeout = 15 * time.Second
+
 // cleanup takes care of a graceful shutdown of the agent and its running service.
 // Afterwards agt.exit is called. If clean-up fails, agt.exit is called with code 1,
 // otherwise with the provided exitCode.
 func (agt *agent) cleanup(code exitCode) {
 	if agt.modulesNeedDeinit {
-		// TODO(ctx): the background context leaves module Deinit unbounded; bound it
-		// with a timeout or a shutdown-signal context. It flows into every module's Deinit.
-		err := deinitModules(context.Background(), agt.config.Devices)
+		// Bound Deinit so a wedged module cannot hang shutdown indefinitely; the
+		// context flows into every module's Deinit via internal/log.
+		ctx, cancel := context.WithTimeout(context.Background(), deinitTimeout)
+		defer cancel()
+
+		err := deinitModules(ctx, agt.config.Devices)
 		if err != nil {
 			printInitErr(err)
 			slog.Error("module deinitialization failed - system might be in an UNKNOWN STATE", "err", err)
@@ -119,19 +126,6 @@ func (agt *agent) cleanup(code exitCode) {
 	}
 
 	agt.exit(int(code))
-}
-
-// watchInterrupt listens for interrupt signals, usually triggered by the user
-// terminating the process with Ctrl-C.
-func (agt *agent) watchInterrupt() {
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, os.Interrupt, syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
-
-	go func() {
-		sig := <-c
-		slog.Info("captured signal", "signal", sig)
-		agt.cleanup(exit0)
-	}()
 }
 
 func (agt *agent) loadConfig() error {
@@ -168,9 +162,11 @@ func printInitErr(err error) {
 	slog.Error("module error", "err", err)
 }
 
-// startRPCService starts the RPC service, which ideally listens for incoming
-// connections forever. It always returns a non-nil error.
-func (agt *agent) startRPCService() error {
+// startRPCService starts the RPC service and serves until ctx is cancelled (a
+// signal), draining in-flight requests, or until the server stops on its own. It
+// returns the server error, if any; the caller classifies a graceful stop via
+// ctx.Err().
+func (agt *agent) startRPCService(ctx context.Context) error {
 	service := &rpcService{
 		devices: agt.config.Devices,
 		locker:  locker.New(),
@@ -188,7 +184,7 @@ func (agt *agent) startRPCService() error {
 
 	slog.Info("rpc service listening", "addr", agt.address)
 
-	return rpc.ListenAndServe(agt.address, mux)
+	return rpc.ListenAndServe(ctx, agt.address, mux)
 }
 
 func (agt *agent) registerWithServer() error {
@@ -239,7 +235,12 @@ func (agt *agent) start() {
 		}
 	}()
 
-	agt.watchInterrupt()
+	// A signal (Ctrl-C / SIGTERM / SIGQUIT) cancels ctx, which drives a graceful
+	// shutdown: the RPC service drains in-flight requests, then modules are
+	// de-initialised. This replaces an out-of-band signal handler, so shutdown runs
+	// on this goroutine rather than racing the running service.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
+	defer stop()
 
 	err := agt.loadConfig()
 	if agt.checkConfig {
@@ -286,8 +287,21 @@ func (agt *agent) start() {
 		}
 	}
 
-	err = agt.startRPCService()
-	slog.Error("internal RPC handler error", "err", err)
+	err = agt.startRPCService(ctx)
+	if ctx.Err() != nil {
+		// A signal cancelled ctx: graceful shutdown. ListenAndServe has drained; a
+		// non-nil err means the drain did not fully complete within the grace
+		// period, which we accept — the process exit closes what remains.
+		if err != nil {
+			slog.Warn("graceful shutdown did not fully drain in time", "err", err)
+		}
+
+		slog.Info("shutting down")
+		agt.cleanup(exit0)
+	}
+
+	// Reached only if the server stopped on its own (e.g. failed to bind).
+	slog.Error("rpc service stopped", "err", err)
 	agt.cleanup(exit1)
 }
 
