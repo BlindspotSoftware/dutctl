@@ -3,13 +3,15 @@ version: "3"
 # Taskfile specific to FWCI
 
 vars:
-  RPI_HOSTNAME: "fwci-fti-tester.sec.9e.network:2024"
+  DUTCTL: "dutctl"
+  RPI_HOSTNAME: "fwci-dutctl-tester:2024"
+  DUT_DEVICE: "fwci-dutctl-tester"
 
 tasks:
   test:read-out-serial:
     desc: For running inside FWCI - read out serial with dutctl
     cmds:
-      - timeout 5s bash -c "/tmp/dutctl -s '{{.RPI_HOSTNAME}}' fwci-dutctl-tester serial" || true
+      - timeout 5s bash -c "{{.DUTCTL}} -s '{{.RPI_HOSTNAME}}' {{.DUT_DEVICE}} serial" || true
 
   misc:dummy-binary-for-flashing:
     desc: Create a dummy binary file to be flashed to SPI flash chip

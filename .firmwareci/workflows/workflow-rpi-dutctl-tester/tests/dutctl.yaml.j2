@@ -1,0 +1,466 @@
+---
+name: Test dutctl
+description: Test the dutctl modules against the dutagent on the FWCI tester
+
+defaults:
+  {%- import ".jinja2_templates/defaults.j2" as defaults %}
+  {%- macro someop() %}{% include ".jinja2_templates/defaults.yaml" with context %}{% endmacro %}
+  {{ someop()|indent(2) }}
+
+{% include ".jinja2_templates/pre.yaml.j2" %}
+{% include ".jinja2_templates/pre.gpio.yaml.j2" %}
+{% include ".jinja2_templates/pre.serial.yaml.j2" %}
+
+# "test/test-dutagent-cfg.yaml"
+
+stages:
+  - name: Test agent module
+    steps:
+      - cmd: cmd
+        name: Report dutagent system info
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args:
+            [
+              {{ defaults.DUTCTL_ARGS }},
+              "{{ defaults.RPI_HOSTNAME }}",
+              "system-info",
+            ]
+          expect:
+            - regex: "Linux {{ defaults.RPI_HOSTNAME }}"
+        options:
+          timeout: 10s
+
+  - name: Test dummy modules
+    steps:
+      - cmd: cmd
+        name: Test status
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args:
+            [
+              {{ defaults.DUTCTL_ARGS }},
+              "{{ defaults.RPI_HOSTNAME }}",
+              "dummy-status",
+            ]
+          expect:
+            - regex: "Hello from dummy status module\nCalled with 0 arguments"
+        options:
+          timeout: 10s
+
+      - cmd: cmd
+        name: Test status with argument
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args:
+            [
+              {{ defaults.DUTCTL_ARGS }},
+              "{{ defaults.RPI_HOSTNAME }}",
+              "dummy-status",
+              "hello",
+            ]
+          expect:
+            - regex: "Hello from dummy status module\nCalled with 1 arguments\nArg 0: hello"
+        options:
+          timeout: 10s
+
+      - cmd: cmd
+        name: Test status with configured arguments
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args:
+            [
+              {{ defaults.DUTCTL_ARGS }},
+              "{{ defaults.RPI_HOSTNAME }}",
+              "dummy-status-args",
+            ]
+          expect:
+            - regex: "Hello from dummy status module\nCalled with 2 arguments"
+        options:
+          timeout: 10s
+
+      - cmd: shell
+        name: Test repeat
+        transport:
+          proto: local
+        parameters:
+          command: "echo -e 'hello\nhello world\n' | [[input.DUTCTL]] {{ defaults.DUTCTL_ARGS_STR }} {{ defaults.RPI_HOSTNAME }} dummy-repeat"
+          expect:
+            - regex: "Hello from dummy repeat module!\nEnter one word per line."
+        options:
+          timeout: 10s
+
+      - cmd: shell
+        name: Create test file
+        transport:
+          proto: local
+        parameters:
+          command: "echo 'hello' > test.txt"
+
+      - cmd: cmd
+        name: Test file transfer
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args:
+            [
+              {{ defaults.DUTCTL_ARGS }},
+              "{{ defaults.RPI_HOSTNAME }}",
+              "dummy-file-transfer",
+              "test.txt",
+              "test2.txt",
+            ]
+          expect:
+            - regex: "Hello from dummy file transfer module"
+        options:
+          timeout: 10s
+
+      - cmd: cmd
+        name: Read test file
+        transport:
+          proto: local
+        parameters:
+          executable: "cat"
+          args: ["test2.txt"]
+          expect:
+            - regex: "processed by dummy.FT module"
+
+  - name: Test shell module
+    steps:
+      - cmd: cmd
+        name: Run echo through the shell module
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args:
+            [
+              {{ defaults.DUTCTL_ARGS }},
+              "{{ defaults.RPI_HOSTNAME }}",
+              "run",
+              "echo hello-from-shell-module",
+            ]
+          expect:
+            - regex: "hello-from-shell-module"
+        options:
+          timeout: 10s
+
+      - cmd: cmd
+        name: Verify the command runs on the dutagent
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args:
+            [
+              {{ defaults.DUTCTL_ARGS }},
+              "{{ defaults.RPI_HOSTNAME }}",
+              "run",
+              "hostname",
+            ]
+          expect:
+            - regex: "{{ defaults.RPI_HOSTNAME }}"
+        options:
+          timeout: 10s
+
+      - cmd: cmd
+        name: Run a command with a pipe
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args:
+            [
+              {{ defaults.DUTCTL_ARGS }},
+              "{{ defaults.RPI_HOSTNAME }}",
+              "run",
+              "echo one two three | tr ' ' '-'",
+            ]
+          expect:
+            - regex: "one-two-three"
+        options:
+          timeout: 10s
+
+  - name: Test time module
+    steps:
+      - cmd: cmd
+        name: Wait for the configured duration
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args:
+            [
+              {{ defaults.DUTCTL_ARGS }},
+              "{{ defaults.RPI_HOSTNAME }}",
+              "wait",
+            ]
+          expect:
+            - regex: "Waiting for 1s"
+        options:
+          timeout: 15s
+
+      - cmd: cmd
+        name: Wait for a duration given on the command line
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args:
+            [
+              {{ defaults.DUTCTL_ARGS }},
+              "{{ defaults.RPI_HOSTNAME }}",
+              "wait",
+              "3s",
+            ]
+          expect:
+            - regex: "Waiting for 3s"
+        options:
+          timeout: 15s
+
+      - cmd: shell
+        name: Verify the wait really blocks
+        transport:
+          proto: local
+        parameters:
+          command: "start=$(date +%s); [[input.DUTCTL]] {{ defaults.DUTCTL_ARGS_STR }} {{ defaults.RPI_HOSTNAME }} wait 3s; end=$(date +%s); echo elapsed=$((end-start))"
+          expect:
+            - regex: "elapsed=([3-9]|[1-9][0-9]+)"
+        options:
+          timeout: 30s
+
+  - name: Test file module
+    steps:
+      - cmd: shell
+        name: Create a file to upload
+        transport:
+          proto: local
+        parameters:
+          command: "echo 'uploaded-by-file-module' > upload-source.txt"
+
+      - cmd: cmd
+        name: Upload the file to the dutagent
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args:
+            [
+              {{ defaults.DUTCTL_ARGS }},
+              "{{ defaults.RPI_HOSTNAME }}",
+              "upload",
+              "upload-source.txt",
+            ]
+        options:
+          timeout: 15s
+
+      - cmd: shell
+        name: Verify the file arrived on the dutagent
+        transport: *transport_oscar
+        parameters:
+          command: "cat /tmp/dutctl-fwci-upload.txt"
+          expect:
+            - regex: "uploaded-by-file-module"
+
+      - cmd: shell
+        name: Create a file on the dutagent to download
+        transport: *transport_oscar
+        parameters:
+          command: "echo 'downloaded-by-file-module' > /tmp/dutctl-fwci-download.txt"
+
+      - cmd: cmd
+        name: Download the file from the dutagent
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args:
+            [
+              {{ defaults.DUTCTL_ARGS }},
+              "{{ defaults.RPI_HOSTNAME }}",
+              "download",
+              "download-target.txt",
+            ]
+        options:
+          timeout: 15s
+
+      - cmd: cmd
+        name: Verify the downloaded file content
+        transport:
+          proto: local
+        parameters:
+          executable: "cat"
+          args: ["download-target.txt"]
+          expect:
+            - regex: "downloaded-by-file-module"
+
+      - cmd: shell
+        name: Remove the transferred files from the dutagent
+        transport: *transport_oscar
+        parameters:
+          command: "rm -f /tmp/dutctl-fwci-upload.txt /tmp/dutctl-fwci-download.txt || true"
+
+  - name: Test serial
+    steps:
+      - cmd: shell
+        name: Feed the fake serial
+        transport: *transport_oscar
+        parameters:
+          command: "( for i in $(seq 1 20); do echo 'Hello World!' > {{ defaults.FAKE_SERIAL_INPUT }}; sleep 0.5; done ) >/dev/null 2>&1 & disown"
+
+      - cmd: cmd
+        name: Read serial
+        transport:
+          proto: local
+        parameters:
+          executable: task
+          args:
+            [
+              "--taskfile",
+              "[[input.TASKFILE]]",
+              "test:read-out-serial",
+              "DUTCTL=[[input.DUTCTL]]",
+              "RPI_HOSTNAME={{ defaults.RPI_HOSTNAME }}:{{ defaults.DUTAGENT_PORT }}",
+              "DUT_DEVICE={{ defaults.RPI_HOSTNAME }}",
+            ]
+          expect:
+            - regex: "Hello World!"
+        options:
+          timeout: 15s
+
+  - name: Test flashing with dpcmd
+    steps:
+      - cmd: cmd
+        name: dutctl flash write
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args:
+            [
+              {{ defaults.DUTCTL_ARGS }},
+              "{{ defaults.RPI_HOSTNAME }}",
+              "flash",
+              "write",
+              "[[input.DUMMY_SPI_FLASH_ROM]]",
+            ]
+        options:
+          timeout: 300s
+
+      - cmd: cmd
+        name: dutctl flash read
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args:
+            [
+              {{ defaults.DUTCTL_ARGS }},
+              "{{ defaults.RPI_HOSTNAME }}",
+              "flash",
+              "read",
+              "flash-readback.rom",
+            ]
+        options:
+          timeout: 300s
+
+      - cmd: shell
+        name: Compare the read-back image with the written one
+        transport:
+          proto: local
+        parameters:
+          command: "cmp -n \"$(stat -c%s '[[input.DUMMY_SPI_FLASH_ROM]]')\" '[[input.DUMMY_SPI_FLASH_ROM]]' flash-readback.rom"
+
+  - name: Test GPIO power via shell script
+    steps:
+      - cmd: cmd
+        name: initial dutctl power off
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: [{{ defaults.DUTCTL_ARGS }}, "{{ defaults.RPI_HOSTNAME }}", "power", "off"]
+
+      - cmd: cmd
+        name: get dutctl power status
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: [{{ defaults.DUTCTL_ARGS }}, "{{ defaults.RPI_HOSTNAME }}", "power"]
+          expect:
+            - regex: "Current state: off"
+
+      - cmd: cmd
+        name: check pin state
+        transport: *transport_oscar
+        parameters:
+          executable: pinctrl
+          args: ["lev", "{{ defaults.GPIO_PIN_TEST_OLIMEX }}"]
+          expect:
+            - regex: "0"
+
+      - cmd: cmd
+        name: dutctl power on
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: [{{ defaults.DUTCTL_ARGS }}, "{{ defaults.RPI_HOSTNAME }}", "power", "on"]
+
+      - cmd: cmd
+        name: get dutctl power status 2
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: [{{ defaults.DUTCTL_ARGS }}, "{{ defaults.RPI_HOSTNAME }}", "power"]
+          expect:
+            - regex: "Current state: on"
+
+      - cmd: cmd
+        name: check pin state 2
+        transport: *transport_oscar
+        parameters:
+          executable: pinctrl
+          args: ["lev", "{{ defaults.GPIO_PIN_TEST_OLIMEX }}"]
+          expect:
+            - regex: "1"
+
+      - cmd: cmd
+        name: dutctl power off
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: [{{ defaults.DUTCTL_ARGS }}, "{{ defaults.RPI_HOSTNAME }}", "power", "off"]
+
+      - cmd: cmd
+        name: get dutctl power status 3
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: [{{ defaults.DUTCTL_ARGS }}, "{{ defaults.RPI_HOSTNAME }}", "power"]
+          expect:
+            - regex: "Current state: off"
+
+      - cmd: cmd
+        name: check pin state 3
+        transport: *transport_oscar
+        parameters:
+          executable: pinctrl
+          args: ["lev", "{{ defaults.GPIO_PIN_TEST_OLIMEX }}"]
+          expect:
+            - regex: "0"
+
+{% include ".jinja2_templates/post.yaml.j2" -%}
