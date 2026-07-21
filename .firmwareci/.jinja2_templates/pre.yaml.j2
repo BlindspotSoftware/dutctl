@@ -18,12 +18,11 @@ pre-stage:
       source: "[[input.REMOTE_PKG]]"
       destination: "{{ defaults.PKG_NAME }}.deb"
 
-  - cmd: cmd
+  - cmd: shell
     name: Install {{ defaults.PKG_NAME }} package
     transport: *transport_root
     parameters:
-      executable: dpkg
-      args: ["-i", "{{ defaults.PKG_NAME }}.deb"]
+      command: "apt-get -o DPkg::Lock::Timeout=300 install --reinstall --assume-yes ./{{ defaults.PKG_NAME }}.deb"
 
   - cmd: copy
     name: Copy over test config file
@@ -63,6 +62,12 @@ pre-stage:
       command: "systemctl status --no-pager {{ defaults.SYSTEMD_FILE }}"
       expect:
         - regex: "Active: active \\(running\\)"
+
+  - cmd: shell
+    name: Wait for dutagent to accept connections
+    transport: *transport_root
+    parameters:
+      command: "for i in $(seq 1 50); do ss -ltn | grep -q ':{{ defaults.DUTAGENT_PORT }} ' && exit 0; sleep 0.2; done; echo 'dutagent never bound port {{ defaults.DUTAGENT_PORT }}'; exit 1"
 
   # ==========================
   #  Test dutctl help command

@@ -8,7 +8,7 @@ devices:
         desc: "Power switch"
         uses:
           - module: gpio-switch
-            main: true
+            passthrough: true
             with:
               pin: 26
               initial: off
@@ -18,7 +18,7 @@ devices:
         desc: "Host serial"
         uses:
           - module: serial
-            main: true
+            passthrough: true
             with:
               port: "/home/oscar/ttyS2"
               baudrate: 115200
@@ -26,7 +26,74 @@ devices:
         desc: "Host SPI flash chip"
         uses:
           - module: flash
-            main: true
+            passthrough: true
             with:
-              tool: "/usr/sbin/flashprog"
-              programmer: "dediprog"
+              tool: "dpcmd"
+      system-info:
+        desc: "Report information about the dutagent system"
+        uses:
+          - module: agent-status
+            passthrough: true
+      wait:
+        desc: "Wait for the given duration"
+        uses:
+          - module: time-wait
+            passthrough: true
+            with:
+              duration: 1s
+      run:
+        desc: "Run a shell command on the dutagent"
+        uses:
+          - module: shell
+            passthrough: true
+            with:
+              path: bash
+      upload:
+        desc: "Upload a file from the client to the dutagent"
+        uses:
+          - module: file
+            passthrough: true
+            with:
+              operation: "upload"
+              destination: "/tmp/dutctl-fwci-upload.txt"
+      download:
+        desc: "Download a file from the dutagent to the client"
+        uses:
+          - module: file
+            passthrough: true
+            with:
+              operation: "download"
+              source: "/tmp/dutctl-fwci-download.txt"
+      dummy-status:
+        desc: "Report status, arguments passed through"
+        uses:
+          - module: dummy-status
+            passthrough: true
+      dummy-status-args:
+        desc: "Report status with arguments fixed by the configuration"
+        uses:
+          - module: dummy-status
+            args:
+              - foo
+              - bar
+      dummy-repeat:
+        desc: "Repeat input"
+        uses:
+          - module: dummy-repeat
+            passthrough: true
+      dummy-file-transfer:
+        desc: "Transfer a file through a two-module chain"
+        args:
+          - name: source-file
+            desc: "Source file path"
+          - name: dest-file
+            desc: "Destination file path"
+        uses:
+          - module: dummy-status
+            args:
+              - transferring
+              - "${source-file}"
+          - module: dummy-ft
+            args:
+              - "${source-file}"
+              - "${dest-file}"

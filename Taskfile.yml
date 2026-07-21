@@ -164,7 +164,7 @@ tasks:
       CONFIG: ./contrib/dutagent-cfg-example.yaml
       DUMMY_SPI_FLASH_ROM: ./.firmwareci/dummy_binary.rom
       TASKFILE: .firmwareci/Taskfile.yml
-      RPI: fwci-fti-tester.sec.9e.network
+      RPI: fwci-dutctl-tester.sec.9e.network
 
       DUTCTL_CONFIG_FILE: /etc/dutctl.yaml
     cmds:
@@ -192,7 +192,7 @@ tasks:
       CONFIG: ./test/test-dutagent-cfg.yaml
       DUMMY_SPI_FLASH_ROM: ./.firmwareci/dummy_binary.rom
       TASKFILE: .firmwareci/Taskfile.yml
-      RPI: fwci-fti-tester.sec.9e.network
+      RPI: fwci-dutctl-tester.sec.9e.network
 
       DUTCTL_CONFIG_FILE: /etc/dutctl.yaml
     cmds:
@@ -216,7 +216,7 @@ tasks:
       CONFIG: ./test/test-dutagent-cfg.yaml
       DUMMY_SPI_FLASH_ROM: ./.firmwareci/dummy_binary.rom
       TASKFILE: .firmwareci/Taskfile.yml
-      RPI: fwci-fti-tester.sec.9e.network
+      RPI: fwci-dutctl-tester.sec.9e.network
 
       DUTCTL_CONFIG_FILE: /etc/dutctl.yaml
     cmds:
