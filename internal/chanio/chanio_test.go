@@ -5,15 +5,17 @@ package chanio
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"reflect"
 	"testing"
+	"time"
 )
 
 func TestNewChanWriter(t *testing.T) {
 	// Test with valid channel
 	ch := make(chan []byte)
-	writer, err := NewChanWriter(ch)
+	writer, err := NewChanWriter(ch, nil)
 
 	if err != nil {
 		t.Fatalf("NewChanWriter() returned an error: %v", err)
@@ -24,7 +26,7 @@ func TestNewChanWriter(t *testing.T) {
 	}
 
 	// Test with nil channel
-	writer, err = NewChanWriter(nil)
+	writer, err = NewChanWriter(nil, nil)
 
 	if err == nil {
 		t.Fatalf("NewChanWriter() did not return an error for nil channel")
@@ -38,7 +40,7 @@ func TestNewChanWriter(t *testing.T) {
 func TestNewChanReader(t *testing.T) {
 	// Test with valid channel
 	ch := make(chan []byte)
-	reader, err := NewChanReader(ch, nil)
+	reader, err := NewChanReader(ch, nil, nil)
 
 	if err != nil {
 		t.Fatalf("NewChanReader() returned an error: %v", err)
@@ -53,7 +55,7 @@ func TestNewChanReader(t *testing.T) {
 	}
 
 	// Test with nil channel
-	reader, err = NewChanReader(nil, nil)
+	reader, err = NewChanReader(nil, nil, nil)
 
 	if err == nil {
 		t.Fatalf("NewChanReader() did not return an error for nil channel")
@@ -256,5 +258,101 @@ func TestChanReader_ReadStraddleOverflow(t *testing.T) {
 
 	if got := "hello" + string(rest); got != "hellobig" {
 		t.Errorf("total read = %q, want %q (bytes dropped when a read straddled buffer and channel)", got, "hellobig")
+	}
+}
+
+// TestChanReaderDoneUnblocksRead verifies that closing the done channel unblocks
+// a Read that is waiting on a source channel which is never fed or closed,
+// returning io.EOF (with any buffered remainder). This is what unwedges a module
+// parked reading stdin when its session is torn down.
+func TestChanReaderDoneUnblocksRead(t *testing.T) {
+	ch := make(chan []byte)     // never fed, never closed
+	done := make(chan struct{}) //nolint:varnamelen // done is the conventional name
+
+	r, err := NewChanReader(ch, done, nil)
+	if err != nil {
+		t.Fatalf("NewChanReader() error = %v", err)
+	}
+
+	readDone := make(chan struct{})
+
+	var (
+		n      int
+		readEr error
+	)
+
+	go func() {
+		n, readEr = r.Read(make([]byte, 8))
+		close(readDone)
+	}()
+
+	// The Read must be blocked: nothing is on ch and done is still open.
+	select {
+	case <-readDone:
+		t.Fatal("Read returned before done was closed (should have blocked)")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(done)
+
+	select {
+	case <-readDone:
+		if !errors.Is(readEr, io.EOF) {
+			t.Errorf("Read after done err = %v, want io.EOF", readEr)
+		}
+
+		if n != 0 {
+			t.Errorf("Read after done n = %d, want 0", n)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Read did not return after done was closed")
+	}
+}
+
+// TestChanWriterDoneUnblocksWrite verifies that closing the done channel unblocks
+// a Write that is waiting on a source channel with no receiver, returning
+// io.ErrClosedPipe. This is what unwedges a module parked writing stdout/stderr
+// when its session is torn down.
+func TestChanWriterDoneUnblocksWrite(t *testing.T) {
+	ch := make(chan []byte)     // no receiver
+	done := make(chan struct{}) //nolint:varnamelen // done is the conventional name
+
+	w, err := NewChanWriter(ch, done)
+	if err != nil {
+		t.Fatalf("NewChanWriter() error = %v", err)
+	}
+
+	writeDone := make(chan struct{})
+
+	var (
+		n       int
+		writeEr error
+	)
+
+	go func() {
+		n, writeEr = w.Write([]byte("payload"))
+		close(writeDone)
+	}()
+
+	// The Write must be blocked: no receiver on ch and done is still open.
+	select {
+	case <-writeDone:
+		t.Fatal("Write returned before done was closed (should have blocked)")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(done)
+
+	select {
+	case <-writeDone:
+		if !errors.Is(writeEr, io.ErrClosedPipe) {
+			t.Errorf("Write after done err = %v, want io.ErrClosedPipe", writeEr)
+		}
+
+		if n != 0 {
+			t.Errorf("Write after done n = %d, want 0", n)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Write did not return after done was closed")
 	}
 }

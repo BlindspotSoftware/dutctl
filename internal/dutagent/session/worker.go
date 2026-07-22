@@ -61,6 +61,12 @@ func toClientWorker(ctx context.Context, stream Stream, s *backend) error {
 				return err
 			}
 		case name := <-s.fileReqCh:
+			// Record the in-flight file before sending the request: the client's
+			// response is driven by this Send, so setting currentFile afterwards
+			// could race a fast response that fromClientWorker validates against
+			// currentFile (see the currentFile guards there).
+			s.currentFile = name
+
 			res := &pb.RunResponse{
 				Msg: &pb.RunResponse_FileRequest{FileRequest: &pb.FileRequest{Path: name}},
 			}
@@ -69,10 +75,10 @@ func toClientWorker(ctx context.Context, stream Stream, s *backend) error {
 			if err != nil {
 				return err
 			}
-
-			s.currentFile = name
 		case file := <-s.fileCh:
-			r, err := chanio.NewChanReader(file, l)
+			// The channel is fed and closed by SendFile right after the
+			// rendezvous, so this read always terminates: pass a nil done.
+			r, err := chanio.NewChanReader(file, nil, l)
 			if err != nil {
 				return err
 			}
@@ -121,18 +127,28 @@ func fromClientWorker(ctx context.Context, stream Stream, s *backend) error {
 	// Receive loop goroutine rationale:
 	//
 	// We offload blocking stream.Receive calls to this goroutine so the main select
-	// can remain responsive to ctx cancellation. The goroutine will keep calling
-	// Receive until an error (including io.EOF) occurs, then return.
+	// can remain responsive to ctx cancellation. The goroutine keeps calling
+	// Receive until an error (including io.EOF) occurs, then returns.
 	//
-	// Potential leak concern: If ctx is cancelled while Receive is blocked the
-	// goroutine keeps waiting. This is acceptable because, by contract, the RPC
-	// stream is closed by the client (EOF) or ends with an error shortly after
-	// module completion / broker cancellation; that closure unblocks Receive and
-	// the goroutine exits, so it does not leak for the lifetime of the process.
+	// Two blocking points, both bounded:
+	//   - stream.Receive is transport I/O that ctx cannot interrupt; it unblocks
+	//     when the client closes the stream (EOF) or it errors, which happens
+	//     shortly after module completion / broker cancellation tears the RPC
+	//     down. This is an accepted bounded wait.
+	//   - the resCh send is guarded by ctx.Done. Once the main loop returns it no
+	//     longer receives from resCh, so an unguarded send here would block
+	//     forever on a receiverless channel — leaking this goroutine for the
+	//     process lifetime. Selecting on ctx.Done lets it exit instead, so the
+	//     goroutine always terminates once Receive returns.
 	go func() {
 		for {
 			req, err := stream.Receive()
-			resCh <- recvResult{req: req, err: err}
+
+			select {
+			case resCh <- recvResult{req: req, err: err}:
+			case <-ctx.Done():
+				return
+			}
 
 			if err != nil { // stop receiving after any error (including EOF)
 				return
@@ -217,7 +233,19 @@ func fromClientWorker(ctx context.Context, stream Stream, s *backend) error {
 				l.Debug("received file from client", "name", path, "bytes", len(content))
 
 				file := make(chan []byte, 1)
-				s.fileCh <- file
+
+				// Hand the file to the module's RequestFile. Unlike the stdin
+				// send above, the receiver is the module goroutine, which may
+				// already be gone on teardown; guard the send with ctx.Done so an
+				// abandoned transfer cannot wedge this worker (and, through
+				// wg.Wait, the broker) forever. The buffered content send and
+				// close below never block once the rendezvous succeeds.
+				select {
+				case s.fileCh <- file:
+				case <-ctx.Done():
+					return nil
+				}
+
 				file <- content
 
 				close(file)

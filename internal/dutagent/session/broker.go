@@ -71,6 +71,12 @@ func (b *Broker) Start(ctx context.Context, s Stream) (module.Session, <-chan er
 		log.FromContext(ctx).Debug("broker initializing")
 
 		workerCtx, workerCancel := context.WithCancel(ctx)
+		// Freeze the workers' done signal onto the session so the module-facing
+		// methods (which carry no context) can abort a channel op whose worker
+		// peer has exited. Set here, before the workers start and before Start
+		// returns to the caller that later spawns the module goroutine, so there
+		// is no race on the read.
+		b.session.done = workerCtx.Done()
 
 		b.wg.Add(numWorkers)
 		b.toClient(workerCtx, workerCancel)
