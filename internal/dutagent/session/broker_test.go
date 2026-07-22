@@ -10,6 +10,7 @@ import (
 	"io"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -344,6 +345,26 @@ func TestBrokerSessionCallsUnblockAfterTeardown(t *testing.T) {
 	if !errors.Is(sendFileErr, errSessionClosed) {
 		t.Errorf("SendFile err = %v, want errSessionClosed", sendFileErr)
 	}
+}
+
+// TestBackendCurrentFileRace guards the mutex on currentFile: it is read and
+// written from three goroutines (SendFile on the module goroutine, and both
+// broker workers) with no channel handing it between them. Concurrent access
+// without the lock is a data race; run under -race this fails if the guarding
+// mutex is dropped.
+func TestBackendCurrentFileRace(t *testing.T) {
+	b := &backend{}
+
+	var wg sync.WaitGroup
+
+	for range 50 {
+		wg.Add(2)
+
+		go func() { defer wg.Done(); b.setCurrentFile("image.bin") }()
+		go func() { defer wg.Done(); _ = b.currentFileName() }()
+	}
+
+	wg.Wait()
 }
 
 // TestBrokerReceiveLoopExitsOnCancel is a regression test for the receive-loop

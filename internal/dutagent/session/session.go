@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"sync"
 
 	"github.com/BlindspotSoftware/dutctl/internal/chanio"
 	"github.com/BlindspotSoftware/dutctl/internal/log"
@@ -27,6 +28,12 @@ type backend struct {
 	stderrCh  chan []byte
 	fileReqCh chan string
 	fileCh    chan chan []byte // a single file is represented by a channel of bytes
+
+	// mu guards currentFile, which is read and written from the module goroutine
+	// (SendFile) and from both broker workers, with no channel handing it between
+	// them — their ordering runs through the client round-trip, which is not a Go
+	// happens-before edge, so the field needs its own lock.
+	mu sync.Mutex
 
 	// currentFile holds the name of the file currently being transferred.
 	// It names either the file the module requested from the client or the file
@@ -53,6 +60,22 @@ func (s *backend) logger() *slog.Logger {
 	}
 
 	return slog.Default()
+}
+
+// currentFileName returns the name of the in-flight file transfer, or "" if none.
+func (s *backend) currentFileName() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.currentFile
+}
+
+// setCurrentFile records the name of the in-flight file transfer; "" clears it.
+func (s *backend) setCurrentFile(name string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.currentFile = name
 }
 
 // Print, Printf and Println forward a message to the client. The send is
@@ -161,7 +184,7 @@ func (s *backend) RequestFile(name string) (io.Reader, error) {
 // file transfer is already in progress or if reading r fails. The error is opaque
 // (reported to the module as-is) and not meant to be matched.
 func (s *backend) SendFile(name string, r io.Reader) error {
-	if s.currentFile != "" {
+	if s.currentFileName() != "" {
 		return fmt.Errorf("send file %q: a file request is already in progress", name)
 	}
 
@@ -174,7 +197,7 @@ func (s *backend) SendFile(name string, r io.Reader) error {
 	downlog := log.Scope(s.logger(), scopeSessionDownstream)
 	downlog.Debug("module sending file", "name", name, "bytes", len(content))
 
-	s.currentFile = name
+	s.setCurrentFile(name)
 
 	file := make(chan []byte, 1)
 
