@@ -14,8 +14,10 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"syscall"
 
 	"github.com/BlindspotSoftware/dutctl/internal/log"
+	"github.com/BlindspotSoftware/dutctl/internal/procexec"
 	"github.com/BlindspotSoftware/dutctl/pkg/module"
 )
 
@@ -156,7 +158,7 @@ func (e *FlashEmulate) Run(ctx context.Context, sesh module.Session, args ...str
 	l.Debug(fmt.Sprintf("executing %s %s", e.Tool, strings.Join(cmdArgs, " ")))
 	sesh.Print(fmt.Sprintf("Executing: %s %s", e.Tool, strings.Join(cmdArgs, " ")))
 
-	err = execute(sesh, e.Tool, cmdArgs...)
+	err = execute(ctx, sesh, e.Tool, cmdArgs...)
 	if err != nil {
 		_ = os.RemoveAll(e.localImagePath)
 		e.localImagePath = ""
@@ -213,9 +215,11 @@ func uploadImage(sesh module.Session, remote, local string) error {
 	return nil
 }
 
-func execute(sesh module.Session, tool string, args ...string) error {
-	//nolint:noctx
-	cmd := exec.Command(tool, args...)
+func execute(ctx context.Context, sesh module.Session, tool string, args ...string) error {
+	// Run in its own process group and SIGKILL the group on cancel, so a cancelled
+	// Run kills the emulator tool and anything it spawned. Emulation is not a
+	// destructive operation, so an unconditional kill is fine here.
+	cmd := procexec.Command(ctx, syscall.SIGKILL, procexec.DefaultGrace, tool, args...)
 
 	output, err := cmd.CombinedOutput()
 

@@ -43,6 +43,13 @@ func clientOptions(opts []connect.ClientOption) []connect.ClientOption {
 // deadline-less streaming Run relies on this to fail fast on an unreachable agent.
 const dialTimeout = 10 * time.Second
 
+// idleConnTimeout reaps a pooled connection after it has been idle this long. It
+// is pool hygiene, not a per-RPC bound: it never touches an active stream. Inert
+// for the one-shot dutctl CLI (which exits long before it fires), it matters for
+// the long-lived dutserver relay, whose cached per-agent upstreams would otherwise
+// keep a dead keep-alive across an agent restart instead of re-dialing fresh.
+const idleConnTimeout = 90 * time.Second
+
 // newH2CClient builds the shared HTTP/2-cleartext client used for every RPC
 // connection. It is unexported: callers obtain a typed client via NewDeviceClient
 // or NewRelayClient rather than the raw transport.
@@ -51,6 +58,8 @@ func newH2CClient() *http.Client {
 	transport := &http.Transport{
 		// Bound connection establishment only; safe for the streaming Run.
 		DialContext: (&net.Dialer{Timeout: dialTimeout}).DialContext,
+		// Reap idle pooled connections; never affects an active stream.
+		IdleConnTimeout: idleConnTimeout,
 	}
 	transport.Protocols = new(http.Protocols)
 	transport.Protocols.SetUnencryptedHTTP2(true)
@@ -64,7 +73,5 @@ func newH2CClient() *http.Client {
 		// first Send), so a slow-to-first-output stream would be killed. The real
 		// per-call bound is a context deadline on the unary RPCs (see cmds/dutctl),
 		// which connect propagates to the agent as a grpc-timeout header.
-		// IdleConnTimeout (daemon-side pool hygiene for the long-lived relay) is
-		// deferred to the dutserver work.
 	}
 }

@@ -16,11 +16,18 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/BlindspotSoftware/dutctl/internal/log"
+	"github.com/BlindspotSoftware/dutctl/internal/procexec"
 	"github.com/BlindspotSoftware/dutctl/pkg/module"
 )
+
+// flashCancelGrace is how long a cancelled flash tool is given to stop on SIGTERM
+// before it is killed. Flashing must not be cut mid-write, so the tool is asked
+// to exit cleanly first and only killed hard if it overruns this window.
+const flashCancelGrace = 10 * time.Second
 
 func init() {
 	module.Register(module.Record{
@@ -185,7 +192,7 @@ func (f *Flash) Run(ctx context.Context, sesh module.Session, args ...string) er
 	l.Debug(fmt.Sprintf("executing %s", cmdStr))
 	sesh.Print(fmt.Sprintf("Executing: %s", cmdStr))
 
-	err := execute(sesh, f.Tool, f.cmdline()...)
+	err := execute(ctx, sesh, f.Tool, f.cmdline()...)
 	if err != nil {
 		return fmt.Errorf("flash operation failed: %w", err)
 	}
@@ -204,9 +211,11 @@ func (f *Flash) Run(ctx context.Context, sesh module.Session, args ...string) er
 	return nil
 }
 
-func execute(sesh module.Session, tool string, args ...string) error {
-	//nolint:noctx
-	shell := exec.Command(tool, args...)
+func execute(ctx context.Context, sesh module.Session, tool string, args ...string) error {
+	// Run in its own process group and, on cancel, ask the whole group to stop with
+	// SIGTERM — flashing must not be cut mid-write, so the tool is signalled
+	// gracefully and only force-killed by os/exec if it overruns flashCancelGrace.
+	shell := procexec.Command(ctx, syscall.SIGTERM, flashCancelGrace, tool, args...)
 
 	output, err := shell.CombinedOutput()
 
