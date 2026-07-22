@@ -8,6 +8,8 @@ import (
 	"context"
 	"errors"
 	"io"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -274,5 +276,111 @@ func TestBroker_DualErrors(t *testing.T) {
 	errs := collectErrors(t, errCh, 300*time.Millisecond)
 	if len(errs) < 2 {
 		// WANT both errors; order unspecified.
+	}
+}
+
+// TestBrokerSessionCallsUnblockAfterTeardown is a regression test for the
+// module-goroutine leak (3a): once the broker's workers have exited, every
+// module-facing session call must unblock via the frozen done signal instead of
+// wedging on a channel whose worker peer is gone. Output methods drop; the
+// Console reader reports io.EOF and the writers io.ErrClosedPipe; the file
+// methods return an error. Pre-fix these were bare channel ops that blocked the
+// module goroutine forever.
+func TestBrokerSessionCallsUnblockAfterTeardown(t *testing.T) {
+	b := &Broker{}
+	// Immediate EOF makes fromClientWorker return, which cancels the workers and
+	// closes the session's done signal; errCh closing confirms both are gone.
+	stream := &testStream{recvErrs: []error{nil}}
+	sess, errCh := b.Start(context.Background(), stream)
+
+	if errs := collectErrors(t, errCh, time.Second); len(errs) != 0 {
+		t.Fatalf("unexpected errors on EOF teardown: %v", errs)
+	}
+
+	finished := make(chan struct{})
+
+	var (
+		stdoutErr, stderrErr, stdinErr, reqErr, sendFileErr error
+	)
+
+	go func() {
+		defer close(finished)
+
+		// None of these must block now that the workers are gone.
+		sess.Print("dropped")
+		sess.Printf("%s", "dropped")
+		sess.Println("dropped")
+
+		stdin, stdout, stderr := sess.Console()
+		_, stdoutErr = stdout.Write([]byte("x"))
+		_, stderrErr = stderr.Write([]byte("x"))
+		_, stdinErr = io.ReadAll(stdin)
+		_, reqErr = sess.RequestFile("f")
+		sendFileErr = sess.SendFile("f", strings.NewReader("data"))
+	}()
+
+	select {
+	case <-finished:
+	case <-time.After(2 * time.Second):
+		t.Fatal("a session call wedged after the workers exited (module goroutine would leak)")
+	}
+
+	if !errors.Is(stdoutErr, io.ErrClosedPipe) {
+		t.Errorf("stdout.Write err = %v, want io.ErrClosedPipe", stdoutErr)
+	}
+
+	if !errors.Is(stderrErr, io.ErrClosedPipe) {
+		t.Errorf("stderr.Write err = %v, want io.ErrClosedPipe", stderrErr)
+	}
+
+	if stdinErr != nil {
+		t.Errorf("stdin io.ReadAll err = %v, want nil (EOF terminates ReadAll)", stdinErr)
+	}
+
+	if !errors.Is(reqErr, errSessionClosed) {
+		t.Errorf("RequestFile err = %v, want errSessionClosed", reqErr)
+	}
+
+	if !errors.Is(sendFileErr, errSessionClosed) {
+		t.Errorf("SendFile err = %v, want errSessionClosed", sendFileErr)
+	}
+}
+
+// TestBrokerReceiveLoopExitsOnCancel is a regression test for the receive-loop
+// goroutine leak (3b): when the broker is cancelled while stream.Receive is
+// blocked, the inner goroutine must exit once Receive returns — its resCh send is
+// guarded by ctx.Done — rather than wedge forever on a channel the returned main
+// loop no longer drains. It is a goroutine-liveness check: pre-fix, the goroutine
+// count stays one above baseline; post-fix it returns to baseline.
+func TestBrokerReceiveLoopExitsOnCancel(t *testing.T) {
+	base := runtime.NumGoroutine()
+
+	b := &Broker{}
+	stream := &testStream{recvBlock: true, unblockCh: make(chan struct{})}
+	ctx, cancel := context.WithCancel(context.Background())
+	_, errCh := b.Start(ctx, stream)
+
+	cancel() // fromClientWorker returns via ctx.Done; the workers tear down
+
+	if errs := collectErrors(t, errCh, time.Second); len(errs) != 0 {
+		t.Fatalf("unexpected errors on cancel: %v", errs)
+	}
+
+	// The inner receive-loop goroutine is still parked in the fake's blocking
+	// Receive. Releasing it must let it exit (its guarded send sees ctx.Done).
+	close(stream.unblockCh)
+
+	deadline := time.After(2 * time.Second)
+	for {
+		if runtime.NumGoroutine() <= base {
+			return // the receive-loop goroutine exited: no leak
+		}
+
+		select {
+		case <-deadline:
+			t.Fatalf("receive-loop goroutine did not exit: goroutines=%d baseline=%d",
+				runtime.NumGoroutine(), base)
+		case <-time.After(10 * time.Millisecond):
+		}
 	}
 }

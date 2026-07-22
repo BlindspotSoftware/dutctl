@@ -14,6 +14,11 @@ import (
 	"github.com/BlindspotSoftware/dutctl/internal/log"
 )
 
+// errSessionClosed is returned by the module-facing methods when the session
+// was torn down (its workers exited) before a transfer could complete. It is
+// opaque and reported to the module as-is. Not meant to be matched.
+var errSessionClosed = errors.New("session closed")
+
 // backend implements the module.Session interface.
 type backend struct {
 	printCh   chan string
@@ -31,6 +36,13 @@ type backend struct {
 	// log is the session-scoped logger, frozen in by the broker (see Broker.Start)
 	// because the module.Session methods carry no context to derive it from.
 	log *slog.Logger
+
+	// done is closed when the broker's workers are torn down. The module-facing
+	// methods select on it so a call blocked on a session channel whose worker peer has
+	// exited unblocks — dropping output, or returning an error / io.EOF — instead
+	// of wedging the module goroutine for the process lifetime. A nil done (a
+	// backend built directly in a test) leaves the calls uncancellable.
+	done <-chan struct{}
 }
 
 // logger returns the session's scoped logger, falling back to the default if
@@ -43,16 +55,29 @@ func (s *backend) logger() *slog.Logger {
 	return slog.Default()
 }
 
+// Print, Printf and Println forward a message to the client. The send is
+// abandoned if the session has been torn down (done closed), so a module that
+// keeps printing after its workers are gone is not wedged — the output is
+// dropped, matching the fact that there is no longer a client to receive it.
 func (s *backend) Print(a ...any) {
-	s.printCh <- fmt.Sprint(a...)
+	select {
+	case s.printCh <- fmt.Sprint(a...):
+	case <-s.done:
+	}
 }
 
 func (s *backend) Printf(format string, a ...any) {
-	s.printCh <- fmt.Sprintf(format, a...)
+	select {
+	case s.printCh <- fmt.Sprintf(format, a...):
+	case <-s.done:
+	}
 }
 
 func (s *backend) Println(a ...any) {
-	s.printCh <- fmt.Sprintln(a...)
+	select {
+	case s.printCh <- fmt.Sprintln(a...):
+	case <-s.done:
+	}
 }
 
 // Console returns the module's stdin/stdout/stderr streams (see module.Session).
@@ -74,17 +99,17 @@ func (s *backend) Console() (stdin io.Reader, stdout, stderr io.Writer) {
 	// so a failure here is a broken invariant (a nil channel), not a runtime
 	// condition. Console has no error return, so panic; the module-execution
 	// goroutine recovers it into a clean run error (see runModule).
-	stdinReader, err = chanio.NewChanReader(s.stdinCh, log.Scope(s.logger(), scopeSessionUpstream))
+	stdinReader, err = chanio.NewChanReader(s.stdinCh, s.done, log.Scope(s.logger(), scopeSessionUpstream))
 	if err != nil {
 		panic(fmt.Sprintf("session.Console: stdin reader: %v", err))
 	}
 
-	stdoutWriter, err = chanio.NewChanWriter(s.stdoutCh)
+	stdoutWriter, err = chanio.NewChanWriter(s.stdoutCh, s.done)
 	if err != nil {
 		panic(fmt.Sprintf("session.Console: stdout writer: %v", err))
 	}
 
-	stderrWriter, err = chanio.NewChanWriter(s.stderrCh)
+	stderrWriter, err = chanio.NewChanWriter(s.stderrCh, s.done)
 	if err != nil {
 		panic(fmt.Sprintf("session.Console: stderr writer: %v", err))
 	}
@@ -105,11 +130,26 @@ func (s *backend) RequestFile(name string) (io.Reader, error) {
 	uplog := log.Scope(s.logger(), scopeSessionUpstream)
 	uplog.Debug("module requested file", "name", name)
 
-	s.fileReqCh <- name // Send the file request to the client.
+	// Send the file request to the client, then wait for the file. Both block on
+	// a worker peer, so guard them with done: if the session is torn down first,
+	// return rather than wedge the module goroutine.
+	select {
+	case s.fileReqCh <- name:
+	case <-s.done:
+		return nil, fmt.Errorf("request file %q: %w", name, errSessionClosed)
+	}
 
-	file := <-s.fileCh // This will block until the client sends the file.
+	var file chan []byte
 
-	r, err := chanio.NewChanReader(file, uplog)
+	select {
+	case file = <-s.fileCh:
+	case <-s.done:
+		return nil, fmt.Errorf("request file %q: %w", name, errSessionClosed)
+	}
+
+	// The received channel is fed and closed by fromClientWorker right after the
+	// rendezvous, so this read always terminates: pass a nil done.
+	r, err := chanio.NewChanReader(file, nil, uplog)
 	if err != nil {
 		return nil, fmt.Errorf("request file %q: %w", name, err)
 	}
@@ -137,7 +177,17 @@ func (s *backend) SendFile(name string, r io.Reader) error {
 	s.currentFile = name
 
 	file := make(chan []byte, 1)
-	s.fileCh <- file
+
+	// Hand the file to toClientWorker. Guard the send with done: if the session
+	// is torn down first, return rather than wedge the module goroutine. The
+	// buffered content send and close below never block once the rendezvous
+	// succeeds.
+	select {
+	case s.fileCh <- file:
+	case <-s.done:
+		return fmt.Errorf("send file %q: %w", name, errSessionClosed)
+	}
+
 	file <- content
 
 	close(file) // indicate EOF.
