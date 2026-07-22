@@ -32,10 +32,7 @@ func (s *testStream) Send(_ *pb.RunResponse) error {
 
 func (s *testStream) Receive() (*pb.RunRequest, error) {
 	if s.recvBlock {
-		if s.unblockCh == nil {
-			s.unblockCh = make(chan struct{})
-		}
-		<-s.unblockCh // will block until closed; simulates a long receive
+		<-s.unblockCh // blocks until the test closes it; simulates a long receive
 	}
 
 	idx := s.recvCalls
@@ -156,15 +153,13 @@ func TestBroker_StdinForwarding(t *testing.T) {
 // Cancellation during a blocked receive should terminate fromClientWorker without producing errors.
 func TestBroker_CancelDuringBlockedReceive(t *testing.T) {
 	b := &Broker{}
-	stream := &testStream{recvBlock: true}
+	stream := &testStream{recvBlock: true, unblockCh: make(chan struct{})}
 	ctx, cancel := context.WithCancel(context.Background())
 	_, errCh := b.Start(ctx, stream)
 
 	// Cancel promptly, then unblock the fake receive so worker goroutine does not leak.
 	cancel()
-	if stream.unblockCh != nil {
-		close(stream.unblockCh)
-	}
+	close(stream.unblockCh)
 
 	errs := collectErrors(t, errCh, 200*time.Millisecond)
 	if len(errs) != 0 {
@@ -184,7 +179,10 @@ func TestBroker_DualErrorsSet(t *testing.T) {
 	sess, errCh := b.Start(ctx, stream)
 
 	// Trigger send error.
-	sess.Print("trigger")
+	// Print blocks until a worker receives it; before the session gained a
+	// done-guard it hangs if the workers already tore down on the injected error,
+	// so run it async — a blocked send leaks harmlessly instead of wedging the test.
+	go sess.Print("trigger")
 
 	errs := collectErrors(t, errCh, 300*time.Millisecond)
 	if len(errs) == 1 {
@@ -219,7 +217,9 @@ func TestBroker_ToClientSendError(t *testing.T) {
 	session, errCh := b.Start(ctx, stream)
 
 	// Trigger toClientWorker by printing.
-	session.Print("hello")
+	// Async: Print blocks until a worker receives it, which may never happen once
+	// the workers tear down on the injected error; a leaked send is harmless here.
+	go session.Print("hello")
 
 	errs := collectErrors(t, errCh, 200*time.Millisecond)
 	if len(errs) != 1 || !errors.Is(errs[0], stream.sendErr) {
@@ -269,7 +269,9 @@ func TestBroker_DualErrors(t *testing.T) {
 	session, errCh := b.Start(ctx, stream)
 
 	// Trigger toClient error
-	session.Print("hello")
+	// Async: Print blocks until a worker receives it, which may never happen once
+	// the workers tear down on the injected error; a leaked send is harmless here.
+	go session.Print("hello")
 
 	errs := collectErrors(t, errCh, 300*time.Millisecond)
 	if len(errs) < 2 {
