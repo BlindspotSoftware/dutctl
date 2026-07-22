@@ -107,6 +107,11 @@ const registerTimeout = 10 * time.Second
 // cannot hang teardown indefinitely.
 const deinitTimeout = 15 * time.Second
 
+// initTimeout bounds module initialization at startup so a wedged module Init
+// (e.g. probing absent hardware) fails startup rather than hanging forever. It is
+// generous because Init may legitimately talk to slow devices.
+const initTimeout = 5 * time.Minute
+
 // cleanup takes care of a graceful shutdown of the agent and its running service.
 // Afterwards agt.exit is called. If clean-up fails, agt.exit is called with code 1,
 // otherwise with the provided exitCode.
@@ -256,10 +261,12 @@ func (agt *agent) start() {
 		agt.cleanup(exit1)
 	}
 
-	// initCtx is the agent-lifetime context for module initialization; it flows
-	// into every module's Init via internal/log.
-	// TODO(ctx): bound startup with a timeout or wire in cancellation.
-	initCtx := context.Background()
+	// initCtx carries module initialization; it flows into every module's Init via
+	// internal/log. It derives from the signal context so Ctrl-C interrupts a slow
+	// startup, and is bounded by initTimeout so a wedged Init fails startup instead
+	// of hanging forever.
+	initCtx, cancelInit := context.WithTimeout(ctx, initTimeout)
+	defer cancelInit()
 
 	agt.modulesNeedDeinit = true
 	err = initModules(initCtx, agt.config.Devices)

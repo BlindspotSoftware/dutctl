@@ -88,9 +88,9 @@ func (w *Wait) Deinit(_ context.Context) error {
 // parsed as the wait duration and overrides the value set during Init; otherwise
 // the configured (or default) duration is used.
 //
-// The wait is not interruptible: Run sleeps for the full duration and does not
-// observe cancellation of ctx.
-func (w *Wait) Run(_ context.Context, s module.Session, args ...string) error {
+// The wait honors ctx: if ctx is cancelled before the duration elapses, Run
+// returns ctx.Err() instead of waiting out the full duration.
+func (w *Wait) Run(ctx context.Context, s module.Session, args ...string) error {
 	var duration time.Duration
 
 	// Override default duration or configured duration with value passed via cmd line.
@@ -107,7 +107,13 @@ func (w *Wait) Run(_ context.Context, s module.Session, args ...string) error {
 
 	s.Printf("Waiting for %s\n", duration)
 
-	time.Sleep(duration)
+	timer := time.NewTimer(duration)
+	defer timer.Stop()
 
-	return nil
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }

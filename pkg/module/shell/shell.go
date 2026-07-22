@@ -11,8 +11,10 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"syscall"
 
 	"github.com/BlindspotSoftware/dutctl/internal/log"
+	"github.com/BlindspotSoftware/dutctl/internal/procexec"
 	"github.com/BlindspotSoftware/dutctl/pkg/module"
 )
 
@@ -102,8 +104,10 @@ func (s *Shell) Run(ctx context.Context, sesh module.Session, args ...string) er
 
 	log.FromContext(ctx).Info(fmt.Sprintf("executing %q", cmdStr))
 
-	//nolint:noctx
-	shell := exec.Command(binary, "-c", cmdStr)
+	// Run in its own process group and SIGKILL that group on cancel, so a cancelled
+	// Run (client disconnect, shutdown) tears down the shell and anything it spawned
+	// instead of orphaning children and blocking on their inherited output pipes.
+	shell := procexec.Command(ctx, syscall.SIGKILL, procexec.DefaultGrace, binary, "-c", cmdStr)
 
 	out, err := shell.CombinedOutput()
 

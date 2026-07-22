@@ -211,6 +211,14 @@ func (s *rpcService) Details(
 	return res, nil
 }
 
+// errAgentClosedStream and errClientClosedStream are cancellation causes recorded
+// on the relay's runCtx when a forwarding direction ends cleanly (io.EOF), so the
+// completion log names which side closed the stream first.
+var (
+	errAgentClosedStream  = errors.New("agent closed the stream")
+	errClientClosedStream = errors.New("client closed the stream")
+)
+
 // Run relays a client's bidirectional Run stream to the agent that controls the
 // requested device, forwarding messages in both directions and bridging the
 // client and agent version headers.
@@ -259,11 +267,14 @@ func (s *rpcService) Run(
 
 	l.Info("routing to agent", "agent", agent.address)
 
-	// upstream is bound to the request context (ctx), so it is torn down when this
-	// handler returns. A relay-internal abort currently relies on that return plus
-	// parent-context teardown; a future context.WithCancelCause on runCtx could
-	// bind upstream to the relay directly for prompt cancellation. TODO(ctx).
-	upstream := agent.conn(log.WithScope(ctx, "relay")).Run(ctx)
+	// Bind the whole relay exchange to runCtx so a forwarding goroutine exiting —
+	// or this handler returning — tears down the upstream Run to the agent
+	// promptly, carrying a cause for observability, instead of waiting for the
+	// request context to unwind.
+	runCtx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+
+	upstream := agent.conn(log.WithScope(runCtx, "relay")).Run(runCtx)
 
 	// Forward the requesting user's identity to the agent so it can enforce locking.
 	upstream.RequestHeader().Set(headers.User, user)
@@ -298,13 +309,9 @@ func (s *rpcService) Run(
 		)
 	}
 
-	// TODO: consider refactoring and use context.WithCancelCause(ctx)
 	const numForwardingWorkers = 2
 
 	errChan := make(chan error, numForwardingWorkers) // Each of the two goroutines can send an error.
-
-	runCtx, cancel := context.WithCancel(ctx)
-	defer cancel() // Ensure the context is cancelled when the function returns.
 
 	// relayAgentVersion forwards the agent's version to the client once, before the
 	// first response, so the client's advisory check sees the real agent.
@@ -312,7 +319,7 @@ func (s *rpcService) Run(
 
 	// agent to client forwarding (downstream direction)
 	go func() {
-		defer cancel()
+		defer cancel(nil)
 
 		l := log.FromContext(log.WithScope(runCtx, "relay downstream"))
 
@@ -328,6 +335,7 @@ func (s *rpcService) Run(
 			res, err := upstream.Receive()
 			if errors.Is(err, io.EOF) {
 				l.Debug("forwarding stopped: stream closed by agent")
+				cancel(errAgentClosedStream)
 
 				return
 			}
@@ -370,7 +378,7 @@ func (s *rpcService) Run(
 
 	// client to agent forwarding (upstream direction)
 	go func() {
-		defer cancel()
+		defer cancel(nil)
 
 		l := log.FromContext(log.WithScope(runCtx, "relay upstream"))
 
@@ -386,6 +394,7 @@ func (s *rpcService) Run(
 			req, err := downstream.Receive()
 			if errors.Is(err, io.EOF) {
 				l.Debug("forwarding stopped: stream closed by client")
+				cancel(errClientClosedStream)
 
 				return
 			}
@@ -410,7 +419,7 @@ func (s *rpcService) Run(
 	// Wait for both forwarding routines to finish, or for one to fail.
 	select {
 	case <-runCtx.Done():
-		l.Info("request finished")
+		l.Info("request finished", "cause", context.Cause(runCtx))
 	case err := <-errChan:
 		l.Error("request finished with error", "err", err)
 

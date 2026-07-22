@@ -7,9 +7,10 @@ package agent
 import (
 	"context"
 	"fmt"
-	"os/exec"
 	"strings"
+	"syscall"
 
+	"github.com/BlindspotSoftware/dutctl/internal/procexec"
 	"github.com/BlindspotSoftware/dutctl/pkg/module"
 )
 
@@ -39,11 +40,12 @@ func (m *Status) Deinit(_ context.Context) error {
 }
 
 // Run executes "uname -a" on the host running dutagent and prints its output to the session. Any arguments are ignored.
-func (m *Status) Run(_ context.Context, s module.Session, _ ...string) error {
+func (m *Status) Run(ctx context.Context, s module.Session, _ ...string) error {
 	var out strings.Builder
 
-	//nolint:noctx
-	cmd := exec.Command("uname", "-a")
+	// Run in its own process group so a cancelled Run kills the process (and any
+	// children) rather than leaving it running.
+	cmd := procexec.Command(ctx, syscall.SIGKILL, procexec.DefaultGrace, "uname", "-a")
 	cmd.Stdout = &out
 
 	err := cmd.Run()

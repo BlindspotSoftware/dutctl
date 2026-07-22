@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"strings"
 
@@ -136,11 +137,35 @@ func (s *SSH) Run(ctx context.Context, sesh module.Session, args ...string) erro
 	l := log.FromContext(ctx)
 	l.Debug(fmt.Sprintf("dialing %s@%s", s.User, s.addr))
 
-	client, err := ssh.Dial("tcp", s.addr, s.config)
+	// Dial with ctx so a cancelled Run does not block on an unreachable host.
+	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", s.addr)
 	if err != nil {
 		return fmt.Errorf("failed to dial SSH server: %w", err)
 	}
+
+	sshConn, chans, reqs, err := ssh.NewClientConn(conn, s.addr, s.config)
+	if err != nil {
+		_ = conn.Close()
+
+		return fmt.Errorf("failed to establish SSH connection: %w", err)
+	}
+
+	client := ssh.NewClient(sshConn, chans, reqs)
 	defer client.Close()
+
+	// The SSH handshake and command run are not ctx-aware on their own; closing
+	// the client on cancellation unblocks a blocked NewSession/CombinedOutput.
+	// The watcher exits when Run returns, so it does not outlive the call.
+	runDone := make(chan struct{})
+	defer close(runDone)
+
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = client.Close()
+		case <-runDone:
+		}
+	}()
 
 	session, err := client.NewSession()
 	if err != nil {
