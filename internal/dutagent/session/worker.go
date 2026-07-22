@@ -65,7 +65,7 @@ func toClientWorker(ctx context.Context, stream Stream, s *backend) error {
 			// response is driven by this Send, so setting currentFile afterwards
 			// could race a fast response that fromClientWorker validates against
 			// currentFile (see the currentFile guards there).
-			s.currentFile = name
+			s.setCurrentFile(name)
 
 			res := &pb.RunResponse{
 				Msg: &pb.RunResponse_FileRequest{FileRequest: &pb.FileRequest{Path: name}},
@@ -88,12 +88,14 @@ func toClientWorker(ctx context.Context, stream Stream, s *backend) error {
 				return err
 			}
 
-			l.Debug("file received from module", "name", s.currentFile, "bytes", len(content))
+			name := s.currentFileName()
+
+			l.Debug("file received from module", "name", name, "bytes", len(content))
 
 			res := &pb.RunResponse{
 				Msg: &pb.RunResponse_File{
 					File: &pb.File{
-						Path:    s.currentFile,
+						Path:    name,
 						Content: content,
 					},
 				},
@@ -104,7 +106,7 @@ func toClientWorker(ctx context.Context, stream Stream, s *backend) error {
 				return err
 			}
 
-			s.currentFile = ""
+			s.setCurrentFile("")
 		}
 	}
 }
@@ -215,7 +217,8 @@ func fromClientWorker(ctx context.Context, stream Stream, s *backend) error {
 					return fmt.Errorf("%w: received empty file-message", ErrBadFileTransfer)
 				}
 
-				if s.currentFile == "" {
+				want := s.currentFileName()
+				if want == "" {
 					return fmt.Errorf("%w: received file-message without a former request", ErrBadFileTransfer)
 				}
 
@@ -226,8 +229,8 @@ func fromClientWorker(ctx context.Context, stream Stream, s *backend) error {
 					return fmt.Errorf("%w: received file-message without content", ErrBadFileTransfer)
 				}
 
-				if path != s.currentFile {
-					return fmt.Errorf("%w: received file-message %q but requested %q", ErrBadFileTransfer, path, s.currentFile)
+				if path != want {
+					return fmt.Errorf("%w: received file-message %q but requested %q", ErrBadFileTransfer, path, want)
 				}
 
 				l.Debug("received file from client", "name", path, "bytes", len(content))
@@ -250,7 +253,7 @@ func fromClientWorker(ctx context.Context, stream Stream, s *backend) error {
 
 				close(file)
 
-				s.currentFile = ""
+				s.setCurrentFile("")
 			default:
 				l.Warn("unexpected message type", "type", fmt.Sprintf("%T", msg))
 			}
