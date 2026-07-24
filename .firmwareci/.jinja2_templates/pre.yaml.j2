@@ -79,3 +79,48 @@ pre-stage:
     parameters:
       executable: "[[input.DUTCTL]]"
       args: ["--help"]
+
+  # Set sensing GPIO pins as inputs
+  - cmd: cmd
+    name: Configure input GPIO pins for testing 21
+    transport: *transport_root
+    parameters:
+      executable: "pinctrl"
+      args: ["set", "21", "ip", "pn"]
+  - cmd: cmd
+    name: Configure input GPIO pins for testing 20
+    transport: *transport_root
+    parameters:
+      executable: "pinctrl"
+      args: ["set", "20", "ip", "pn"]
+  - cmd: cmd
+    name: Configure input GPIO pins for testing 17
+    transport: *transport_root
+    parameters:
+      executable: "pinctrl"
+      args: ["set", "17", "ip", "pn"]
+  - cmd: cmd
+    name: Configure input GPIO pins for testing 27
+    transport: *transport_root
+    parameters:
+      executable: "pinctrl"
+      args: ["set", "27", "ip", "pn"]
+  - cmd: cmd
+    name: Configure input GPIO pins for testing 22
+    transport: *transport_root
+    parameters:
+      executable: "pinctrl"
+      args: ["set", "22", "ip", "pn"]
+
+  - cmd: cmd
+    name: Start fake serial
+    transport: *transport_oscar
+    parameters:
+      executable: bash
+      args:
+        [
+          "-c",
+          "socat -x pty,rawer,icanon=0,nonblock,link={{ defaults.FAKE_SERIAL_INPUT }} pty,rawer,icanon=0,nonblock,link={{ defaults.FAKE_SERIAL_OUTPUT }} & disown",
+        ]
+    options:
+      timeout: 1s
