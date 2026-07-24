@@ -59,7 +59,7 @@ func (f *Flash) Deinit(_ context.Context) error {
 }
 
 // Run writes or reads the flash, as args say.
-func (f *Flash) Run(_ context.Context, s module.Session, args ...string) error {
+func (f *Flash) Run(ctx context.Context, s module.Session, args ...string) error {
 	const wantArgs = 2
 	if len(args) != wantArgs {
 		return fmt.Errorf("expected write <image> or read <file>, got %d arguments", len(args))
@@ -67,16 +67,16 @@ func (f *Flash) Run(_ context.Context, s module.Session, args ...string) error {
 
 	switch op, name := args[0], args[1]; op {
 	case "write":
-		return writeFlash(s, name)
+		return writeFlash(ctx, s, name)
 	case "read":
-		return readFlash(s, name)
+		return readFlash(ctx, s, name)
 	default:
 		return fmt.Errorf("unknown operation %q, want write or read", op)
 	}
 }
 
 // writeFlash requests the image name from the user and writes it to the flash.
-func writeFlash(s module.Session, name string) error {
+func writeFlash(ctx context.Context, s module.Session, name string) error {
 	// Checked before the transfer too, so that a user is not kept waiting for
 	// a transfer that cannot be used.
 	err := demoBoard.Writable()
@@ -84,7 +84,7 @@ func writeFlash(s module.Session, name string) error {
 		return err
 	}
 
-	r, err := s.RequestFile(name)
+	r, err := s.RequestFile(ctx, name)
 	if err != nil {
 		return fmt.Errorf("requesting %s: %w", name, err)
 	}
@@ -111,10 +111,10 @@ func writeFlash(s module.Session, name string) error {
 }
 
 // readFlash sends the content of the flash to the user as name.
-func readFlash(s module.Session, name string) error {
+func readFlash(ctx context.Context, s module.Session, name string) error {
 	img := demoBoard.Firmware()
 
-	err := s.SendFile(name, bytes.NewReader(img.Data))
+	err := s.SendFile(ctx, name, int64(len(img.Data)), bytes.NewReader(img.Data))
 	if err != nil {
 		return fmt.Errorf("sending the flash as %s: %w", name, err)
 	}

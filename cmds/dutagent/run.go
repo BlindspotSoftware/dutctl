@@ -158,6 +158,13 @@ func runInSession(ctx context.Context, stream session.Stream, mods []dut.Module,
 	defer func() { _ = broker.Stop() }()
 
 	modErr := runModules(sessCtx, sess, broker.CloseConsole, mods, moduleArgs)
+
+	// A file a module handed to SendFile still streams after the module
+	// returned. Stop forwarding module output, but let every transfer finish
+	// before Stop ends the workers and cancels sessCtx, which bounds them.
+	broker.Shutdown()
+	broker.WaitForTransfersToComplete()
+
 	brokerErr := broker.Stop()
 
 	switch {

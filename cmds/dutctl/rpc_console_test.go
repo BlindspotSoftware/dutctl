@@ -261,8 +261,8 @@ func TestRunRPCPipeEndReachesLaterConsoles(t *testing.T) {
 	}
 }
 
-// A file request answered by the receive routine while the send routine
-// forwards input exercises the one sender both share; the race detector
+// An upload the agent requests while the send routine forwards input exercises
+// the one sender they share; the race detector
 // watches the stream.
 func TestRunRPCFileReplyWhileInputFlows(t *testing.T) {
 	dir := t.TempDir()
@@ -282,13 +282,18 @@ func TestRunRPCFileReplyWhileInputFlows(t *testing.T) {
 			return err
 		}
 
-		if err := stream.Send(&pb.RunResponse{Msg: &pb.RunResponse_FileRequest{FileRequest: &pb.FileRequest{Path: path}}}); err != nil {
+		if err := stream.Send(&pb.RunResponse{Msg: &pb.RunResponse_FileTransferRequest{FileTransferRequest: &pb.FileTransferRequest{
+			TransferId: "1", Metadata: &pb.FileMetadata{Path: path}, Direction: pb.FileTransferRequest_DIRECTION_UPLOAD,
+		}}}); err != nil {
 			return err
 		}
 
-		// The file reply and the input travel on separate routines of the
+		// The file's chunks and the input travel on separate routines of the
 		// client, in no fixed order: wait for both, then end the console.
-		var gotFile, gotEOF bool
+		var (
+			gotFile, gotEOF bool
+			content         []byte
+		)
 
 		for !gotFile || !gotEOF {
 			req, err := agent.receive(stream)
@@ -297,12 +302,24 @@ func TestRunRPCFileReplyWhileInputFlows(t *testing.T) {
 			}
 
 			switch msg := req.GetMsg().(type) {
-			case *pb.RunRequest_File:
-				if string(msg.File.GetContent()) != "file content" {
-					return errors.New("wrong file content")
+			case *pb.RunRequest_FileChunk:
+				content = append(content, msg.FileChunk.GetChunkData()...)
+				status := pb.FileTransferResponse_STATUS_CHUNK_RECEIVED
+
+				if msg.FileChunk.GetIsFinal() {
+					if string(content) != "file content" {
+						return errors.New("wrong file content")
+					}
+
+					gotFile = true
+					status = pb.FileTransferResponse_STATUS_TRANSFER_COMPLETE
 				}
 
-				gotFile = true
+				if err := stream.Send(&pb.RunResponse{Msg: &pb.RunResponse_FileTransferResponse{FileTransferResponse: &pb.FileTransferResponse{
+					TransferId: "1", Status: status, NextChunkExpected: msg.FileChunk.GetChunkNumber() + 1,
+				}}}); err != nil {
+					return err
+				}
 			case *pb.RunRequest_ConsoleControl:
 				gotEOF = msg.ConsoleControl.GetEof() != nil
 			}
@@ -347,6 +364,45 @@ func TestRunRPCUnframedOutputShown(t *testing.T) {
 
 	if got := stdout.String(); got != "stray output\n" {
 		t.Errorf("stdout = %q, want the stray output", got)
+	}
+}
+
+// A download the agent drops without a word, such as one its module cancelled,
+// fails the run when the stream ends, and leaves no file behind.
+func TestRunRPCUnfinishedDownloadFailsTheRun(t *testing.T) {
+	dest := filepath.Join(t.TempDir(), "out.bin")
+
+	agent := &scriptedAgent{}
+	agent.run = func(stream runStreamServer) error {
+		if _, err := agent.receive(stream); err != nil {
+			return err
+		}
+
+		err := stream.Send(&pb.RunResponse{Msg: &pb.RunResponse_FileTransferRequest{
+			FileTransferRequest: &pb.FileTransferRequest{
+				TransferId: "1",
+				Metadata:   &pb.FileMetadata{Path: dest, Name: dest, Size: 6},
+				Direction:  pb.FileTransferRequest_DIRECTION_DOWNLOAD,
+			},
+		}})
+		if err != nil {
+			return err
+		}
+
+		return stream.Send(&pb.RunResponse{Msg: &pb.RunResponse_FileChunk{
+			FileChunk: &pb.FileChunk{TransferId: "1", ChunkData: []byte("abc")},
+		}})
+	}
+
+	app, _, _ := newConsoleApp(t, agent, strings.NewReader(""), "")
+
+	err := app.runRPC(context.Background(), "dev", "cmd", nil)
+	if err == nil || !strings.Contains(err.Error(), "out.bin") {
+		t.Fatalf("runRPC = %v, want an error that names the unfinished download", err)
+	}
+
+	if _, statErr := os.Stat(dest); !os.IsNotExist(statErr) {
+		t.Errorf("the unfinished download left %s (%v)", dest, statErr)
 	}
 }
 

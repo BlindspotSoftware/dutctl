@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -201,7 +202,7 @@ func (f *File) uploadFile(ctx context.Context, sesh module.Session, src, dest st
 	l.Debug(fmt.Sprintf("uploading %q from client to %q on dutagent", src, dest))
 
 	// Request file from client
-	fileReader, err := sesh.RequestFile(src)
+	fileReader, err := sesh.RequestFile(ctx, src)
 	if err != nil {
 		return fmt.Errorf("failed to request file from client: %w", err)
 	}
@@ -219,27 +220,67 @@ func (f *File) uploadFile(ctx context.Context, sesh module.Session, src, dest st
 		return fmt.Errorf("failed to parse permission %q: %w", f.Permission, err)
 	}
 
-	perm := fs.FileMode(mode)
-
-	// Create destination file
-	dstFile, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)
+	bytesWritten, err := writeUpload(l, fileReader, dest, fs.FileMode(mode))
 	if err != nil {
-		return fmt.Errorf("failed to create destination file %q: %w", dest, err)
-	}
-
-	bytesWritten, err := io.Copy(dstFile, fileReader)
-	// A failed close can mean the data did not reach the disk in full.
-	err = errors.Join(err, dstFile.Close())
-	if err != nil {
-		os.Remove(dest)
-
-		return fmt.Errorf("failed to write file data: %w", err)
+		return err
 	}
 
 	l.Info(fmt.Sprintf("uploaded %d bytes to %q", bytesWritten, dest))
 	sesh.Printf("Upload complete: %s -> %s (%d bytes)\n", src, dest, bytesWritten)
 
 	return nil
+}
+
+// writeUpload writes the file arriving on r to dest. RequestFile returns before
+// the client has opened the file, so the upload is staged in the run's own
+// directory, and dest is opened only once all of it arrived: a file the client
+// cannot send leaves dest as it was.
+func writeUpload(l *slog.Logger, r io.Reader, dest string, perm fs.FileMode) (int64, error) {
+	dir, err := os.MkdirTemp("", "file-")
+	if err != nil {
+		return 0, fmt.Errorf("failed to create a directory for the upload: %w", err)
+	}
+
+	defer func() {
+		err := os.RemoveAll(dir)
+		if err != nil {
+			l.Warn(fmt.Sprintf("remove upload directory: %v", err))
+		}
+	}()
+
+	staged, err := os.Create(filepath.Join(dir, "upload"))
+	if err != nil {
+		return 0, fmt.Errorf("failed to stage the upload: %w", err)
+	}
+
+	// Read back below through the same descriptor, so its close cannot lose data.
+	defer func() { _ = staged.Close() }()
+
+	size, err := io.Copy(staged, r)
+	if err != nil {
+		return 0, fmt.Errorf("failed to receive file data: %w", err)
+	}
+
+	_, err = staged.Seek(0, io.SeekStart)
+	if err != nil {
+		return 0, fmt.Errorf("failed to read the staged upload: %w", err)
+	}
+
+	dstFile, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)
+	if err != nil {
+		return 0, fmt.Errorf("failed to create destination file %q: %w", dest, err)
+	}
+
+	_, err = io.Copy(dstFile, staged)
+	// A failed close can mean the data did not reach the disk in full.
+	err = errors.Join(err, dstFile.Close())
+	if err != nil {
+		os.Remove(dest)
+
+		return 0, fmt.Errorf("failed to write file data: %w", err)
+	}
+
+	return size, nil
 }
 
 // downloadFile handles downloading a file from dutagent to client.
@@ -257,16 +298,18 @@ func downloadFile(ctx context.Context, sesh module.Session, src, dest string) er
 		return fmt.Errorf("failed to open source file %q: %w", src, err)
 	}
 
-	// Open source file
 	srcFile, err := os.Open(src)
 	if err != nil {
 		return fmt.Errorf("failed to open source file %q: %w", src, err)
 	}
-	defer srcFile.Close()
 
-	// Send file to client
-	err = sesh.SendFile(dest, srcFile)
+	// SendFile takes ownership of the file on success: the transfer is chunked
+	// and proceeds after this returns, so the session closes it and we must NOT
+	// defer Close. On error ownership stays here.
+	err = sesh.SendFile(ctx, dest, fileInfo.Size(), srcFile)
 	if err != nil {
+		srcFile.Close()
+
 		return fmt.Errorf("failed to send file to client: %w", err)
 	}
 

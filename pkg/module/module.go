@@ -96,8 +96,8 @@ type Module interface {
 	// such as a package variable or a library's global state. Keep the files
 	// of a run in a directory of its own, made with os.MkdirTemp under the
 	// agent's temporary directory, and remove it before Run returns. Close
-	// every file Run opens, and treat a failed close of a file it wrote as a
-	// failed write.
+	// every file Run opens, except one that SendFile accepted, and treat a
+	// failed close of a file it wrote as a failed write.
 	Run(ctx context.Context, s Session, args ...string) error
 }
 
@@ -161,11 +161,29 @@ type Session interface {
 	// first, whose Stdin then reports io.EOF and whose writers fail. Print may
 	// be used while a console is open.
 	OpenConsole(opts ConsoleOptions) Console
-	// RequestFile requests a file from the client.
-	// The file is identified by its name and is made available to the module via the returned io.Reader.
-	RequestFile(name string) (io.Reader, error)
-	// SendFile sends a file to the client.
-	SendFile(name string, r io.Reader) error
+	// RequestFile requests a file from the client. The file is identified by its
+	// name and is made available to the module via the returned io.Reader.
+	//
+	// ctx bounds the transfer: cancelling it aborts the transfer and fails the
+	// reader. Pass Run's context, or a deadline derived from it. The session
+	// imposes no limit of its own.
+	RequestFile(ctx context.Context, name string) (io.Reader, error)
+	// SendFile sends a file to the client. size is the total file size in bytes,
+	// which the agent announces to the client.
+	//
+	// It returns as soon as the transfer is registered; the bytes are streamed
+	// afterwards, so r must stay readable beyond this call. If r implements
+	// io.Closer the session takes ownership and closes it when the transfer
+	// completes, but only on a nil return. On error the caller still owns r and
+	// must close it.
+	//
+	// ctx bounds the transfer, and still does after SendFile returns: cancelling
+	// it closes r and aborts the transfer, which fails the run on the client.
+	// The session reads r on a goroutine of its own and closes it from another,
+	// so Close must be safe during a Read and end it, as it is for an *os.File
+	// or an io.PipeReader. A Read of an r without Close must not block, since
+	// nothing could end it.
+	SendFile(ctx context.Context, name string, size int64, r io.Reader) error
 }
 
 // ConsoleMode is how a module uses its console. Only the module knows, and the

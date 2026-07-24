@@ -10,8 +10,8 @@ mistake here does not fail one command: it blocks a run forever, keeps a device 
 ends the agent with every run on it. Review every new goroutine, channel operation, lock and timer
 here with care: what ends it, and what happens to it when the run is torn down. The decisions in
 force here are ADR-0007, ADR-0017, ADR-0021, ADR-0025, ADR-0027, ADR-0029, ADR-0031, ADR-0032,
-ADR-0035 and ADR-0036; GEN-1, GEN-2 and GEN-3 say when a change needs a new or superseding ADR or
-is breaking.
+ADR-0035, ADR-0036 and ADR-0040; GEN-1, GEN-2 and GEN-3 say when a change needs a new or
+superseding ADR or is breaking.
 
 ## Session and channels
 
@@ -22,14 +22,19 @@ is breaking.
   goroutine selects on `ctx.Done()`.
   → https://github.com/BlindspotSoftware/dutctl/blob/main/docs/decisions/0007-route-module-input-and-output-through-a-session.md#more-information
 - [CORE-2] The session's channels are unbuffered, so a slow client slows the module down and
-  output keeps its order. The only buffered one among them is a file's channel of capacity 1,
-  which its sender fills and closes at once. Once the broker runs, only `toClientWorker` sends on
-  the stream.
-  → https://github.com/BlindspotSoftware/dutctl/blob/main/docs/decisions/0007-route-module-input-and-output-through-a-session.md#decision-outcome
+  output keeps its order. The only buffered one among them is `fileTransferNotifyCh`, of
+  capacity 1, a wake-up for `toClientWorker` in which signals coalesce. Every send on the stream
+  goes through `sendToClient`: `toClientWorker` sends the module's output, the console events,
+  the downloads and the acknowledgments of upload chunks; `fromClientWorker` only answers the
+  client's transfer requests and refuses its broken chunks. An upload chunk waits for the module
+  in a `deliverChunk` goroutine of its own, never in `fromClientWorker`, and holds no lock there.
+  → https://github.com/BlindspotSoftware/dutctl/blob/main/docs/decisions/0040-transfer-files-in-chunks-over-the-run-stream.md#decision-outcome
 - [CORE-3] `Broker.Start` sets the fields that the module-facing methods read without a lock (the
   channels, `done`, `log`) before it starts the workers, and nothing reassigns them later. The
-  fields that `backend.mu` guards, `currentFile`, `currentConsole` and `lastConsoleID`, are read
-  and written only under it.
+  fields that `backend.mu` guards, `currentConsole` and `lastConsoleID`, are read and written
+  only under it. `register` and the teardown sweeps take `shutdownMutex` before the transfer maps'
+  locks, and a transfer is counted on `transferWg` before it is published. A download's `mu`
+  serializes the reads of the module's reader; closing the reader never waits for it.
   → https://github.com/BlindspotSoftware/dutctl/blob/main/internal/dutagent/session/session.go
 - [CORE-4] A module has one console at a time: a second `OpenConsole` ends the first. Input or
   control that is not marked for the open console is dropped, never kept for a later one. A
@@ -114,7 +119,7 @@ is breaking.
 
 ## Do not flag
 
-- A file's channel of capacity 1 in the session: it is the session's one deliberate buffered
+- `fileTransferNotifyCh` of capacity 1 in the session: it is the session's one deliberate buffered
   channel (CORE-2). CORE-2 covers only the session's channels, not others such as the signal
   channel in `shutdown.go` or a result channel that a goroutine sends to once.
 - A detail line that `runModules` or the broker logs in its own scope with a comment marking it as
