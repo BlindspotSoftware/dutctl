@@ -87,7 +87,7 @@ func (d *FT) Run(ctx context.Context, s module.Session, args ...string) error {
 
 	outFile := args[1]
 
-	err = s.SendFile(outFile, bytes.NewBuffer(result))
+	err = s.SendFile(outFile, int64(len(result)), bytes.NewBuffer(result))
 	if err != nil {
 		return fmt.Errorf("failed to send file: %v", err)
 	}

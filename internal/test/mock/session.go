@@ -96,7 +96,7 @@ func (m *Session) RequestFile(name string) (io.Reader, error) {
 
 // SendFile records the call in SendFileCalled and the argument in SentFileName, then reads
 // all of r into SentFileContent. It returns any error from reading r without recording content.
-func (m *Session) SendFile(name string, r io.Reader) error {
+func (m *Session) SendFile(name string, _ int64, r io.Reader) error {
 	m.SendFileCalled = true
 	m.SentFileName = name
 

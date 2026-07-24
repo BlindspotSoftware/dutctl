@@ -299,12 +299,19 @@ func uploadImage(sesh module.Session, remote, local string) error {
 
 // downloadImage sends the local flash image file to sesh.
 func downloadImage(sesh module.Session, local, remote string) error {
+	// The session takes ownership of the file via SendFile (chunked, async) and
+	// closes it when the transfer completes, so we must NOT close it here.
 	file, err := os.Open(local)
 	if err != nil {
 		return fmt.Errorf("open flash image on dutagent after read operation: %w", err)
 	}
 
-	err = sesh.SendFile(remote, file)
+	fileInfo, err := file.Stat()
+	if err != nil {
+		return fmt.Errorf("stat flash image on dutagent after read operation: %w", err)
+	}
+
+	err = sesh.SendFile(remote, fileInfo.Size(), file)
 	if err != nil {
 		return fmt.Errorf("send flash image to client after read operation: %w", err)
 	}
