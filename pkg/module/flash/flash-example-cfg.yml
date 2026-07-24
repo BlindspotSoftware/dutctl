@@ -1,8 +1,7 @@
----
-version: 1.0.0-alpha.1 # x-release-please-version
+version: 2.0.0-alpha.1
 devices:
   xyz:
-    desc: "A mainboard that needs to be flashed during firmware development"
+    desc: A mainboard that needs to be flashed during firmware development
     cmds:
       flash:
         desc: |
@@ -11,5 +10,5 @@ devices:
           - module: flash
             passthrough: true
             with:
-              tool: "/usr/sbin/flashprog"
-              programmer: "dediprog"
+              tool: /usr/sbin/flashprog
+              programmer: dediprog

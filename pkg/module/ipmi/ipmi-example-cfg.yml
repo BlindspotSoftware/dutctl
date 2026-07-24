@@ -1,10 +1,10 @@
-version: 1.0.0-alpha.1 # x-release-please-version
+version: 2.0.0-alpha.1
 devices:
   fancy-server:
-    desc: "A server with IPMI-managed power control"
+    desc: A server with IPMI-managed power control
     cmds:
       power:
-        desc: "Power on the server using IPMI"
+        desc: Power on the server using IPMI
         uses:
           - module: ipmi
             with:

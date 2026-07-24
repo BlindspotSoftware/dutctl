@@ -1,11 +1,10 @@
----
-version: 1.0.0-alpha.1 # x-release-please-version
+version: 2.0.0-alpha.1
 devices:
   device1:
-    desc: "Device 1"
+    desc: Device 1
     cmds:
       status:
-        desc: "Report status"
+        desc: Report status
         uses:
           - module: dummy-status
             passthrough: true

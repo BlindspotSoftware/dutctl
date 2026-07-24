@@ -1,18 +1,17 @@
----
-version: 1.0.0-alpha.1 # x-release-please-version
+version: 2.0.0-alpha.1
 devices:
   rocket:
-    desc: "A rocket that can be fired"
+    desc: A rocket that can be fired
     cmds:
       fire:
-        desc: "Push the big red button"
+        desc: Push the big red button
         uses:
           - module: gpio-button
             passthrough: true
             with:
               pin: 9
       reset:
-        desc: "Reset the rocket"
+        desc: Reset the rocket
         uses:
           - module: gpio-button
             passthrough: true
@@ -20,10 +19,10 @@ devices:
               pin: 10
               activelow: true
       light:
-        desc: "Turn on the light"
+        desc: Turn on the light
         uses:
           - module: gpio-switch
             passthrough: true
             with:
               pin: 11
-              initial: on
+              initial: 'on'
