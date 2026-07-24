@@ -1,7 +1,7 @@
-version: 1.0.0-alpha.1 # x-release-please-version
+version: 2.0.0-alpha.1
 devices:
   server:
-    desc: "A server that needs to be observed during boot"
+    desc: A server that needs to be observed during boot
     cmds:
       serial:
         desc: |
@@ -14,4 +14,4 @@ devices:
             with:
               port: /tmp/ttyS0
               baud: 115200
-              delay: 50ms # optional: pause before each send (default 50ms; "0s" disables)
+              delay: 50ms
