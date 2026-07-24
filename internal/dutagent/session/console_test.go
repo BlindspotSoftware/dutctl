@@ -113,8 +113,8 @@ func kind(res *pb.RunResponse) string {
 		return "stdout:" + string(msg.ConsoleOutput.GetStdout())
 	case *pb.RunResponse_Print:
 		return "print:" + string(msg.Print.GetText())
-	case *pb.RunResponse_FileRequest:
-		return "file-request:" + msg.FileRequest.GetPath()
+	case *pb.RunResponse_FileTransferRequest:
+		return "file-request:" + msg.FileTransferRequest.GetMetadata().GetPath()
 	default:
 		return "other"
 	}
@@ -274,7 +274,7 @@ func TestConsoleInputWithoutConsoleKeepsFilesFlowing(t *testing.T) {
 	got := make(chan result, 1)
 
 	go func() {
-		r, err := sess.RequestFile("f.txt")
+		r, err := sess.RequestFile(t.Context(), "f.txt")
 		if err != nil {
 			got <- result{err: err}
 
@@ -285,9 +285,13 @@ func TestConsoleInputWithoutConsoleKeepsFilesFlowing(t *testing.T) {
 		got <- result{data: data, err: err}
 	}()
 
-	assertKinds(t, stream.await(t, 1), "file-request:f.txt")
+	announced := stream.await(t, 1)
+	assertKinds(t, announced, "file-request:f.txt")
 
-	stream.push(t, &pb.RunRequest{Msg: &pb.RunRequest_File{File: &pb.File{Path: "f.txt", Content: []byte("data")}}})
+	id := announced[0].GetFileTransferRequest().GetTransferId()
+	stream.push(t, &pb.RunRequest{Msg: &pb.RunRequest_FileChunk{FileChunk: &pb.FileChunk{
+		TransferId: id, ChunkData: []byte("data"), IsFinal: true,
+	}}})
 
 	select {
 	case res := <-got:

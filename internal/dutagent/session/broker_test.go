@@ -10,7 +10,6 @@ import (
 	"io"
 	"runtime"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -262,13 +261,14 @@ func TestBrokerFirstFailureWins(t *testing.T) {
 // module-facing session call must unblock via the frozen done signal instead of
 // wedging on a channel whose worker peer is gone. Output methods drop; the
 // Console reader reports io.EOF and the writers io.ErrClosedPipe; the file
-// methods return an error. Pre-fix these were bare channel ops that blocked the
-// module goroutine forever.
+// methods refuse with ErrSessionClosed. Pre-fix the output/console ops were bare
+// channel ops that blocked the module goroutine forever.
 func TestBrokerSessionCallsUnblockAfterTeardown(t *testing.T) {
 	b := &Broker{}
 	// Immediate EOF makes fromClientWorker return, which cancels the workers and
 	// closes the session's done signal; Stop returning confirms both are gone.
 	stream := &testStream{recvErrs: []error{nil}}
+	ctx := context.Background()
 	sess, _ := start(t, b, stream)
 
 	if err := b.Stop(); err != nil {
@@ -293,8 +293,8 @@ func TestBrokerSessionCallsUnblockAfterTeardown(t *testing.T) {
 		_, stdoutErr = con.Stdout.Write([]byte("x"))
 		_, stderrErr = con.Stderr.Write([]byte("x"))
 		_, stdinErr = io.ReadAll(con.Stdin)
-		_, reqErr = sess.RequestFile("f")
-		sendFileErr = sess.SendFile("f", strings.NewReader("data"))
+		_, reqErr = sess.RequestFile(ctx, "f")
+		sendFileErr = sess.SendFile(ctx, "f", 4, strings.NewReader("data"))
 	}()
 
 	select {
@@ -315,33 +315,16 @@ func TestBrokerSessionCallsUnblockAfterTeardown(t *testing.T) {
 		t.Errorf("stdin io.ReadAll err = %v, want nil (EOF terminates ReadAll)", stdinErr)
 	}
 
-	if !errors.Is(reqErr, errSessionClosed) {
-		t.Errorf("RequestFile err = %v, want errSessionClosed", reqErr)
+	// RequestFile and SendFile refuse outright once the workers are gone. Letting
+	// them register would account for a transfer on transferWg that nothing can
+	// ever carry or release, so the refusal is what keeps the count balanced.
+	if !errors.Is(reqErr, ErrSessionClosed) {
+		t.Errorf("RequestFile err = %v, want ErrSessionClosed", reqErr)
 	}
 
-	if !errors.Is(sendFileErr, errSessionClosed) {
-		t.Errorf("SendFile err = %v, want errSessionClosed", sendFileErr)
+	if !errors.Is(sendFileErr, ErrSessionClosed) {
+		t.Errorf("SendFile err = %v, want ErrSessionClosed", sendFileErr)
 	}
-}
-
-// TestBackendCurrentFileRace guards the mutex on currentFile: it is read and
-// written from three goroutines (SendFile on the module goroutine, and both
-// broker workers) with no channel handing it between them. Concurrent access
-// without the lock is a data race; run under -race this fails if the guarding
-// mutex is dropped.
-func TestBackendCurrentFileRace(t *testing.T) {
-	b := &backend{}
-
-	var wg sync.WaitGroup
-
-	for range 50 {
-		wg.Add(2)
-
-		go func() { defer wg.Done(); b.setCurrentFile("image.bin") }()
-		go func() { defer wg.Done(); _ = b.currentFileName() }()
-	}
-
-	wg.Wait()
 }
 
 // TestBrokerReceiveLoopExitsOnCancel is a regression test for the receive-loop
