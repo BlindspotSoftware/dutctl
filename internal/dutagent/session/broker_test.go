@@ -35,7 +35,9 @@ func (s *testStream) Send(_ *pb.RunResponse) error {
 
 func (s *testStream) Receive() (*pb.RunRequest, error) {
 	if s.recvBlock {
-		<-s.unblockCh // blocks until the test closes it; simulates a long receive
+		// unblockCh must be created by the test before Start so this goroutine
+		// only reads it, never writes it (a write here would race the test).
+		<-s.unblockCh // will block until closed; simulates a long receive
 	}
 
 	idx := s.recvCalls
@@ -133,7 +135,8 @@ func TestBroker_StdinForwarding(t *testing.T) {
 	b := &Broker{}
 	stdinPayload := []byte("user input")
 	req := &pb.RunRequest{Msg: &pb.RunRequest_Console{Console: &pb.Console{Data: &pb.Console_Stdin{Stdin: stdinPayload}}}}
-	stream := &testStream{recvReqs: []*pb.RunRequest{req}, recvErrs: []error{nil}} // after first req, EOF
+	// No recvErrs: testStream returns reqs in order then EOF by default.
+	stream := &testStream{recvReqs: []*pb.RunRequest{req}}
 	ctx, cancel := context.WithCancel(context.Background())
 	sess, errCh := b.Start(ctx, stream)
 
@@ -145,7 +148,7 @@ func TestBroker_StdinForwarding(t *testing.T) {
 			t.Fatalf("stdin mismatch: got %q want %q", string(data), string(stdinPayload))
 		}
 	case <-time.After(200 * time.Millisecond):
-		// Timed out waiting for the forwarded stdin payload.
+		t.Fatal("timeout: stdin payload was not forwarded to stdinCh")
 	}
 
 	cancel() // simulate module completion
