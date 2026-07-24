@@ -9,11 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"log/slog"
-	"os"
 	"strings"
-	"sync"
 	"time"
 
 	"connectrpc.com/connect"
@@ -239,23 +236,46 @@ type run struct {
 	console  *console
 	metadata map[string]string
 
-	// sendMu serialises the sends: connect allows one Send at a time on a
-	// stream, and both routines send, the receive routine file replies and
-	// the send routine input.
-	sendMu sync.Mutex
+	// sender serialises the sends: connect allows one Send at a time on a
+	// stream, and the receive routine, the send routine and an upload's
+	// routine all send.
+	sender *sendStream
+	// files drives the client's side of the file transfers: it answers the
+	// agent's upload requests with chunks and writes downloads to disk.
+	files *clientFileTransferManager
 
 	// cancel ends the run, which both routines then leave.
 	cancel context.CancelFunc
 	// errCh takes the failure that ends a routine, with room for both.
 	errCh chan error
+	// recvDone is closed when the receive routine returned.
+	recvDone chan struct{}
+}
+
+// stop ends the run and, once the receive routine has returned, drops the
+// transfers the run left unfinished, so an interrupted download leaves no
+// temporary file behind.
+func (r *run) stop() {
+	r.cancel()
+	// A cancelled context does not end a Receive that waits for the agent's
+	// next message; closing the response does.
+	_ = r.stream.CloseResponse()
+	<-r.recvDone
+	r.files.removeAll()
+}
+
+// reportTransfer shows a file transfer that ended.
+func (r *run) reportTransfer(transfer output.FileTransfer) {
+	r.app.formatter.WriteContent(output.Content{
+		Type:     output.TypeFileTransfer,
+		Data:     transfer,
+		Metadata: r.metadata,
+	})
 }
 
 // send sends req on the stream, one send at a time.
 func (r *run) send(req *pb.RunRequest) error {
-	r.sendMu.Lock()
-	defer r.sendMu.Unlock()
-
-	return r.stream.Send(req)
+	return r.sender.Send(req)
 }
 
 func inputReq(id uint32, data []byte) *pb.RunRequest {
@@ -303,9 +323,12 @@ func (app *application) runRPC(ctx context.Context, device, command string, cmdA
 			output.MetaCommand: command,
 			output.MetaArgs:    strings.Join(cmdArgs, " "),
 		},
-		cancel: cancelRunCtx,
-		errCh:  make(chan error, numWorkers),
+		sender:   newSendStream(stream),
+		cancel:   cancelRunCtx,
+		errCh:    make(chan error, numWorkers),
+		recvDone: make(chan struct{}),
 	}
+	r.files = newClientFileTransferManager(r.reportTransfer)
 
 	err := r.send(&pb.RunRequest{
 		Msg: &pb.RunRequest_Command{
@@ -320,10 +343,17 @@ func (app *application) runRPC(ctx context.Context, device, command string, cmdA
 		return err
 	}
 
+	defer r.stop()
+
 	go r.receiveLoop(runCtx)
 	go r.sendLoop(runCtx)
 
-	// Wait for completion or error
+	return r.wait(ctx, runCtx)
+}
+
+// wait blocks until the run ends, and returns its error. ctx is the signal
+// context the run's context runCtx derives from.
+func (r *run) wait(ctx, runCtx context.Context) error {
 	select {
 	case <-runCtx.Done():
 		// ctx.Err() is non-nil only if a signal fired (dispatch's deferred stop
@@ -333,6 +363,14 @@ func (app *application) runRPC(ctx context.Context, device, command string, cmdA
 			return errInterrupted
 		}
 
+		// A routine that failed sent its error before it cancelled the run, and
+		// select picks at random between ready cases.
+		select {
+		case err := <-r.errCh:
+			return err
+		default:
+		}
+
 		return nil
 	case err := <-r.errCh:
 		return err
@@ -340,12 +378,13 @@ func (app *application) runRPC(ctx context.Context, device, command string, cmdA
 }
 
 // receiveLoop is the receive routine: it renders the agent's responses, drives
-// the console with the agent's events and answers file requests, until the
+// the console with the agent's events and carries the file transfers, until the
 // stream ends. It cancels the run when it returns, so a run never outlives
 // its stream.
 //
 //nolint:funlen,cyclop // one switch over every kind of response; inherently branchy
 func (r *run) receiveLoop(ctx context.Context) {
+	defer close(r.recvDone)
 	defer r.cancel()
 
 	for {
@@ -363,6 +402,12 @@ func (r *run) receiveLoop(ctx context.Context) {
 		case errors.Is(err, io.EOF):
 			slog.Debug("receive routine terminating", "reason", "stream closed by agent")
 
+			// A download the agent dropped without a word, such as one its
+			// module cancelled, must not pass as a run that delivered it.
+			if paths := r.files.unfinishedDownloads(); len(paths) > 0 {
+				r.errCh <- fmt.Errorf("the run ended before the download of %s was complete", strings.Join(paths, ", "))
+			}
+
 			return
 		case err != nil && (errors.Is(err, context.Canceled) || connect.CodeOf(err) == connect.CodeCanceled):
 			slog.Debug("receive routine terminating", "reason", "context cancelled")
@@ -373,6 +418,8 @@ func (r *run) receiveLoop(ctx context.Context) {
 
 			return
 		}
+
+		var fileErr error
 
 		//nolint:protogetter
 		switch msg := res.Msg.(type) {
@@ -398,61 +445,22 @@ func (r *run) receiveLoop(ctx context.Context) {
 			}
 		case *pb.RunResponse_ConsoleClose:
 			r.console.closed()
-		case *pb.RunResponse_FileRequest:
-			path := msg.FileRequest.GetPath()
-			slog.Debug("file requested by agent", "path", path)
-
-			content, err := os.ReadFile(path)
-			if err != nil {
-				r.errCh <- fmt.Errorf("reading requested file %q: %w", path, err)
-
-				return
-			}
-
-			err = r.send(&pb.RunRequest{
-				Msg: &pb.RunRequest_File{
-					File: &pb.File{
-						Path:    path,
-						Content: content,
-					},
-				},
-			})
-			if err != nil && !errors.Is(err, io.EOF) {
-				r.errCh <- fmt.Errorf("sending requested file %q: %w", path, err)
-
-				return
-			}
-
-			r.app.formatter.WriteContent(output.Content{
-				Type:     output.TypeFileTransfer,
-				Data:     output.FileTransfer{Direction: "sent", Path: path, Bytes: len(content)},
-				Metadata: r.metadata,
-			})
-		case *pb.RunResponse_File:
-			path := msg.File.GetPath()
-			content := msg.File.GetContent()
-
-			if len(content) == 0 {
-				slog.Warn("received empty file content", "path", path)
-			}
-
-			perm := 0600
-
-			err = os.WriteFile(path, content, fs.FileMode(perm))
-			if err != nil {
-				r.errCh <- fmt.Errorf("saving received file %q: %w", path, err)
-
-				return
-			}
-
-			r.app.formatter.WriteContent(output.Content{
-				Type:     output.TypeFileTransfer,
-				Data:     output.FileTransfer{Direction: "received", Path: path, Bytes: len(content)},
-				Metadata: r.metadata,
-			})
-
+		case *pb.RunResponse_FileTransferRequest:
+			fileErr = r.files.handleFileTransferRequest(msg.FileTransferRequest, r.sender)
+		case *pb.RunResponse_FileChunk:
+			fileErr = r.files.handleFileChunk(msg.FileChunk, r.sender)
+		case *pb.RunResponse_FileTransferResponse:
+			fileErr = r.files.handleFileTransferResponse(msg.FileTransferResponse)
 		default:
 			slog.Warn("unexpected message type", "type", fmt.Sprintf("%T", msg))
+		}
+
+		// As for the end of input above, a send that fails because the stream
+		// is over is not the run's error.
+		if fileErr != nil && !errors.Is(fileErr, io.EOF) {
+			r.errCh <- fileErr
+
+			return
 		}
 	}
 }
