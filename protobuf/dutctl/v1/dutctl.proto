@@ -65,21 +65,36 @@ message DetailsResponse {
 // to further interact with the agent during the command execution.
 // The first RunRequest message sent to a agent must always contain a Command message.
 message RunRequest {
+  // 3 and 4 carried the unchunked File/FileRequest messages. They are reserved
+  // rather than reused so a peer speaking the old protocol fails to parse
+  // instead of silently misreading a chunked transfer as a whole file.
+  reserved 3, 4;
+  reserved "file";
+
   oneof msg {
     Command command = 1;
     Console console = 2;
-    File file = 3;
+    FileTransferRequest file_transfer_request = 5;
+    FileChunk file_chunk = 6;
+    FileTransferResponse file_transfer_response = 7;
   }
 }
 
 // RunResponse is sent by the agent in response to a RunRequest and can either contain
 // just the output of the command (Print), or trigger further interaction with the client.
 message RunResponse {
+  // See RunRequest: 3 and 4 held the unchunked messages and stay reserved. The
+  // file-transfer fields share RunRequest's numbering, since both directions
+  // carry the same three messages.
+  reserved 3, 4;
+  reserved "file", "file_request";
+
   oneof msg {
     Print print = 1;
     Console console = 2;
-    FileRequest file_request = 3;
-    File file = 4;
+    FileTransferRequest file_transfer_request = 5;
+    FileChunk file_chunk = 6;
+    FileTransferResponse file_transfer_response = 7;
   }
 }
 
@@ -105,15 +120,51 @@ message Console {
   }
 }
 
-// FileRequest is used by the agent to request a file from the client.
-message FileRequest {
-  string path = 1;
+// FileMetadata describes the properties of a file being transferred.
+message FileMetadata {
+  string path = 1; // Path of the file
+  int64 size = 2; // Total file size in bytes
+  string name = 3; // Filename for reference
 }
 
-// File is used by the client and the agent to transfer a file.
-message File {
-  string path = 1;
-  bytes content = 2;
+// FileChunk represents a single chunk of a file being transferred.
+// Maximum chunk size is 1MB.
+message FileChunk {
+  string transfer_id = 1; // Unique ID for this transfer session
+  int32 chunk_number = 2; // Sequential chunk number (0-indexed)
+  bytes chunk_data = 3; // File data chunk (max 1MB)
+  int64 chunk_offset = 4; // Byte offset in the file
+  bool is_final = 5; // Whether this is the last chunk
+}
+
+// FileTransferRequest initiates a file transfer.
+// Sent by the side requesting to receive a file.
+message FileTransferRequest {
+  string transfer_id = 1; // Unique ID for this transfer
+  FileMetadata metadata = 2; // File metadata
+
+  enum Direction {
+    DIRECTION_UNSPECIFIED = 0;
+    DIRECTION_UPLOAD = 1; // Client sending file to agent (agent requesting from client)
+    DIRECTION_DOWNLOAD = 2; // Agent sending file to client
+  }
+  Direction direction = 3; // Direction of file transfer
+}
+
+// FileTransferResponse acknowledges file transfer requests and chunk receipts.
+message FileTransferResponse {
+  string transfer_id = 1; // Matches request ID
+  enum Status {
+    STATUS_UNSPECIFIED = 0;
+    STATUS_ACCEPTED = 1; // Ready to receive chunks
+    STATUS_CHUNK_RECEIVED = 2; // Chunk received successfully
+    STATUS_TRANSFER_COMPLETE = 3; // All chunks received
+    STATUS_TRANSFER_REJECTED = 4; // Transfer cannot proceed
+    STATUS_ERROR = 5; // Transfer error occurred
+  }
+  Status status = 2;
+  int32 next_chunk_expected = 3; // Next chunk number expected (for recovery)
+  string error_message = 4; // Error details if status is ERROR
 }
 
 // LockRequest is sent by the client to acquire or extend a lock on a device.
