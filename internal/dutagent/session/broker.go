@@ -43,8 +43,10 @@ func (b *Broker) init() {
 	b.session.stdinCh = make(chan []byte)
 	b.session.stdoutCh = make(chan []byte)
 	b.session.stderrCh = make(chan []byte)
-	b.session.fileReqCh = make(chan string)
-	b.session.fileCh = make(chan chan []byte)
+	b.session.shutdownCh = make(chan struct{})
+	b.session.fileTransferNotifyCh = make(chan struct{}, 1)
+	b.session.activeUploads = make(map[string]*uploadState)
+	b.session.activeDownloads = make(map[string]*downloadState)
 
 	// Buffer equals number of workers so error sends never block.
 	b.errCh = make(chan error, numWorkers)
@@ -84,12 +86,27 @@ func (b *Broker) Start(ctx context.Context, s Stream) (module.Session, <-chan er
 
 		go func() {
 			b.wg.Wait()
+			// Both workers have exited. Release any transfer still in flight so
+			// WaitForTransfers (and thus graceful shutdown) cannot block forever
+			// when the client disconnected mid-transfer.
+			b.session.abortTransfers()
 			close(b.errCh)
 		}()
 	})
 
 	// Rebinding the stream after first start is ignored by design; a Broker is single-use per Run.
 	return &b.session, b.errCh
+}
+
+// Shutdown begins graceful shutdown of the session: module output stops being
+// forwarded while the workers finish any in-flight file transfers.
+func (b *Broker) Shutdown() {
+	b.session.Shutdown()
+}
+
+// WaitForTransfersToComplete blocks until every active file transfer has finished.
+func (b *Broker) WaitForTransfersToComplete() {
+	b.session.WaitForTransfers()
 }
 
 func (b *Broker) toClient(ctx context.Context, cancel context.CancelFunc) {

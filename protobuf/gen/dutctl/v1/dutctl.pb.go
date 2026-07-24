@@ -21,6 +21,113 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type FileTransferRequest_Direction int32
+
+const (
+	FileTransferRequest_DIRECTION_UNSPECIFIED FileTransferRequest_Direction = 0
+	FileTransferRequest_UPLOAD                FileTransferRequest_Direction = 1 // Client sending file to agent (agent requesting from client)
+	FileTransferRequest_DOWNLOAD              FileTransferRequest_Direction = 2 // Agent sending file to client
+)
+
+// Enum value maps for FileTransferRequest_Direction.
+var (
+	FileTransferRequest_Direction_name = map[int32]string{
+		0: "DIRECTION_UNSPECIFIED",
+		1: "UPLOAD",
+		2: "DOWNLOAD",
+	}
+	FileTransferRequest_Direction_value = map[string]int32{
+		"DIRECTION_UNSPECIFIED": 0,
+		"UPLOAD":                1,
+		"DOWNLOAD":              2,
+	}
+)
+
+func (x FileTransferRequest_Direction) Enum() *FileTransferRequest_Direction {
+	p := new(FileTransferRequest_Direction)
+	*p = x
+	return p
+}
+
+func (x FileTransferRequest_Direction) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (FileTransferRequest_Direction) Descriptor() protoreflect.EnumDescriptor {
+	return file_dutctl_v1_dutctl_proto_enumTypes[0].Descriptor()
+}
+
+func (FileTransferRequest_Direction) Type() protoreflect.EnumType {
+	return &file_dutctl_v1_dutctl_proto_enumTypes[0]
+}
+
+func (x FileTransferRequest_Direction) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use FileTransferRequest_Direction.Descriptor instead.
+func (FileTransferRequest_Direction) EnumDescriptor() ([]byte, []int) {
+	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{15, 0}
+}
+
+type FileTransferResponse_Status int32
+
+const (
+	FileTransferResponse_STATUS_UNSPECIFIED FileTransferResponse_Status = 0
+	FileTransferResponse_ACCEPTED           FileTransferResponse_Status = 1 // Ready to receive chunks
+	FileTransferResponse_CHUNK_RECEIVED     FileTransferResponse_Status = 2 // Chunk received successfully
+	FileTransferResponse_TRANSFER_COMPLETE  FileTransferResponse_Status = 3 // All chunks received
+	FileTransferResponse_TRANSFER_REJECTED  FileTransferResponse_Status = 4 // Transfer cannot proceed
+	FileTransferResponse_ERROR              FileTransferResponse_Status = 5 // Transfer error occurred
+)
+
+// Enum value maps for FileTransferResponse_Status.
+var (
+	FileTransferResponse_Status_name = map[int32]string{
+		0: "STATUS_UNSPECIFIED",
+		1: "ACCEPTED",
+		2: "CHUNK_RECEIVED",
+		3: "TRANSFER_COMPLETE",
+		4: "TRANSFER_REJECTED",
+		5: "ERROR",
+	}
+	FileTransferResponse_Status_value = map[string]int32{
+		"STATUS_UNSPECIFIED": 0,
+		"ACCEPTED":           1,
+		"CHUNK_RECEIVED":     2,
+		"TRANSFER_COMPLETE":  3,
+		"TRANSFER_REJECTED":  4,
+		"ERROR":              5,
+	}
+)
+
+func (x FileTransferResponse_Status) Enum() *FileTransferResponse_Status {
+	p := new(FileTransferResponse_Status)
+	*p = x
+	return p
+}
+
+func (x FileTransferResponse_Status) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (FileTransferResponse_Status) Descriptor() protoreflect.EnumDescriptor {
+	return file_dutctl_v1_dutctl_proto_enumTypes[1].Descriptor()
+}
+
+func (FileTransferResponse_Status) Type() protoreflect.EnumType {
+	return &file_dutctl_v1_dutctl_proto_enumTypes[1]
+}
+
+func (x FileTransferResponse_Status) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use FileTransferResponse_Status.Descriptor instead.
+func (FileTransferResponse_Status) EnumDescriptor() ([]byte, []int) {
+	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{16, 0}
+}
+
 // ListRequest is sent by the client to request a list of devices connected to the agent.
 type ListRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -426,7 +533,9 @@ type RunRequest struct {
 	//
 	//	*RunRequest_Command
 	//	*RunRequest_Console
-	//	*RunRequest_File
+	//	*RunRequest_FileTransferRequest
+	//	*RunRequest_FileChunk
+	//	*RunRequest_FileTransferResponse
 	Msg           isRunRequest_Msg `protobuf_oneof:"msg"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -487,10 +596,28 @@ func (x *RunRequest) GetConsole() *Console {
 	return nil
 }
 
-func (x *RunRequest) GetFile() *File {
+func (x *RunRequest) GetFileTransferRequest() *FileTransferRequest {
 	if x != nil {
-		if x, ok := x.Msg.(*RunRequest_File); ok {
-			return x.File
+		if x, ok := x.Msg.(*RunRequest_FileTransferRequest); ok {
+			return x.FileTransferRequest
+		}
+	}
+	return nil
+}
+
+func (x *RunRequest) GetFileChunk() *FileChunk {
+	if x != nil {
+		if x, ok := x.Msg.(*RunRequest_FileChunk); ok {
+			return x.FileChunk
+		}
+	}
+	return nil
+}
+
+func (x *RunRequest) GetFileTransferResponse() *FileTransferResponse {
+	if x != nil {
+		if x, ok := x.Msg.(*RunRequest_FileTransferResponse); ok {
+			return x.FileTransferResponse
 		}
 	}
 	return nil
@@ -508,15 +635,27 @@ type RunRequest_Console struct {
 	Console *Console `protobuf:"bytes,2,opt,name=console,proto3,oneof"`
 }
 
-type RunRequest_File struct {
-	File *File `protobuf:"bytes,3,opt,name=file,proto3,oneof"`
+type RunRequest_FileTransferRequest struct {
+	FileTransferRequest *FileTransferRequest `protobuf:"bytes,3,opt,name=file_transfer_request,json=fileTransferRequest,proto3,oneof"`
+}
+
+type RunRequest_FileChunk struct {
+	FileChunk *FileChunk `protobuf:"bytes,4,opt,name=file_chunk,json=fileChunk,proto3,oneof"`
+}
+
+type RunRequest_FileTransferResponse struct {
+	FileTransferResponse *FileTransferResponse `protobuf:"bytes,5,opt,name=file_transfer_response,json=fileTransferResponse,proto3,oneof"`
 }
 
 func (*RunRequest_Command) isRunRequest_Msg() {}
 
 func (*RunRequest_Console) isRunRequest_Msg() {}
 
-func (*RunRequest_File) isRunRequest_Msg() {}
+func (*RunRequest_FileTransferRequest) isRunRequest_Msg() {}
+
+func (*RunRequest_FileChunk) isRunRequest_Msg() {}
+
+func (*RunRequest_FileTransferResponse) isRunRequest_Msg() {}
 
 // RunResponse is sent by the agent in response to a RunRequest and can either contain
 // just the output of the command (Print), or trigger further interaction with the client.
@@ -526,8 +665,9 @@ type RunResponse struct {
 	//
 	//	*RunResponse_Print
 	//	*RunResponse_Console
-	//	*RunResponse_FileRequest
-	//	*RunResponse_File
+	//	*RunResponse_FileTransferRequest
+	//	*RunResponse_FileChunk
+	//	*RunResponse_FileTransferResponse
 	Msg           isRunResponse_Msg `protobuf_oneof:"msg"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -588,19 +728,28 @@ func (x *RunResponse) GetConsole() *Console {
 	return nil
 }
 
-func (x *RunResponse) GetFileRequest() *FileRequest {
+func (x *RunResponse) GetFileTransferRequest() *FileTransferRequest {
 	if x != nil {
-		if x, ok := x.Msg.(*RunResponse_FileRequest); ok {
-			return x.FileRequest
+		if x, ok := x.Msg.(*RunResponse_FileTransferRequest); ok {
+			return x.FileTransferRequest
 		}
 	}
 	return nil
 }
 
-func (x *RunResponse) GetFile() *File {
+func (x *RunResponse) GetFileChunk() *FileChunk {
 	if x != nil {
-		if x, ok := x.Msg.(*RunResponse_File); ok {
-			return x.File
+		if x, ok := x.Msg.(*RunResponse_FileChunk); ok {
+			return x.FileChunk
+		}
+	}
+	return nil
+}
+
+func (x *RunResponse) GetFileTransferResponse() *FileTransferResponse {
+	if x != nil {
+		if x, ok := x.Msg.(*RunResponse_FileTransferResponse); ok {
+			return x.FileTransferResponse
 		}
 	}
 	return nil
@@ -618,21 +767,27 @@ type RunResponse_Console struct {
 	Console *Console `protobuf:"bytes,2,opt,name=console,proto3,oneof"`
 }
 
-type RunResponse_FileRequest struct {
-	FileRequest *FileRequest `protobuf:"bytes,3,opt,name=file_request,json=fileRequest,proto3,oneof"`
+type RunResponse_FileTransferRequest struct {
+	FileTransferRequest *FileTransferRequest `protobuf:"bytes,3,opt,name=file_transfer_request,json=fileTransferRequest,proto3,oneof"`
 }
 
-type RunResponse_File struct {
-	File *File `protobuf:"bytes,4,opt,name=file,proto3,oneof"`
+type RunResponse_FileChunk struct {
+	FileChunk *FileChunk `protobuf:"bytes,4,opt,name=file_chunk,json=fileChunk,proto3,oneof"`
+}
+
+type RunResponse_FileTransferResponse struct {
+	FileTransferResponse *FileTransferResponse `protobuf:"bytes,5,opt,name=file_transfer_response,json=fileTransferResponse,proto3,oneof"`
 }
 
 func (*RunResponse_Print) isRunResponse_Msg() {}
 
 func (*RunResponse_Console) isRunResponse_Msg() {}
 
-func (*RunResponse_FileRequest) isRunResponse_Msg() {}
+func (*RunResponse_FileTransferRequest) isRunResponse_Msg() {}
 
-func (*RunResponse_File) isRunResponse_Msg() {}
+func (*RunResponse_FileChunk) isRunResponse_Msg() {}
+
+func (*RunResponse_FileTransferResponse) isRunResponse_Msg() {}
 
 // Command is used by the client to start a command execution on a device.
 type Command struct {
@@ -840,28 +995,30 @@ func (*Console_Stdout) isConsole_Data() {}
 
 func (*Console_Stderr) isConsole_Data() {}
 
-// FileRequest is used by the agent to request a file from the client.
-type FileRequest struct {
+// FileMetadata describes the properties of a file being transferred.
+type FileMetadata struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Path          string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
+	Path          string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`  // Path of the file
+	Size          int64                  `protobuf:"varint,2,opt,name=size,proto3" json:"size,omitempty"` // Total file size in bytes
+	Name          string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`  // Filename for reference
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *FileRequest) Reset() {
-	*x = FileRequest{}
+func (x *FileMetadata) Reset() {
+	*x = FileMetadata{}
 	mi := &file_dutctl_v1_dutctl_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *FileRequest) String() string {
+func (x *FileMetadata) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*FileRequest) ProtoMessage() {}
+func (*FileMetadata) ProtoMessage() {}
 
-func (x *FileRequest) ProtoReflect() protoreflect.Message {
+func (x *FileMetadata) ProtoReflect() protoreflect.Message {
 	mi := &file_dutctl_v1_dutctl_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -873,41 +1030,59 @@ func (x *FileRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use FileRequest.ProtoReflect.Descriptor instead.
-func (*FileRequest) Descriptor() ([]byte, []int) {
+// Deprecated: Use FileMetadata.ProtoReflect.Descriptor instead.
+func (*FileMetadata) Descriptor() ([]byte, []int) {
 	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{13}
 }
 
-func (x *FileRequest) GetPath() string {
+func (x *FileMetadata) GetPath() string {
 	if x != nil {
 		return x.Path
 	}
 	return ""
 }
 
-// File is used by the client and the agent to transfer a file.
-type File struct {
+func (x *FileMetadata) GetSize() int64 {
+	if x != nil {
+		return x.Size
+	}
+	return 0
+}
+
+func (x *FileMetadata) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+// FileChunk represents a single chunk of a file being transferred.
+// Maximum chunk size is 1MB.
+type FileChunk struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Path          string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
-	Content       []byte                 `protobuf:"bytes,2,opt,name=content,proto3" json:"content,omitempty"`
+	TransferId    string                 `protobuf:"bytes,1,opt,name=transfer_id,json=transferId,proto3" json:"transfer_id,omitempty"`     // Unique ID for this transfer session
+	ChunkNumber   int32                  `protobuf:"varint,2,opt,name=chunk_number,json=chunkNumber,proto3" json:"chunk_number,omitempty"` // Sequential chunk number (0-indexed)
+	ChunkData     []byte                 `protobuf:"bytes,3,opt,name=chunk_data,json=chunkData,proto3" json:"chunk_data,omitempty"`        // File data chunk (max 1MB)
+	ChunkOffset   int64                  `protobuf:"varint,4,opt,name=chunk_offset,json=chunkOffset,proto3" json:"chunk_offset,omitempty"` // Byte offset in the file
+	IsFinal       bool                   `protobuf:"varint,5,opt,name=is_final,json=isFinal,proto3" json:"is_final,omitempty"`             // Whether this is the last chunk
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *File) Reset() {
-	*x = File{}
+func (x *FileChunk) Reset() {
+	*x = FileChunk{}
 	mi := &file_dutctl_v1_dutctl_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *File) String() string {
+func (x *FileChunk) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*File) ProtoMessage() {}
+func (*FileChunk) ProtoMessage() {}
 
-func (x *File) ProtoReflect() protoreflect.Message {
+func (x *FileChunk) ProtoReflect() protoreflect.Message {
 	mi := &file_dutctl_v1_dutctl_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -919,23 +1094,175 @@ func (x *File) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use File.ProtoReflect.Descriptor instead.
-func (*File) Descriptor() ([]byte, []int) {
+// Deprecated: Use FileChunk.ProtoReflect.Descriptor instead.
+func (*FileChunk) Descriptor() ([]byte, []int) {
 	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{14}
 }
 
-func (x *File) GetPath() string {
+func (x *FileChunk) GetTransferId() string {
 	if x != nil {
-		return x.Path
+		return x.TransferId
 	}
 	return ""
 }
 
-func (x *File) GetContent() []byte {
+func (x *FileChunk) GetChunkNumber() int32 {
 	if x != nil {
-		return x.Content
+		return x.ChunkNumber
+	}
+	return 0
+}
+
+func (x *FileChunk) GetChunkData() []byte {
+	if x != nil {
+		return x.ChunkData
 	}
 	return nil
+}
+
+func (x *FileChunk) GetChunkOffset() int64 {
+	if x != nil {
+		return x.ChunkOffset
+	}
+	return 0
+}
+
+func (x *FileChunk) GetIsFinal() bool {
+	if x != nil {
+		return x.IsFinal
+	}
+	return false
+}
+
+// FileTransferRequest initiates a file transfer.
+// Sent by the side requesting to receive a file.
+type FileTransferRequest struct {
+	state         protoimpl.MessageState        `protogen:"open.v1"`
+	TransferId    string                        `protobuf:"bytes,1,opt,name=transfer_id,json=transferId,proto3" json:"transfer_id,omitempty"`                           // Unique ID for this transfer
+	Metadata      *FileMetadata                 `protobuf:"bytes,2,opt,name=metadata,proto3" json:"metadata,omitempty"`                                                 // File metadata
+	Direction     FileTransferRequest_Direction `protobuf:"varint,3,opt,name=direction,proto3,enum=dutctl.v1.FileTransferRequest_Direction" json:"direction,omitempty"` // Direction of file transfer
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FileTransferRequest) Reset() {
+	*x = FileTransferRequest{}
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FileTransferRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FileTransferRequest) ProtoMessage() {}
+
+func (x *FileTransferRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FileTransferRequest.ProtoReflect.Descriptor instead.
+func (*FileTransferRequest) Descriptor() ([]byte, []int) {
+	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *FileTransferRequest) GetTransferId() string {
+	if x != nil {
+		return x.TransferId
+	}
+	return ""
+}
+
+func (x *FileTransferRequest) GetMetadata() *FileMetadata {
+	if x != nil {
+		return x.Metadata
+	}
+	return nil
+}
+
+func (x *FileTransferRequest) GetDirection() FileTransferRequest_Direction {
+	if x != nil {
+		return x.Direction
+	}
+	return FileTransferRequest_DIRECTION_UNSPECIFIED
+}
+
+// FileTransferResponse acknowledges file transfer requests and chunk receipts.
+type FileTransferResponse struct {
+	state             protoimpl.MessageState      `protogen:"open.v1"`
+	TransferId        string                      `protobuf:"bytes,1,opt,name=transfer_id,json=transferId,proto3" json:"transfer_id,omitempty"` // Matches request ID
+	Status            FileTransferResponse_Status `protobuf:"varint,2,opt,name=status,proto3,enum=dutctl.v1.FileTransferResponse_Status" json:"status,omitempty"`
+	NextChunkExpected int32                       `protobuf:"varint,3,opt,name=next_chunk_expected,json=nextChunkExpected,proto3" json:"next_chunk_expected,omitempty"` // Next chunk number expected (for recovery)
+	ErrorMessage      string                      `protobuf:"bytes,4,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`                   // Error details if status is ERROR
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *FileTransferResponse) Reset() {
+	*x = FileTransferResponse{}
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FileTransferResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FileTransferResponse) ProtoMessage() {}
+
+func (x *FileTransferResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FileTransferResponse.ProtoReflect.Descriptor instead.
+func (*FileTransferResponse) Descriptor() ([]byte, []int) {
+	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *FileTransferResponse) GetTransferId() string {
+	if x != nil {
+		return x.TransferId
+	}
+	return ""
+}
+
+func (x *FileTransferResponse) GetStatus() FileTransferResponse_Status {
+	if x != nil {
+		return x.Status
+	}
+	return FileTransferResponse_STATUS_UNSPECIFIED
+}
+
+func (x *FileTransferResponse) GetNextChunkExpected() int32 {
+	if x != nil {
+		return x.NextChunkExpected
+	}
+	return 0
+}
+
+func (x *FileTransferResponse) GetErrorMessage() string {
+	if x != nil {
+		return x.ErrorMessage
+	}
+	return ""
 }
 
 // LockRequest is sent by the client to acquire or extend a lock on a device.
@@ -954,7 +1281,7 @@ type LockRequest struct {
 
 func (x *LockRequest) Reset() {
 	*x = LockRequest{}
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[15]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -966,7 +1293,7 @@ func (x *LockRequest) String() string {
 func (*LockRequest) ProtoMessage() {}
 
 func (x *LockRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[15]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -979,7 +1306,7 @@ func (x *LockRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LockRequest.ProtoReflect.Descriptor instead.
 func (*LockRequest) Descriptor() ([]byte, []int) {
-	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{15}
+	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *LockRequest) GetDevice() string {
@@ -1007,7 +1334,7 @@ type LockResponse struct {
 
 func (x *LockResponse) Reset() {
 	*x = LockResponse{}
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[16]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1019,7 +1346,7 @@ func (x *LockResponse) String() string {
 func (*LockResponse) ProtoMessage() {}
 
 func (x *LockResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[16]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1032,7 +1359,7 @@ func (x *LockResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LockResponse.ProtoReflect.Descriptor instead.
 func (*LockResponse) Descriptor() ([]byte, []int) {
-	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{16}
+	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *LockResponse) GetDevice() string {
@@ -1061,7 +1388,7 @@ type UnlockRequest struct {
 
 func (x *UnlockRequest) Reset() {
 	*x = UnlockRequest{}
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[17]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1073,7 +1400,7 @@ func (x *UnlockRequest) String() string {
 func (*UnlockRequest) ProtoMessage() {}
 
 func (x *UnlockRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[17]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1086,7 +1413,7 @@ func (x *UnlockRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnlockRequest.ProtoReflect.Descriptor instead.
 func (*UnlockRequest) Descriptor() ([]byte, []int) {
-	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{17}
+	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *UnlockRequest) GetDevice() string {
@@ -1112,7 +1439,7 @@ type UnlockResponse struct {
 
 func (x *UnlockResponse) Reset() {
 	*x = UnlockResponse{}
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[18]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1124,7 +1451,7 @@ func (x *UnlockResponse) String() string {
 func (*UnlockResponse) ProtoMessage() {}
 
 func (x *UnlockResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[18]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1137,7 +1464,7 @@ func (x *UnlockResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnlockResponse.ProtoReflect.Descriptor instead.
 func (*UnlockResponse) Descriptor() ([]byte, []int) {
-	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{18}
+	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{20}
 }
 
 // RegisterRequest is sent by a device agent to register with the relay server.
@@ -1152,7 +1479,7 @@ type RegisterRequest struct {
 
 func (x *RegisterRequest) Reset() {
 	*x = RegisterRequest{}
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[19]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1164,7 +1491,7 @@ func (x *RegisterRequest) String() string {
 func (*RegisterRequest) ProtoMessage() {}
 
 func (x *RegisterRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[19]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1177,7 +1504,7 @@ func (x *RegisterRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterRequest.ProtoReflect.Descriptor instead.
 func (*RegisterRequest) Descriptor() ([]byte, []int) {
-	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{19}
+	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *RegisterRequest) GetDevices() []string {
@@ -1204,7 +1531,7 @@ type RegisterResponse struct {
 
 func (x *RegisterResponse) Reset() {
 	*x = RegisterResponse{}
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[20]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1216,7 +1543,7 @@ func (x *RegisterResponse) String() string {
 func (*RegisterResponse) ProtoMessage() {}
 
 func (x *RegisterResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[20]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1229,7 +1556,7 @@ func (x *RegisterResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterResponse.ProtoReflect.Descriptor instead.
 func (*RegisterResponse) Descriptor() ([]byte, []int) {
-	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{20}
+	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{22}
 }
 
 var File_dutctl_v1_dutctl_proto protoreflect.FileDescriptor
@@ -1258,18 +1585,23 @@ const file_dutctl_v1_dutctl_proto_rawDesc = "" +
 	"\acommand\x18\x02 \x01(\tR\acommand\x12\x18\n" +
 	"\akeyword\x18\x03 \x01(\tR\akeyword\"+\n" +
 	"\x0fDetailsResponse\x12\x18\n" +
-	"\adetails\x18\x01 \x01(\tR\adetails\"\x9a\x01\n" +
+	"\adetails\x18\x01 \x01(\tR\adetails\"\xd9\x02\n" +
 	"\n" +
 	"RunRequest\x12.\n" +
 	"\acommand\x18\x01 \x01(\v2\x12.dutctl.v1.CommandH\x00R\acommand\x12.\n" +
-	"\aconsole\x18\x02 \x01(\v2\x12.dutctl.v1.ConsoleH\x00R\aconsole\x12%\n" +
-	"\x04file\x18\x03 \x01(\v2\x0f.dutctl.v1.FileH\x00R\x04fileB\x05\n" +
-	"\x03msg\"\xd2\x01\n" +
+	"\aconsole\x18\x02 \x01(\v2\x12.dutctl.v1.ConsoleH\x00R\aconsole\x12T\n" +
+	"\x15file_transfer_request\x18\x03 \x01(\v2\x1e.dutctl.v1.FileTransferRequestH\x00R\x13fileTransferRequest\x125\n" +
+	"\n" +
+	"file_chunk\x18\x04 \x01(\v2\x14.dutctl.v1.FileChunkH\x00R\tfileChunk\x12W\n" +
+	"\x16file_transfer_response\x18\x05 \x01(\v2\x1f.dutctl.v1.FileTransferResponseH\x00R\x14fileTransferResponseB\x05\n" +
+	"\x03msg\"\xd4\x02\n" +
 	"\vRunResponse\x12(\n" +
 	"\x05print\x18\x01 \x01(\v2\x10.dutctl.v1.PrintH\x00R\x05print\x12.\n" +
-	"\aconsole\x18\x02 \x01(\v2\x12.dutctl.v1.ConsoleH\x00R\aconsole\x12;\n" +
-	"\ffile_request\x18\x03 \x01(\v2\x16.dutctl.v1.FileRequestH\x00R\vfileRequest\x12%\n" +
-	"\x04file\x18\x04 \x01(\v2\x0f.dutctl.v1.FileH\x00R\x04fileB\x05\n" +
+	"\aconsole\x18\x02 \x01(\v2\x12.dutctl.v1.ConsoleH\x00R\aconsole\x12T\n" +
+	"\x15file_transfer_request\x18\x03 \x01(\v2\x1e.dutctl.v1.FileTransferRequestH\x00R\x13fileTransferRequest\x125\n" +
+	"\n" +
+	"file_chunk\x18\x04 \x01(\v2\x14.dutctl.v1.FileChunkH\x00R\tfileChunk\x12W\n" +
+	"\x16file_transfer_response\x18\x05 \x01(\v2\x1f.dutctl.v1.FileTransferResponseH\x00R\x14fileTransferResponseB\x05\n" +
 	"\x03msg\"O\n" +
 	"\aCommand\x12\x16\n" +
 	"\x06device\x18\x01 \x01(\tR\x06device\x12\x18\n" +
@@ -1281,12 +1613,42 @@ const file_dutctl_v1_dutctl_proto_rawDesc = "" +
 	"\x05stdin\x18\x01 \x01(\fH\x00R\x05stdin\x12\x18\n" +
 	"\x06stdout\x18\x02 \x01(\fH\x00R\x06stdout\x12\x18\n" +
 	"\x06stderr\x18\x03 \x01(\fH\x00R\x06stderrB\x06\n" +
-	"\x04data\"!\n" +
-	"\vFileRequest\x12\x12\n" +
-	"\x04path\x18\x01 \x01(\tR\x04path\"4\n" +
-	"\x04File\x12\x12\n" +
-	"\x04path\x18\x01 \x01(\tR\x04path\x12\x18\n" +
-	"\acontent\x18\x02 \x01(\fR\acontent\"P\n" +
+	"\x04data\"J\n" +
+	"\fFileMetadata\x12\x12\n" +
+	"\x04path\x18\x01 \x01(\tR\x04path\x12\x12\n" +
+	"\x04size\x18\x02 \x01(\x03R\x04size\x12\x12\n" +
+	"\x04name\x18\x03 \x01(\tR\x04name\"\xac\x01\n" +
+	"\tFileChunk\x12\x1f\n" +
+	"\vtransfer_id\x18\x01 \x01(\tR\n" +
+	"transferId\x12!\n" +
+	"\fchunk_number\x18\x02 \x01(\x05R\vchunkNumber\x12\x1d\n" +
+	"\n" +
+	"chunk_data\x18\x03 \x01(\fR\tchunkData\x12!\n" +
+	"\fchunk_offset\x18\x04 \x01(\x03R\vchunkOffset\x12\x19\n" +
+	"\bis_final\x18\x05 \x01(\bR\aisFinal\"\xf5\x01\n" +
+	"\x13FileTransferRequest\x12\x1f\n" +
+	"\vtransfer_id\x18\x01 \x01(\tR\n" +
+	"transferId\x123\n" +
+	"\bmetadata\x18\x02 \x01(\v2\x17.dutctl.v1.FileMetadataR\bmetadata\x12F\n" +
+	"\tdirection\x18\x03 \x01(\x0e2(.dutctl.v1.FileTransferRequest.DirectionR\tdirection\"@\n" +
+	"\tDirection\x12\x19\n" +
+	"\x15DIRECTION_UNSPECIFIED\x10\x00\x12\n" +
+	"\n" +
+	"\x06UPLOAD\x10\x01\x12\f\n" +
+	"\bDOWNLOAD\x10\x02\"\xc9\x02\n" +
+	"\x14FileTransferResponse\x12\x1f\n" +
+	"\vtransfer_id\x18\x01 \x01(\tR\n" +
+	"transferId\x12>\n" +
+	"\x06status\x18\x02 \x01(\x0e2&.dutctl.v1.FileTransferResponse.StatusR\x06status\x12.\n" +
+	"\x13next_chunk_expected\x18\x03 \x01(\x05R\x11nextChunkExpected\x12#\n" +
+	"\rerror_message\x18\x04 \x01(\tR\ferrorMessage\"{\n" +
+	"\x06Status\x12\x16\n" +
+	"\x12STATUS_UNSPECIFIED\x10\x00\x12\f\n" +
+	"\bACCEPTED\x10\x01\x12\x12\n" +
+	"\x0eCHUNK_RECEIVED\x10\x02\x12\x15\n" +
+	"\x11TRANSFER_COMPLETE\x10\x03\x12\x15\n" +
+	"\x11TRANSFER_REJECTED\x10\x04\x12\t\n" +
+	"\x05ERROR\x10\x05\"P\n" +
 	"\vLockRequest\x12\x16\n" +
 	"\x06device\x18\x01 \x01(\tR\x06device\x12)\n" +
 	"\x10duration_seconds\x18\x02 \x01(\x03R\x0fdurationSeconds\"P\n" +
@@ -1323,60 +1685,71 @@ func file_dutctl_v1_dutctl_proto_rawDescGZIP() []byte {
 	return file_dutctl_v1_dutctl_proto_rawDescData
 }
 
-var file_dutctl_v1_dutctl_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
+var file_dutctl_v1_dutctl_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_dutctl_v1_dutctl_proto_msgTypes = make([]protoimpl.MessageInfo, 23)
 var file_dutctl_v1_dutctl_proto_goTypes = []any{
-	(*ListRequest)(nil),      // 0: dutctl.v1.ListRequest
-	(*ListResponse)(nil),     // 1: dutctl.v1.ListResponse
-	(*DeviceInfo)(nil),       // 2: dutctl.v1.DeviceInfo
-	(*LockState)(nil),        // 3: dutctl.v1.LockState
-	(*CommandsRequest)(nil),  // 4: dutctl.v1.CommandsRequest
-	(*CommandsResponse)(nil), // 5: dutctl.v1.CommandsResponse
-	(*DetailsRequest)(nil),   // 6: dutctl.v1.DetailsRequest
-	(*DetailsResponse)(nil),  // 7: dutctl.v1.DetailsResponse
-	(*RunRequest)(nil),       // 8: dutctl.v1.RunRequest
-	(*RunResponse)(nil),      // 9: dutctl.v1.RunResponse
-	(*Command)(nil),          // 10: dutctl.v1.Command
-	(*Print)(nil),            // 11: dutctl.v1.Print
-	(*Console)(nil),          // 12: dutctl.v1.Console
-	(*FileRequest)(nil),      // 13: dutctl.v1.FileRequest
-	(*File)(nil),             // 14: dutctl.v1.File
-	(*LockRequest)(nil),      // 15: dutctl.v1.LockRequest
-	(*LockResponse)(nil),     // 16: dutctl.v1.LockResponse
-	(*UnlockRequest)(nil),    // 17: dutctl.v1.UnlockRequest
-	(*UnlockResponse)(nil),   // 18: dutctl.v1.UnlockResponse
-	(*RegisterRequest)(nil),  // 19: dutctl.v1.RegisterRequest
-	(*RegisterResponse)(nil), // 20: dutctl.v1.RegisterResponse
+	(FileTransferRequest_Direction)(0), // 0: dutctl.v1.FileTransferRequest.Direction
+	(FileTransferResponse_Status)(0),   // 1: dutctl.v1.FileTransferResponse.Status
+	(*ListRequest)(nil),                // 2: dutctl.v1.ListRequest
+	(*ListResponse)(nil),               // 3: dutctl.v1.ListResponse
+	(*DeviceInfo)(nil),                 // 4: dutctl.v1.DeviceInfo
+	(*LockState)(nil),                  // 5: dutctl.v1.LockState
+	(*CommandsRequest)(nil),            // 6: dutctl.v1.CommandsRequest
+	(*CommandsResponse)(nil),           // 7: dutctl.v1.CommandsResponse
+	(*DetailsRequest)(nil),             // 8: dutctl.v1.DetailsRequest
+	(*DetailsResponse)(nil),            // 9: dutctl.v1.DetailsResponse
+	(*RunRequest)(nil),                 // 10: dutctl.v1.RunRequest
+	(*RunResponse)(nil),                // 11: dutctl.v1.RunResponse
+	(*Command)(nil),                    // 12: dutctl.v1.Command
+	(*Print)(nil),                      // 13: dutctl.v1.Print
+	(*Console)(nil),                    // 14: dutctl.v1.Console
+	(*FileMetadata)(nil),               // 15: dutctl.v1.FileMetadata
+	(*FileChunk)(nil),                  // 16: dutctl.v1.FileChunk
+	(*FileTransferRequest)(nil),        // 17: dutctl.v1.FileTransferRequest
+	(*FileTransferResponse)(nil),       // 18: dutctl.v1.FileTransferResponse
+	(*LockRequest)(nil),                // 19: dutctl.v1.LockRequest
+	(*LockResponse)(nil),               // 20: dutctl.v1.LockResponse
+	(*UnlockRequest)(nil),              // 21: dutctl.v1.UnlockRequest
+	(*UnlockResponse)(nil),             // 22: dutctl.v1.UnlockResponse
+	(*RegisterRequest)(nil),            // 23: dutctl.v1.RegisterRequest
+	(*RegisterResponse)(nil),           // 24: dutctl.v1.RegisterResponse
 }
 var file_dutctl_v1_dutctl_proto_depIdxs = []int32{
-	2,  // 0: dutctl.v1.ListResponse.devices:type_name -> dutctl.v1.DeviceInfo
-	3,  // 1: dutctl.v1.DeviceInfo.lock:type_name -> dutctl.v1.LockState
-	10, // 2: dutctl.v1.RunRequest.command:type_name -> dutctl.v1.Command
-	12, // 3: dutctl.v1.RunRequest.console:type_name -> dutctl.v1.Console
-	14, // 4: dutctl.v1.RunRequest.file:type_name -> dutctl.v1.File
-	11, // 5: dutctl.v1.RunResponse.print:type_name -> dutctl.v1.Print
-	12, // 6: dutctl.v1.RunResponse.console:type_name -> dutctl.v1.Console
-	13, // 7: dutctl.v1.RunResponse.file_request:type_name -> dutctl.v1.FileRequest
-	14, // 8: dutctl.v1.RunResponse.file:type_name -> dutctl.v1.File
-	3,  // 9: dutctl.v1.LockResponse.lock:type_name -> dutctl.v1.LockState
-	0,  // 10: dutctl.v1.DeviceService.List:input_type -> dutctl.v1.ListRequest
-	4,  // 11: dutctl.v1.DeviceService.Commands:input_type -> dutctl.v1.CommandsRequest
-	6,  // 12: dutctl.v1.DeviceService.Details:input_type -> dutctl.v1.DetailsRequest
-	8,  // 13: dutctl.v1.DeviceService.Run:input_type -> dutctl.v1.RunRequest
-	15, // 14: dutctl.v1.DeviceService.Lock:input_type -> dutctl.v1.LockRequest
-	17, // 15: dutctl.v1.DeviceService.Unlock:input_type -> dutctl.v1.UnlockRequest
-	19, // 16: dutctl.v1.RelayService.Register:input_type -> dutctl.v1.RegisterRequest
-	1,  // 17: dutctl.v1.DeviceService.List:output_type -> dutctl.v1.ListResponse
-	5,  // 18: dutctl.v1.DeviceService.Commands:output_type -> dutctl.v1.CommandsResponse
-	7,  // 19: dutctl.v1.DeviceService.Details:output_type -> dutctl.v1.DetailsResponse
-	9,  // 20: dutctl.v1.DeviceService.Run:output_type -> dutctl.v1.RunResponse
-	16, // 21: dutctl.v1.DeviceService.Lock:output_type -> dutctl.v1.LockResponse
-	18, // 22: dutctl.v1.DeviceService.Unlock:output_type -> dutctl.v1.UnlockResponse
-	20, // 23: dutctl.v1.RelayService.Register:output_type -> dutctl.v1.RegisterResponse
-	17, // [17:24] is the sub-list for method output_type
-	10, // [10:17] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	4,  // 0: dutctl.v1.ListResponse.devices:type_name -> dutctl.v1.DeviceInfo
+	5,  // 1: dutctl.v1.DeviceInfo.lock:type_name -> dutctl.v1.LockState
+	12, // 2: dutctl.v1.RunRequest.command:type_name -> dutctl.v1.Command
+	14, // 3: dutctl.v1.RunRequest.console:type_name -> dutctl.v1.Console
+	17, // 4: dutctl.v1.RunRequest.file_transfer_request:type_name -> dutctl.v1.FileTransferRequest
+	16, // 5: dutctl.v1.RunRequest.file_chunk:type_name -> dutctl.v1.FileChunk
+	18, // 6: dutctl.v1.RunRequest.file_transfer_response:type_name -> dutctl.v1.FileTransferResponse
+	13, // 7: dutctl.v1.RunResponse.print:type_name -> dutctl.v1.Print
+	14, // 8: dutctl.v1.RunResponse.console:type_name -> dutctl.v1.Console
+	17, // 9: dutctl.v1.RunResponse.file_transfer_request:type_name -> dutctl.v1.FileTransferRequest
+	16, // 10: dutctl.v1.RunResponse.file_chunk:type_name -> dutctl.v1.FileChunk
+	18, // 11: dutctl.v1.RunResponse.file_transfer_response:type_name -> dutctl.v1.FileTransferResponse
+	15, // 12: dutctl.v1.FileTransferRequest.metadata:type_name -> dutctl.v1.FileMetadata
+	0,  // 13: dutctl.v1.FileTransferRequest.direction:type_name -> dutctl.v1.FileTransferRequest.Direction
+	1,  // 14: dutctl.v1.FileTransferResponse.status:type_name -> dutctl.v1.FileTransferResponse.Status
+	5,  // 15: dutctl.v1.LockResponse.lock:type_name -> dutctl.v1.LockState
+	2,  // 16: dutctl.v1.DeviceService.List:input_type -> dutctl.v1.ListRequest
+	6,  // 17: dutctl.v1.DeviceService.Commands:input_type -> dutctl.v1.CommandsRequest
+	8,  // 18: dutctl.v1.DeviceService.Details:input_type -> dutctl.v1.DetailsRequest
+	10, // 19: dutctl.v1.DeviceService.Run:input_type -> dutctl.v1.RunRequest
+	19, // 20: dutctl.v1.DeviceService.Lock:input_type -> dutctl.v1.LockRequest
+	21, // 21: dutctl.v1.DeviceService.Unlock:input_type -> dutctl.v1.UnlockRequest
+	23, // 22: dutctl.v1.RelayService.Register:input_type -> dutctl.v1.RegisterRequest
+	3,  // 23: dutctl.v1.DeviceService.List:output_type -> dutctl.v1.ListResponse
+	7,  // 24: dutctl.v1.DeviceService.Commands:output_type -> dutctl.v1.CommandsResponse
+	9,  // 25: dutctl.v1.DeviceService.Details:output_type -> dutctl.v1.DetailsResponse
+	11, // 26: dutctl.v1.DeviceService.Run:output_type -> dutctl.v1.RunResponse
+	20, // 27: dutctl.v1.DeviceService.Lock:output_type -> dutctl.v1.LockResponse
+	22, // 28: dutctl.v1.DeviceService.Unlock:output_type -> dutctl.v1.UnlockResponse
+	24, // 29: dutctl.v1.RelayService.Register:output_type -> dutctl.v1.RegisterResponse
+	23, // [23:30] is the sub-list for method output_type
+	16, // [16:23] is the sub-list for method input_type
+	16, // [16:16] is the sub-list for extension type_name
+	16, // [16:16] is the sub-list for extension extendee
+	0,  // [0:16] is the sub-list for field type_name
 }
 
 func init() { file_dutctl_v1_dutctl_proto_init() }
@@ -1387,13 +1760,16 @@ func file_dutctl_v1_dutctl_proto_init() {
 	file_dutctl_v1_dutctl_proto_msgTypes[8].OneofWrappers = []any{
 		(*RunRequest_Command)(nil),
 		(*RunRequest_Console)(nil),
-		(*RunRequest_File)(nil),
+		(*RunRequest_FileTransferRequest)(nil),
+		(*RunRequest_FileChunk)(nil),
+		(*RunRequest_FileTransferResponse)(nil),
 	}
 	file_dutctl_v1_dutctl_proto_msgTypes[9].OneofWrappers = []any{
 		(*RunResponse_Print)(nil),
 		(*RunResponse_Console)(nil),
-		(*RunResponse_FileRequest)(nil),
-		(*RunResponse_File)(nil),
+		(*RunResponse_FileTransferRequest)(nil),
+		(*RunResponse_FileChunk)(nil),
+		(*RunResponse_FileTransferResponse)(nil),
 	}
 	file_dutctl_v1_dutctl_proto_msgTypes[12].OneofWrappers = []any{
 		(*Console_Stdin)(nil),
@@ -1405,13 +1781,14 @@ func file_dutctl_v1_dutctl_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_dutctl_v1_dutctl_proto_rawDesc), len(file_dutctl_v1_dutctl_proto_rawDesc)),
-			NumEnums:      0,
-			NumMessages:   21,
+			NumEnums:      2,
+			NumMessages:   23,
 			NumExtensions: 0,
 			NumServices:   2,
 		},
 		GoTypes:           file_dutctl_v1_dutctl_proto_goTypes,
 		DependencyIndexes: file_dutctl_v1_dutctl_proto_depIdxs,
+		EnumInfos:         file_dutctl_v1_dutctl_proto_enumTypes,
 		MessageInfos:      file_dutctl_v1_dutctl_proto_msgTypes,
 	}.Build()
 	File_dutctl_v1_dutctl_proto = out.File
