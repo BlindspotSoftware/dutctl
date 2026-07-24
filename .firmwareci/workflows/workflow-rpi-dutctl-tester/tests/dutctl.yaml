@@ -1,0 +1,635 @@
+---
+name: Test dutctl
+description: Test the dutctl modules against the dutagent on the FWCI tester
+
+defaults:
+  transport_oscar: &transport_oscar
+    proto: ssh
+    options:
+      host: "[[attributes.Host]]"
+      user: oscar
+      identity_file: "/root/.ssh/fwci"
+      # TODO: The ssh keys (identity_file) are hard-coded in the FWCI docker at the moment
+
+  transport_root: &transport_root
+    proto: ssh
+    options:
+      host: "[[attributes.Host]]"
+      user: root
+      identity_file: "/root/.ssh/fwci"
+      # TODO: The ssh keys (identity_file) are hard-coded in the FWCI docker at the moment
+
+
+pre-stage:
+  # Fix permissions
+  - cmd: cmd
+    name: chmod dutctl
+    transport:
+      proto: local
+    parameters:
+      executable: chmod
+      args: ["755", "[[input.DUTCTL]]"]
+
+  # ========================
+  #  Copy files over to RPI
+  # ========================
+  - cmd: copy
+    name: Copy over dutctl debian package
+    transport: *transport_root
+    parameters:
+      source: "[[input.REMOTE_PKG]]"
+      destination: "dutctl.deb"
+
+  - cmd: shell
+    name: Install dutctl package
+    transport: *transport_root
+    parameters:
+      command: "apt-get -o DPkg::Lock::Timeout=300 install --reinstall --assume-yes ./dutctl.deb"
+
+  - cmd: copy
+    name: Copy over test config file
+    transport: *transport_root
+    parameters:
+      source: "[[input.CONFIG]]"
+      destination: /etc/dutctl.yaml
+
+  - cmd: cmd
+    name: chmod config file
+    transport: *transport_root
+    parameters:
+      executable: chmod
+      args: ["644", /etc/dutctl.yaml]
+
+  # ==============
+  #  Start server
+  # ==============
+  - cmd: cmd
+    name: Reload systemctl daemon
+    transport: *transport_root
+    parameters:
+      executable: systemctl
+      args: ["daemon-reload"]
+
+  - cmd: cmd
+    name: Start systemd service
+    transport: *transport_root
+    parameters:
+      executable: systemctl
+      args: ["start", dutagent.service]
+
+  - cmd: shell
+    name: Status systemd service
+    transport: *transport_root
+    parameters:
+      command: "systemctl status --no-pager dutagent.service"
+      expect:
+        - regex: "Active: active \\(running\\)"
+
+  - cmd: shell
+    name: Wait for dutagent to accept connections
+    transport: *transport_root
+    parameters:
+      command: "for i in $(seq 1 50); do ss -ltn | grep -q ':2024 ' && exit 0; sleep 0.2; done; echo 'dutagent never bound port 2024'; exit 1"
+
+  # ==========================
+  #  Test dutctl help command
+  # ==========================
+  - cmd: cmd
+    name: dutctl help
+    transport:
+      proto: local
+    parameters:
+      executable: "[[input.DUTCTL]]"
+      args: ["--help"]
+
+  # Set sensing GPIO pins as inputs
+  - cmd: cmd
+    name: Configure input GPIO pins for testing 21
+    transport: *transport_root
+    parameters:
+      executable: "pinctrl"
+      args: ["set", "21", "ip", "pn"]
+  - cmd: cmd
+    name: Configure input GPIO pins for testing 20
+    transport: *transport_root
+    parameters:
+      executable: "pinctrl"
+      args: ["set", "20", "ip", "pn"]
+  - cmd: cmd
+    name: Configure input GPIO pins for testing 17
+    transport: *transport_root
+    parameters:
+      executable: "pinctrl"
+      args: ["set", "17", "ip", "pn"]
+  - cmd: cmd
+    name: Configure input GPIO pins for testing 27
+    transport: *transport_root
+    parameters:
+      executable: "pinctrl"
+      args: ["set", "27", "ip", "pn"]
+  - cmd: cmd
+    name: Configure input GPIO pins for testing 22
+    transport: *transport_root
+    parameters:
+      executable: "pinctrl"
+      args: ["set", "22", "ip", "pn"]
+
+  - cmd: cmd
+    name: Start fake serial
+    transport: *transport_oscar
+    parameters:
+      executable: bash
+      args:
+        [
+          "-c",
+          "socat -x pty,rawer,icanon=0,nonblock,link=/home/oscar/ttyS1 pty,rawer,icanon=0,nonblock,link=/home/oscar/ttyS2 & disown",
+        ]
+    options:
+      timeout: 1s
+
+
+# "test/test-dutagent-cfg.yaml"
+
+stages:
+  - name: Test agent module
+    steps:
+      - cmd: cmd
+        name: Report dutagent system info
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args:
+            [
+              "-s", "fwci-dutctl-tester:2024",
+              "fwci-dutctl-tester",
+              "system-info",
+            ]
+          expect:
+            - regex: "Linux fwci-dutctl-tester"
+        options:
+          timeout: 10s
+
+  - name: Test dummy modules
+    steps:
+      - cmd: cmd
+        name: Test status
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args:
+            [
+              "-s", "fwci-dutctl-tester:2024",
+              "fwci-dutctl-tester",
+              "dummy-status",
+            ]
+          expect:
+            - regex: "Hello from dummy status module\nCalled with 0 arguments"
+        options:
+          timeout: 10s
+
+      - cmd: cmd
+        name: Test status with argument
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args:
+            [
+              "-s", "fwci-dutctl-tester:2024",
+              "fwci-dutctl-tester",
+              "dummy-status",
+              "hello",
+            ]
+          expect:
+            - regex: "Hello from dummy status module\nCalled with 1 arguments\nArg 0: hello"
+        options:
+          timeout: 10s
+
+      - cmd: cmd
+        name: Test status with configured arguments
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args:
+            [
+              "-s", "fwci-dutctl-tester:2024",
+              "fwci-dutctl-tester",
+              "dummy-status-args",
+            ]
+          expect:
+            - regex: "Hello from dummy status module\nCalled with 2 arguments"
+        options:
+          timeout: 10s
+
+      - cmd: shell
+        name: Test repeat
+        transport:
+          proto: local
+        parameters:
+          command: "echo -e 'hello\nhello world\n' | [[input.DUTCTL]] -s fwci-dutctl-tester:2024 fwci-dutctl-tester dummy-repeat"
+          expect:
+            - regex: "Hello from dummy repeat module!\nEnter one word per line."
+        options:
+          timeout: 10s
+
+      - cmd: shell
+        name: Create test file
+        transport:
+          proto: local
+        parameters:
+          command: "echo 'hello' > test.txt"
+
+      - cmd: cmd
+        name: Test file transfer
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args:
+            [
+              "-s", "fwci-dutctl-tester:2024",
+              "fwci-dutctl-tester",
+              "dummy-file-transfer",
+              "test.txt",
+              "test2.txt",
+            ]
+          expect:
+            - regex: "Hello from dummy file transfer module"
+        options:
+          timeout: 10s
+
+      - cmd: cmd
+        name: Read test file
+        transport:
+          proto: local
+        parameters:
+          executable: "cat"
+          args: ["test2.txt"]
+          expect:
+            - regex: "processed by dummy.FT module"
+
+  - name: Test shell module
+    steps:
+      - cmd: cmd
+        name: Run echo through the shell module
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args:
+            [
+              "-s", "fwci-dutctl-tester:2024",
+              "fwci-dutctl-tester",
+              "run",
+              "echo hello-from-shell-module",
+            ]
+          expect:
+            - regex: "hello-from-shell-module"
+        options:
+          timeout: 10s
+
+      - cmd: cmd
+        name: Verify the command runs on the dutagent
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args:
+            [
+              "-s", "fwci-dutctl-tester:2024",
+              "fwci-dutctl-tester",
+              "run",
+              "hostname",
+            ]
+          expect:
+            - regex: "fwci-dutctl-tester"
+        options:
+          timeout: 10s
+
+      - cmd: cmd
+        name: Run a command with a pipe
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args:
+            [
+              "-s", "fwci-dutctl-tester:2024",
+              "fwci-dutctl-tester",
+              "run",
+              "echo one two three | tr ' ' '-'",
+            ]
+          expect:
+            - regex: "one-two-three"
+        options:
+          timeout: 10s
+
+  - name: Test time module
+    steps:
+      - cmd: cmd
+        name: Wait for the configured duration
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args:
+            [
+              "-s", "fwci-dutctl-tester:2024",
+              "fwci-dutctl-tester",
+              "wait",
+            ]
+          expect:
+            - regex: "Waiting for 1s"
+        options:
+          timeout: 15s
+
+      - cmd: cmd
+        name: Wait for a duration given on the command line
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args:
+            [
+              "-s", "fwci-dutctl-tester:2024",
+              "fwci-dutctl-tester",
+              "wait",
+              "3s",
+            ]
+          expect:
+            - regex: "Waiting for 3s"
+        options:
+          timeout: 15s
+
+      - cmd: shell
+        name: Verify the wait really blocks
+        transport:
+          proto: local
+        parameters:
+          command: "start=$(date +%s); [[input.DUTCTL]] -s fwci-dutctl-tester:2024 fwci-dutctl-tester wait 3s; end=$(date +%s); echo elapsed=$((end-start))"
+          expect:
+            - regex: "elapsed=([3-9]|[1-9][0-9]+)"
+        options:
+          timeout: 30s
+
+  - name: Test file module
+    steps:
+      - cmd: shell
+        name: Create a file to upload
+        transport:
+          proto: local
+        parameters:
+          command: "echo 'uploaded-by-file-module' > upload-source.txt"
+
+      - cmd: cmd
+        name: Upload the file to the dutagent
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args:
+            [
+              "-s", "fwci-dutctl-tester:2024",
+              "fwci-dutctl-tester",
+              "upload",
+              "upload-source.txt",
+            ]
+        options:
+          timeout: 15s
+
+      - cmd: shell
+        name: Verify the file arrived on the dutagent
+        transport: *transport_oscar
+        parameters:
+          command: "cat /tmp/dutctl-fwci-upload.txt"
+          expect:
+            - regex: "uploaded-by-file-module"
+
+      - cmd: shell
+        name: Create a file on the dutagent to download
+        transport: *transport_oscar
+        parameters:
+          command: "echo 'downloaded-by-file-module' > /tmp/dutctl-fwci-download.txt"
+
+      - cmd: cmd
+        name: Download the file from the dutagent
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args:
+            [
+              "-s", "fwci-dutctl-tester:2024",
+              "fwci-dutctl-tester",
+              "download",
+              "download-target.txt",
+            ]
+        options:
+          timeout: 15s
+
+      - cmd: cmd
+        name: Verify the downloaded file content
+        transport:
+          proto: local
+        parameters:
+          executable: "cat"
+          args: ["download-target.txt"]
+          expect:
+            - regex: "downloaded-by-file-module"
+
+      - cmd: shell
+        name: Remove the transferred files from the dutagent
+        transport: *transport_oscar
+        parameters:
+          command: "rm -f /tmp/dutctl-fwci-upload.txt /tmp/dutctl-fwci-download.txt || true"
+
+  - name: Test serial
+    steps:
+      - cmd: shell
+        name: Feed the fake serial
+        transport: *transport_oscar
+        parameters:
+          command: "( for i in $(seq 1 20); do echo 'Hello World!' > /home/oscar/ttyS1; sleep 0.5; done ) >/dev/null 2>&1 & disown"
+
+      - cmd: cmd
+        name: Read serial
+        transport:
+          proto: local
+        parameters:
+          executable: task
+          args:
+            [
+              "--taskfile",
+              "[[input.TASKFILE]]",
+              "test:read-out-serial",
+              "DUTCTL=[[input.DUTCTL]]",
+              "RPI_HOSTNAME=fwci-dutctl-tester:2024",
+              "DUT_DEVICE=fwci-dutctl-tester",
+            ]
+          expect:
+            - regex: "Hello World!"
+        options:
+          timeout: 15s
+
+  - name: Test flashing with dpcmd
+    steps:
+      - cmd: cmd
+        name: dutctl flash write
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args:
+            [
+              "-s", "fwci-dutctl-tester:2024",
+              "fwci-dutctl-tester",
+              "flash",
+              "write",
+              "[[input.DUMMY_SPI_FLASH_ROM]]",
+            ]
+        options:
+          timeout: 300s
+
+      - cmd: cmd
+        name: dutctl flash read
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args:
+            [
+              "-s", "fwci-dutctl-tester:2024",
+              "fwci-dutctl-tester",
+              "flash",
+              "read",
+              "flash-readback.rom",
+            ]
+        options:
+          timeout: 300s
+
+      - cmd: shell
+        name: Compare the read-back image with the written one
+        transport:
+          proto: local
+        parameters:
+          command: "cmp -n \"$(stat -c%s '[[input.DUMMY_SPI_FLASH_ROM]]')\" '[[input.DUMMY_SPI_FLASH_ROM]]' flash-readback.rom"
+
+  - name: Test GPIO power via shell script
+    steps:
+      - cmd: cmd
+        name: initial dutctl power off
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: ["-s", "fwci-dutctl-tester:2024", "fwci-dutctl-tester", "power", "off"]
+
+      - cmd: cmd
+        name: get dutctl power status
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: ["-s", "fwci-dutctl-tester:2024", "fwci-dutctl-tester", "power"]
+          expect:
+            - regex: "Current state: off"
+
+      - cmd: cmd
+        name: check pin state
+        transport: *transport_oscar
+        parameters:
+          executable: pinctrl
+          args: ["lev", "21"]
+          expect:
+            - regex: "0"
+
+      - cmd: cmd
+        name: dutctl power on
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: ["-s", "fwci-dutctl-tester:2024", "fwci-dutctl-tester", "power", "on"]
+
+      - cmd: cmd
+        name: get dutctl power status 2
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: ["-s", "fwci-dutctl-tester:2024", "fwci-dutctl-tester", "power"]
+          expect:
+            - regex: "Current state: on"
+
+      - cmd: cmd
+        name: check pin state 2
+        transport: *transport_oscar
+        parameters:
+          executable: pinctrl
+          args: ["lev", "21"]
+          expect:
+            - regex: "1"
+
+      - cmd: cmd
+        name: dutctl power off
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: ["-s", "fwci-dutctl-tester:2024", "fwci-dutctl-tester", "power", "off"]
+
+      - cmd: cmd
+        name: get dutctl power status 3
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: ["-s", "fwci-dutctl-tester:2024", "fwci-dutctl-tester", "power"]
+          expect:
+            - regex: "Current state: off"
+
+      - cmd: cmd
+        name: check pin state 3
+        transport: *transport_oscar
+        parameters:
+          executable: pinctrl
+          args: ["lev", "21"]
+          expect:
+            - regex: "0"
+
+post-stage:
+  # ===========================================
+  #  Delete the files copied over for the test
+  # ===========================================
+  - cmd: shell
+    name: Stop remotelab-server systemd service
+    transport: *transport_root
+    parameters:
+      command: "systemctl stop dutagent.service || true"
+
+  - cmd: shell
+    name: Uninstall the package
+    transport: *transport_root
+    parameters:
+      command: "apt remove --assume-yes dutctl || true"
+
+  - cmd: shell
+    name: Delete testing configuration file
+    transport: *transport_root
+    parameters:
+      command: "rm /etc/dutctl.yaml || true"
+
+  - cmd: shell
+    name: Delete package
+    transport: *transport_root
+    parameters:
+      command: "rm dutctl.deb || true"
+
+  - cmd: shell
+    name: Shutdown fake serial
+    transport: *transport_oscar
+    parameters:
+      command: "pkill socat || true"
