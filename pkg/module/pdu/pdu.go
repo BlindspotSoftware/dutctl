@@ -27,66 +27,164 @@ func init() {
 	})
 }
 
-// PDU is a module that provides basic power management functions for a PDU (Power Distribution Unit).
-// NOTE: This implementation currently supports only Intellinet ATM PDUs.
+// Supported PDU vendors, selected via the "vendor" configuration option. A
+// value names the device's HTTP API family rather than a single product:
+// "intellinet" also covers compatible units such as the LogiLink PDU8P01.
+const (
+	vendorIntellinet = "intellinet"
+	vendorGude       = "gude"
+)
+
+const defaultTimeout = 10 * time.Second // Default timeout for HTTP requests.
+
+// status is the query command that reports the current power state. Unlike the
+// power actions it does not change state, so it is dispatched on its own.
+const status = "status"
+
+// state is an outlet's power state. It is the common, vendor-neutral type that
+// crosses the backend interface; each backend converts it to and from its own
+// wire encoding.
+type state int
+
+const (
+	off state = iota
+	on
+)
+
+func (s state) String() string {
+	switch s {
+	case on:
+		return "on"
+	case off:
+		return "off"
+	default:
+		return ""
+	}
+}
+
+// parseState converts a device-reported power word ("on"/"off") to a state.
+func parseState(word string) (state, bool) {
+	switch word {
+	case on.String():
+		return on, true
+	case off.String():
+		return off, true
+	default:
+		return off, false
+	}
+}
+
+// action is a power command requested by the user. Its verb-like values
+// distinguish it from state: an outlet is never "in the toggle state".
+type action int
+
+const (
+	turnOn action = iota
+	turnOff
+	toggle
+)
+
+func (a action) String() string {
+	switch a {
+	case turnOn:
+		return "on"
+	case turnOff:
+		return "off"
+	case toggle:
+		return "toggle"
+	default:
+		return ""
+	}
+}
+
+// parseAction converts a user command word to a power action.
+func parseAction(word string) (action, bool) {
+	switch word {
+	case turnOn.String():
+		return turnOn, true
+	case turnOff.String():
+		return turnOff, true
+	case toggle.String():
+		return toggle, true
+	default:
+		return turnOn, false
+	}
+}
+
+// commandList returns the supported commands as a comma-separated string,
+// derived from the action and status commands so usage messages cannot drift.
+func commandList() string {
+	return strings.Join([]string{turnOn.String(), turnOff.String(), toggle.String(), status}, ", ")
+}
+
+// PDU is a module that provides basic power management functions for a PDU
+// (Power Distribution Unit). It supports Intellinet-style PDUs (e.g. Intellinet
+// 163682, LogiLink PDU8P01) and Gude PDUs; the concrete device is selected via
+// the Vendor option.
 type PDU struct {
+	Vendor   string `yaml:"vendor"` // Vendor selects the PDU HTTP API: "intellinet" (default) or "gude".
 	Host     string // Host is the base address of the PDU.
-	User     string // User is used for authentication, if supported by the PDU.
-	Password string // Password is used for authentication, if supported by the PDU.
+	User     string // User for HTTP Basic Auth; set together with Password, or leave both empty for no auth.
+	Password string // Password for HTTP Basic Auth; set together with User, or leave both empty for no auth.
 	Outlet   int    // Outlet is the outlet to control, if the PDU supports multiple outlets. Defaults to 0 (first outlet).
 
-	client     *http.Client // internal HTTP client for requests to the PDU
-	controlURL *url.URL     // controlURL is the URL for controlling the PDU outlet
-	statusURL  *url.URL     // statusURL is the URL for getting the PDU status
+	backend backend // vendor-specific API, selected in Init.
 }
 
 func (p *PDU) Help() string {
 	help := strings.Builder{}
 
-	help.WriteString("PDU Power Management Module\n")
+	help.WriteString("PDU module: control of a Power Distribution Unit (PDU) via HTTP.\n")
 	help.WriteString("\nUsage:\n")
-	help.WriteString("  pdu-power [on|off|toggle|status]\n\n")
+	help.WriteString("  pdu [on|off|toggle|status]\n\n")
 	help.WriteString("Commands:\n")
 	help.WriteString("  on      - Power on the outlet\n")
 	help.WriteString("  off     - Power off the outlet\n")
 	help.WriteString("  toggle  - Toggle the outlet power\n")
-	help.WriteString("  status  - Get current power state\n")
+	help.WriteString("  status  - Report the current power state\n")
 	help.WriteString("\n")
-	help.WriteString("This module provides basic power control functions via HTTP to a PDU.\n")
-	help.WriteString("The configured PDU has IP: " + p.Host + "\n")
-	help.WriteString(fmt.Sprintf("The configured outlet is: %d\n", p.Outlet))
+	fmt.Fprintf(&help, "Controls outlet %d of the PDU at %s via the %s API.\n", p.Outlet, p.Host, p.vendorLabel())
 
 	return help.String()
 }
 
-const (
-	defaultTimeout = 10 * time.Second // Default timeout for HTTP requests
-	on             = "on"
-	off            = "off"
-	toggle         = "toggle"
-	status         = "status"
-)
+// vendorLabel returns the configured vendor for display, flagging when the
+// default (see newBackend) applies because no vendor was set.
+func (p *PDU) vendorLabel() string {
+	if p.Vendor == "" {
+		return vendorIntellinet + " (default)"
+	}
+
+	return p.Vendor
+}
 
 func (p *PDU) Init(_ context.Context) error {
+	if p.Host == "" {
+		return fmt.Errorf("PDU host address not configured")
+	}
+
 	if p.Outlet < 0 {
 		return fmt.Errorf("invalid outlet number %d: outlet must be 0 or greater", p.Outlet)
 	}
 
-	p.client = &http.Client{Timeout: defaultTimeout}
+	// Basic Auth needs both parts; only one set is a misconfiguration that would
+	// otherwise send no credentials and fail with an opaque 401 at request time.
+	if (p.User == "") != (p.Password == "") {
+		return fmt.Errorf("PDU authentication requires both user and password to be set, or neither")
+	}
 
-	controlURL, err := url.Parse(strings.TrimRight(p.Host, "/") + "/control_outlet.htm")
+	req := &requester{
+		client:   &http.Client{Timeout: defaultTimeout},
+		user:     p.User,
+		password: p.Password,
+	}
+
+	backend, err := newBackend(p.Vendor, req, p.Host)
 	if err != nil {
 		return err
 	}
 
-	p.controlURL = controlURL
-
-	statusURL, err := url.Parse(strings.TrimRight(p.Host, "/") + "/status.xml")
-	if err != nil {
-		return err
-	}
-
-	p.statusURL = statusURL
+	p.backend = backend
 
 	return nil
 }
@@ -96,52 +194,112 @@ func (p *PDU) Deinit(_ context.Context) error {
 }
 
 func (p *PDU) Run(ctx context.Context, s module.Session, args ...string) error {
-	if p.client == nil {
-		return fmt.Errorf("PDU client not initialized")
-	}
-
-	if p.Host == "" {
-		return fmt.Errorf("PDU host address not configured")
+	if p.backend == nil {
+		return fmt.Errorf("PDU backend not initialized: Init must run successfully before Run")
 	}
 
 	if len(args) == 0 {
-		s.Println("No command specified. Call 'help' for usage.")
-
-		return nil
+		return fmt.Errorf("no command specified, available commands: %s", commandList())
 	}
 
 	cmd := strings.ToLower(args[0])
 
-	switch cmd {
-	case on, off, toggle:
-		return p.setPower(ctx, s, cmd)
-	case status:
-		return p.status(ctx, s)
-	default:
-		s.Println("Unknown command: " + cmd)
-		s.Println("Available commands: on, off, toggle, status")
+	if cmd == status {
+		return p.report(ctx, s)
+	}
 
-		return nil
+	act, ok := parseAction(cmd)
+	if !ok {
+		return fmt.Errorf("unknown command %q, available commands: %s", cmd, commandList())
+	}
+
+	return p.apply(ctx, s, act)
+}
+
+// apply performs the power action via the backend and reports the resulting state to the client.
+func (p *PDU) apply(ctx context.Context, s module.Session, act action) error {
+	result, err := p.backend.setPower(ctx, p.Outlet, act)
+	if err != nil {
+		return err
+	}
+
+	log.FromContext(ctx).Info("power command applied", "outlet", p.Outlet, "action", act, "state", result)
+	s.Printf("PDU outlet %d powered %s\n", p.Outlet, result)
+
+	return nil
+}
+
+// report queries the outlet state via the backend and reports it to the client.
+func (p *PDU) report(ctx context.Context, s module.Session) error {
+	current, err := p.backend.outletState(ctx, p.Outlet)
+	if err != nil {
+		return err
+	}
+
+	log.FromContext(ctx).Debug("power state queried", "outlet", p.Outlet, "state", current)
+	s.Printf("PDU outlet %d state: %s\n", p.Outlet, current)
+
+	return nil
+}
+
+// backend abstracts a vendor-specific PDU HTTP API. Implementations are chosen
+// by newBackend and carry everything they need to reach the device, so the PDU
+// module can drive any supported vendor through the same two operations.
+type backend interface {
+	// setPower applies the action to the outlet and returns the resulting state.
+	// Backends without a native toggle implement it as a read-modify-write.
+	setPower(ctx context.Context, outlet int, act action) (state, error)
+	// outletState reports the outlet's current power state.
+	outletState(ctx context.Context, outlet int) (state, error)
+}
+
+//nolint:ireturn // factory returns different backends behind one interface for vendor polymorphism.
+func newBackend(vendor string, req *requester, host string) (backend, error) {
+	base, err := url.Parse(host)
+	if err != nil {
+		return nil, fmt.Errorf("invalid PDU host %q: %w", host, err)
+	}
+
+	if base.Scheme == "" || base.Host == "" {
+		return nil, fmt.Errorf("invalid PDU host %q: must be an absolute URL including scheme (e.g. http://10.0.0.5)", host)
+	}
+
+	switch vendor {
+	case "", vendorIntellinet: // An empty vendor keeps legacy configs on the Intellinet API.
+		return intellinet{req: req, base: base}, nil
+	case vendorGude:
+		return gude{req: req, base: base}, nil
+	default:
+		return nil, fmt.Errorf("unknown PDU vendor %q (supported: %q, %q)", vendor, vendorIntellinet, vendorGude)
 	}
 }
 
-// doRequest performs an authenticated GET request against url and returns the
-// response. On success the caller owns the response and must close its Body; on
-// any error the returned response is nil (its body already closed if one
-// existed). A non-200 status is reported as an error.
-func (p *PDU) doRequest(ctx context.Context, url string) (*http.Response, error) {
-	log.FromContext(ctx).Debug("GET " + url)
+// requester performs authenticated GET requests against a PDU's HTTP API. It
+// carries the credentials so vendor backends need not repeat the request setup.
+type requester struct {
+	client   *http.Client
+	user     string
+	password string
+}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+// get issues an authenticated GET against endpoint. On success the caller owns the
+// response and must close its Body; on any error the returned response is nil (its
+// body already closed if one existed). A non-200 status is reported as an error.
+func (r *requester) get(ctx context.Context, endpoint string) (*http.Response, error) {
+	authenticated := r.user != "" && r.password != ""
+
+	log.FromContext(ctx).Debug("GET "+endpoint, "auth", authenticated)
+
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	if p.User != "" && p.Password != "" {
-		req.SetBasicAuth(p.User, p.Password)
+	if authenticated {
+		request.SetBasicAuth(r.user, r.password)
 	}
 
-	resp, err := p.client.Do(req)
+	resp, err := r.client.Do(request)
 	if err != nil {
 		return nil, err
 	}
@@ -150,106 +308,8 @@ func (p *PDU) doRequest(ctx context.Context, url string) (*http.Response, error)
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
 
-		return nil, fmt.Errorf("PDU command failed with status %s: %s", resp.Status, string(body))
+		return nil, fmt.Errorf("PDU request failed with status %s: %s", resp.Status, string(body))
 	}
 
 	return resp, nil
-}
-
-func (p *PDU) setPower(ctx context.Context, s module.Session, state string) error {
-	opState, err := parseOp(state)
-	if err != nil {
-		return err
-	}
-
-	q := p.controlURL.Query()
-	q.Set(fmt.Sprintf("outlet%d", p.Outlet), "1")
-	q.Set("op", opState.String())
-	p.controlURL.RawQuery = q.Encode()
-
-	resp, err := p.doRequest(ctx, p.controlURL.String())
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	log.FromContext(ctx).Info(fmt.Sprintf("outlet %d power %s", p.Outlet, state))
-	s.Printf("PDU outlet%d power set to '%s' successfully\n", p.Outlet, state)
-
-	return nil
-}
-
-func (p *PDU) status(ctx context.Context, s module.Session) error {
-	resp, err := p.doRequest(ctx, p.statusURL.String())
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return err
-	}
-
-	outletValue, err := p.parseOutletStatus(body)
-	if err != nil {
-		return err
-	}
-
-	s.Printf("PDU outlet%d state: %s\n", p.Outlet, outletValue)
-
-	return nil
-}
-
-// parseOutletStatus extracts the outlet status from XML response body.
-func (p *PDU) parseOutletStatus(body []byte) (string, error) {
-	bodyStr := string(body)
-
-	outletTag := fmt.Sprintf("<outletStat%d>", p.Outlet)
-	outletEndTag := fmt.Sprintf("</outletStat%d>", p.Outlet)
-
-	startIdx := strings.Index(bodyStr, outletTag)
-	if startIdx == -1 {
-		return "", fmt.Errorf("outlet %d not found in PDU status", p.Outlet)
-	}
-
-	startIdx += len(outletTag)
-
-	endIdx := strings.Index(bodyStr[startIdx:], outletEndTag)
-	if endIdx == -1 {
-		return "", fmt.Errorf("malformed XML for outlet %d", p.Outlet)
-	}
-
-	outletValue := strings.TrimSpace(bodyStr[startIdx : startIdx+endIdx])
-
-	if outletValue != on && outletValue != off {
-		return "", fmt.Errorf("unexpected outlet state '%s' for outlet %d", outletValue, p.Outlet)
-	}
-
-	return outletValue, nil
-}
-
-type op string
-
-const (
-	opOn     op = "0"
-	opOff    op = "1"
-	opToggle op = "2"
-)
-
-func (o op) String() string {
-	return string(o)
-}
-
-func parseOp(state string) (op, error) {
-	switch state {
-	case on:
-		return opOn, nil
-	case off:
-		return opOff, nil
-	case toggle:
-		return opToggle, nil
-	default:
-		return "", fmt.Errorf("invalid PDU operation: %s", state)
-	}
 }
