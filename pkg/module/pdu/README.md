@@ -2,7 +2,7 @@
 
 The _PDU_ module provides basic power control of a Power Distribution Unit (PDU) via HTTP requests. It supports turning a power outlet on, off, toggling its state, and querying the current status.
 
-**Note**: This module currently supports only Intellinet ATM PDUs.
+**Note**: This module supports Intellinet-style PDUs (e.g. Intellinet 163682, LogiLink PDU8P01) and Gude PDUs. Select the device with the `vendor` option.
 
 This module is intended to be used as part of `dutagent`, allowing automated power control of a DUT (Device Under Test) through a network-accessible PDU.
 
@@ -23,13 +23,14 @@ pdu [on|off|toggle|status]
 
 If no command is provided, the module prints a usage message and exits.
 
-See [pdu-example-cfg.yml](./pdu-example-cfg.yml) for examples. 
+See [pdu-example-cfg.yml](./pdu-example-cfg.yml) for examples.
 
 ## Configuration Options
 
-| Option     | Type   | Description                                    |
-| ---------- | ------ | ---------------------------------------------- |
-| `host`     | string | Base URL of the PDU (e.g. `10.0.0.5`)          |
-| `user`     | string | (Optional) Username for HTTP Basic Auth        |
-| `password` | string | (Optional) Password for HTTP Basic Auth        |
-| `outlet`   | int    | Outlet number to control (0-15, defaults to 0) |
+| Option     | Type   | Description                                                    |
+| ---------- | ------ | ------------------------------------------------------------- |
+| `vendor`   | string | PDU HTTP API: `intellinet` (default) or `gude`                       |
+| `host`     | string | Base URL of the PDU, including scheme (e.g. `http://10.0.0.5`)        |
+| `user`     | string | (Optional) Username for HTTP Basic Auth; set together with `password` |
+| `password` | string | (Optional) Password for HTTP Basic Auth; set together with `user`    |
+| `outlet`   | int    | Outlet to control (0-based, defaults to 0); upper bound is device-specific |

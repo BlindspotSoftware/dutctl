@@ -5,238 +5,248 @@
 package pdu
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
-func TestParseOutletStatus(t *testing.T) {
+// TestBackendSelection exercises the config decode + Init path that selects the
+// vendor backend, mirroring how pkg/dut unmarshals a module's "with" options.
+func TestBackendSelection(t *testing.T) {
 	tests := []struct {
-		name     string
-		outlet   int
-		xmlBody  string
-		expected string
-		err      bool
+		name    string
+		options string
+		want    backend
+		initErr bool
 	}{
 		{
-			name:   "outlet 0 on",
-			outlet: 0,
-			xmlBody: `<response>
-<outletStat0>on</outletStat0>
-<outletStat1>off</outletStat1>
-</response>`,
-			expected: "on",
-			err:      false,
+			name:    "explicit intellinet",
+			options: "vendor: intellinet\nhost: http://10.0.0.1\noutlet: 0\n",
+			want:    intellinet{},
 		},
 		{
-			name:   "outlet 1 off",
-			outlet: 1,
-			xmlBody: `<response>
-<outletStat0>on</outletStat0>
-<outletStat1>off</outletStat1>
-</response>`,
-			expected: "off",
-			err:      false,
+			name:    "gude",
+			options: "vendor: gude\nhost: http://10.0.0.1\noutlet: 0\n",
+			want:    gude{},
 		},
 		{
-			name:   "outlet 6 on with whitespace",
-			outlet: 6,
-			xmlBody: `<response>
-<outletStat6>  on  </outletStat6>
-</response>`,
-			expected: "on",
-			err:      false,
+			name:    "legacy config without vendor defaults to intellinet",
+			options: "host: http://10.0.0.1\noutlet: 0\n",
+			want:    intellinet{},
 		},
 		{
-			name:   "outlet not found",
-			outlet: 5,
-			xmlBody: `<response>
-<outletStat0>on</outletStat0>
-<outletStat1>off</outletStat1>
-</response>`,
-			expected: "",
-			err:      true,
+			name:    "unknown vendor is rejected at Init",
+			options: "vendor: acme\nhost: http://10.0.0.1\n",
+			initErr: true,
 		},
 		{
-			name:   "malformed XML - missing end tag",
-			outlet: 0,
-			xmlBody: `<response>
-<outletStat0>on
-</response>`,
-			expected: "",
-			err:      true,
+			name:    "user and password together are accepted",
+			options: "vendor: gude\nhost: http://10.0.0.1\nuser: admin\npassword: secret\n",
+			want:    gude{},
 		},
 		{
-			name:   "unexpected outlet state",
-			outlet: 0,
-			xmlBody: `<response>
-<outletStat0>unknown</outletStat0>
-</response>`,
-			expected: "",
-			err:      true,
+			name:    "user without password is rejected",
+			options: "host: http://10.0.0.1\nuser: admin\n",
+			initErr: true,
 		},
 		{
-			name:   "real PDU response example",
-			outlet: 6,
-			xmlBody: `<response>
-<cur0>0.2</cur0>
-<stat0>normal</stat0>
-<curBan>0.2</curBan>
-<tempBan>30</tempBan>
-<humBan>31</humBan>
-<statBan>normal</statBan>
-<outletStat0>on</outletStat0>
-<outletStat1>on</outletStat1>
-<outletStat2>on</outletStat2>
-<outletStat3>on</outletStat3>
-<outletStat4>on</outletStat4>
-<outletStat5>on</outletStat5>
-<outletStat6>on</outletStat6>
-<outletStat7>off</outletStat7>
-<userVerifyRes>0</userVerifyRes>
-</response>`,
-			expected: "on",
-			err:      false,
-		},
-		{
-			name:     "empty XML",
-			outlet:   0,
-			xmlBody:  "",
-			expected: "",
-			err:      true,
-		},
-		{
-			name:   "outlet number out of range",
-			outlet: 99,
-			xmlBody: `<response>
-<outletStat0>on</outletStat0>
-</response>`,
-			expected: "",
-			err:      true,
+			name:    "password without user is rejected",
+			options: "host: http://10.0.0.1\npassword: secret\n",
+			initErr: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			p := &PDU{
-				Outlet: tt.outlet,
+			var p PDU
+			if err := yaml.Unmarshal([]byte(tt.options), &p); err != nil {
+				t.Fatalf("yaml.Unmarshal() unexpected error: %v", err)
 			}
 
-			result, err := p.parseOutletStatus([]byte(tt.xmlBody))
+			err := p.Init(context.Background())
 
-			if tt.err {
+			if tt.initErr {
 				if err == nil {
-					t.Errorf("parseOutletStatus() expected error but got none")
+					t.Fatalf("Init() expected error but got none")
 				}
+
 				return
 			}
 
 			if err != nil {
-				t.Errorf("parseOutletStatus() unexpected error: %v", err)
-				return
+				t.Fatalf("Init() unexpected error: %v", err)
 			}
 
-			if result != tt.expected {
-				t.Errorf("parseOutletStatus() = %v, expected %v", result, tt.expected)
+			if gotType, wantType := typeName(p.backend), typeName(tt.want); gotType != wantType {
+				t.Errorf("backend = %s, want %s", gotType, wantType)
 			}
 		})
 	}
 }
 
-func TestParseOp(t *testing.T) {
+func typeName(b backend) string {
+	switch b.(type) {
+	case intellinet:
+		return "intellinet"
+	case gude:
+		return "gude"
+	default:
+		return "nil"
+	}
+}
+
+func TestParseAction(t *testing.T) {
 	tests := []struct {
-		name     string
-		input    string
-		expected op
-		err      bool
+		name  string
+		input string
+		want  action
+		ok    bool
 	}{
-		{
-			name:     "on command",
-			input:    "on",
-			expected: opOn,
-			err:      false,
-		},
-		{
-			name:     "off command",
-			input:    "off",
-			expected: opOff,
-			err:      false,
-		},
-		{
-			name:     "toggle command",
-			input:    "toggle",
-			expected: opToggle,
-			err:      false,
-		},
-		{
-			name:     "invalid command",
-			input:    "invalid",
-			expected: "",
-			err:      true,
-		},
-		{
-			name:     "empty command",
-			input:    "",
-			expected: "",
-			err:      true,
-		},
+		{name: "on", input: "on", want: turnOn, ok: true},
+		{name: "off", input: "off", want: turnOff, ok: true},
+		{name: "toggle", input: "toggle", want: toggle, ok: true},
+		{name: "status is not an action", input: "status", ok: false},
+		{name: "unknown", input: "bogus", ok: false},
+		{name: "empty", input: "", ok: false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := parseOp(tt.input)
-
-			if tt.err {
-				if err == nil {
-					t.Errorf("parseOp() expected error but got none")
-				}
-				return
+			got, ok := parseAction(tt.input)
+			if ok != tt.ok {
+				t.Fatalf("parseAction(%q) ok = %v, want %v", tt.input, ok, tt.ok)
 			}
 
-			if err != nil {
-				t.Errorf("parseOp() unexpected error: %v", err)
-				return
-			}
-
-			if result != tt.expected {
-				t.Errorf("parseOp() = %v, expected %v", result, tt.expected)
+			if ok && got != tt.want {
+				t.Errorf("parseAction(%q) = %v, want %v", tt.input, got, tt.want)
 			}
 		})
 	}
 }
 
-func TestOpString(t *testing.T) {
+func TestParseState(t *testing.T) {
 	tests := []struct {
-		name     string
-		op       op
-		expected string
+		name  string
+		input string
+		want  state
+		ok    bool
 	}{
-		{
-			name:     "opOn",
-			op:       opOn,
-			expected: "0",
-		},
-		{
-			name:     "opOff",
-			op:       opOff,
-			expected: "1",
-		},
-		{
-			name:     "opToggle",
-			op:       opToggle,
-			expected: "2",
-		},
-		{
-			name:     "invalid op",
-			op:       op("invalid"),
-			expected: "invalid",
-		},
+		{name: "on", input: "on", want: on, ok: true},
+		{name: "off", input: "off", want: off, ok: true},
+		{name: "toggle is not a state", input: "toggle", ok: false},
+		{name: "unknown", input: "bogus", ok: false},
+		{name: "empty", input: "", ok: false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := tt.op.String()
-			if result != tt.expected {
-				t.Errorf("op.String() = %v, expected %v", result, tt.expected)
+			got, ok := parseState(tt.input)
+			if ok != tt.ok {
+				t.Fatalf("parseState(%q) ok = %v, want %v", tt.input, ok, tt.ok)
+			}
+
+			if ok && got != tt.want {
+				t.Errorf("parseState(%q) = %v, want %v", tt.input, got, tt.want)
 			}
 		})
 	}
+}
+
+func TestStateString(t *testing.T) {
+	if got := on.String(); got != "on" {
+		t.Errorf("on.String() = %q, want %q", got, "on")
+	}
+
+	if got := off.String(); got != "off" {
+		t.Errorf("off.String() = %q, want %q", got, "off")
+	}
+}
+
+func TestActionString(t *testing.T) {
+	tests := []struct {
+		a    action
+		want string
+	}{
+		{a: turnOn, want: "on"},
+		{a: turnOff, want: "off"},
+		{a: toggle, want: "toggle"},
+	}
+
+	for _, tt := range tests {
+		if got := tt.a.String(); got != tt.want {
+			t.Errorf("action.String() = %q, want %q", got, tt.want)
+		}
+	}
+}
+
+// TestRequesterGet documents the transport contract every backend relies on:
+// HTTP Basic Auth is sent only when both credentials are configured, and any
+// non-200 response is turned into an error with no response handed back.
+func TestRequesterGet(t *testing.T) {
+	t.Run("sends basic auth when credentials are set", func(t *testing.T) {
+		var (
+			gotUser, gotPass string
+			gotOK            bool
+		)
+
+		srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+			gotUser, gotPass, gotOK = r.BasicAuth()
+		}))
+		defer srv.Close()
+
+		req := &requester{client: srv.Client(), user: "admin", password: "secret"}
+
+		resp, err := req.get(context.Background(), srv.URL)
+		if err != nil {
+			t.Fatalf("get() unexpected error: %v", err)
+		}
+		resp.Body.Close()
+
+		if !gotOK || gotUser != "admin" || gotPass != "secret" {
+			t.Errorf("basic auth = (%q, %q, ok=%v), want (admin, secret, ok=true)", gotUser, gotPass, gotOK)
+		}
+	})
+
+	t.Run("omits basic auth when credentials are empty", func(t *testing.T) {
+		var gotOK bool
+
+		srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+			_, _, gotOK = r.BasicAuth()
+		}))
+		defer srv.Close()
+
+		req := &requester{client: srv.Client()}
+
+		resp, err := req.get(context.Background(), srv.URL)
+		if err != nil {
+			t.Fatalf("get() unexpected error: %v", err)
+		}
+		resp.Body.Close()
+
+		if gotOK {
+			t.Errorf("basic auth was sent, want none")
+		}
+	})
+
+	t.Run("non-200 status is an error and returns no response", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			http.Error(w, "forbidden", http.StatusForbidden)
+		}))
+		defer srv.Close()
+
+		req := &requester{client: srv.Client()}
+
+		resp, err := req.get(context.Background(), srv.URL)
+		if err == nil {
+			resp.Body.Close()
+			t.Fatal("get() expected error for non-200 status, got nil")
+		}
+
+		if resp != nil {
+			t.Errorf("get() returned a response alongside the error, want nil")
+		}
+	})
 }
