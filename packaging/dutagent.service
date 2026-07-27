@@ -21,6 +21,7 @@ WorkingDirectory=/var/lib/dutagent
 Environment=TMPDIR=/var/lib/dutagent/tmp
 # Writable scratch dir for flash images and temp files.
 Environment=HOME=/var/lib/dutagent
+Environment=EM100_HOME=/var/lib/dutagent/.em100
 # em100 (flash-emulate) reads its chip/firmware DB from $HOME/.em100. A systemd
 # service gets an empty HOME and em100 fails with "Can't find chip configs",
 # so pin HOME to where the DB lives.
