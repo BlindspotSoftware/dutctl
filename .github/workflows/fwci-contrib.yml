@@ -1,0 +1,121 @@
+---
+name: fwci-contrib
+# Pull requests from forks run without repository secrets, so fwci-test cannot
+# submit a FirmwareCI job for them. This workflow runs in the base repository,
+# where the secrets live, and submits the binaries the contributor's run already
+# built.
+#
+# Contributor-authored code is never executed here: this job only downloads the
+# build artifact and hands it to FirmwareCI. The environment gate below is what
+# decides whether that firmware is allowed onto real hardware.
+
+on:
+  workflow_run:
+    workflows: ["fwci-test"]
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read # required to read the triggering run's artifacts
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.workflow_run.head_repository.full_name }}-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: true
+
+jobs:
+  client-agent-integration:
+    # Fork pull requests only. Same-repo pull requests and pushes have secrets
+    # and already submit their job from fwci-test.
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_repository.full_name != github.repository
+    runs-on: ubuntu-latest
+    # Required reviewers on this environment are the gate. Approving means
+    # letting a contributor's firmware run on real hardware, so the reviewer
+    # should have read the diff first.
+    environment: firmwareci-contrib
+    strategy:
+      fail-fast: false
+      matrix:
+        configfile:
+          - ./contrib/dutagent-cfg-example.yaml
+          #- ./test/test-dutagent-cfg.yaml
+    steps:
+      # Base repository only — the fork's tree is deliberately not checked out.
+      # This provides the config file passed as CONFIG below.
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: binaries
+          path: bin/
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get names of binaries
+        id: filenames
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+
+          # This artifact was produced by a run of the contributor's code, so
+          # its contents are untrusted. Require exactly one match per pattern,
+          # and reject only the characters that would let a filename break out
+          # of the value it lands in: a newline appends arbitrary step outputs,
+          # and ';' or '=' forge extra entries in the BINARIES map below.
+          # Merely unusual characters are fine — goreleaser writes package
+          # names like dutctl_0.0.0~SNAPSHOT-c57fb1b_arm64.deb.
+          resolve() {
+            local what=$1
+            shift
+
+            if [ "$#" -ne 1 ]; then
+              echo "expected exactly one ${what}, found $#: $*" >&2
+              exit 1
+            fi
+
+            if [[ $1 == *$'\n'* || $1 == *';'* || $1 == *'='* ]]; then
+              echo "refusing unexpected artifact path: $1" >&2
+              exit 1
+            fi
+
+            printf '%s\n' "$1"
+          }
+
+          dutctl_path=$(resolve "dutctl binary" ./bin/dutctl_linux_amd64_*/dutctl)
+          dutctl_pkg_path=$(resolve "dutctl arm64 package" ./bin/dutctl_*_arm64.deb)
+
+          echo "dutctl_path=$dutctl_path" >> "${GITHUB_OUTPUT}"
+          echo "dutctl_pkg_path=$dutctl_pkg_path" >> "${GITHUB_OUTPUT}"
+
+      - name: Debug
+        # Values from the event payload go through the environment rather than
+        # being interpolated into the script, so nothing from the fork side can
+        # be parsed as shell.
+        env:
+          SOURCE_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          DUTCTL_PATH: ${{ steps.filenames.outputs.dutctl_path }}
+          DUTCTL_PKG_PATH: ${{ steps.filenames.outputs.dutctl_pkg_path }}
+        run: |
+          echo "source:          ${SOURCE_REPO}"
+          echo "head_sha:        ${HEAD_SHA}"
+          echo "dutctl_path:     ${DUTCTL_PATH}"
+          echo "dutctl_pkg_path: ${DUTCTL_PKG_PATH}"
+
+      - name: Upload to FirmwareCI
+        uses: docker://firmwareci/action:v6.0
+        with:
+          TOKEN: "${{ secrets.FWCI_TOKEN }}"
+          WORKFLOW_NAME: test-dutctl
+          # The workflow_run payload carries the pull request head commit. This
+          # workflow itself runs on the base branch, so auto-detection would
+          # report the wrong commit.
+          COMMIT_HASH: ${{ github.event.workflow_run.head_sha }}
+          # The fork's branch does not exist in this repository, so the
+          # FirmwareCI config has to be resolved against the base branch.
+          BRANCH: main
+          BINARIES: DUTCTL=${{ steps.filenames.outputs.dutctl_path }};REMOTE_PKG=${{ steps.filenames.outputs.dutctl_pkg_path }};CONFIG=${{ matrix.configfile }}
+          GITHUB_INSTALLATION_ID: 45795153

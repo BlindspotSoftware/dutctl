@@ -45,6 +45,12 @@ jobs:
 
   # Run a firmware-ci test suite
   client-agent-integration:
+    # Pull requests from forks run without repository secrets, so FWCI_TOKEN
+    # would be empty here. The fwci-contrib workflow picks those up instead, from
+    # the base repository and behind a required-reviewer environment.
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     needs:
       - build-with-goreleaser
