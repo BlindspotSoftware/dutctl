@@ -38,7 +38,9 @@ PrivateTmp=yes
 KeyringMode=private
 ProtectClock=yes
 ProtectHostname=yes
-ProtectKernel=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
 ## Prevent privilege escalation
 RestrictSUIDSGID=true
 NoNewPrivileges=true
