@@ -123,6 +123,8 @@ nfpms:
     bindir: /usr/bin
     section: default
     priority: extra
+    dependencies:
+      - systemd
     contents:
       # systemd services
       - src: packaging/dutagent.service
@@ -140,6 +142,12 @@ nfpms:
       packager: "Jens Topp <jens.topp@blindspot.software>"
     archlinux:
       packager: "Jens Topp <jens.topp@blindspot.software>"
+
+    overrides:
+      # In Debian the systemd-sysusers or systemd-tmpfiles does not get triggered automatically
+      deb:
+        scripts:
+          postinstall: packaging/postinstall.sh
 
 source:
   enabled: true
