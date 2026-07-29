@@ -7,3 +7,4 @@ m dutagent dutagent
 
 # Access to serial
 m dutagent uucp
+m dutagent dialout
