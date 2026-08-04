@@ -1,0 +1,34 @@
+---
+name: dutagent module
+description: Report system info through the dutagent module.
+
+defaults:
+  {%- import ".jinja2_templates/defaults.j2" as defaults %}
+  {%- macro someop() %}{% include ".jinja2_templates/defaults.yaml" with context %}{% endmacro %}
+  {{ someop()|indent(2) }}
+
+{% include ".jinja2_templates/pre.yaml.j2" %}
+
+# "test/test-dutagent-cfg.yaml"
+
+stages:
+  - name: Test agent module
+    steps:
+      - cmd: cmd
+        name: Report dutagent system info
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args:
+            [
+              {{ defaults.DUTCTL_ARGS }},
+              "{{ defaults.RPI_HOSTNAME }}",
+              "system-info",
+            ]
+          expect:
+            - regex: "Linux {{ defaults.RPI_HOSTNAME }}"
+        options:
+          timeout: 10s
+
+{% include ".jinja2_templates/post.yaml.j2" -%}

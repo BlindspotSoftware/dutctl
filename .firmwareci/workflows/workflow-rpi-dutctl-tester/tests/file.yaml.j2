@@ -1,0 +1,86 @@
+---
+name: file module
+description: Copy files to and from the DUT through the file module.
+
+defaults:
+  {%- import ".jinja2_templates/defaults.j2" as defaults %}
+  {%- macro someop() %}{% include ".jinja2_templates/defaults.yaml" with context %}{% endmacro %}
+  {{ someop()|indent(2) }}
+
+{% include ".jinja2_templates/pre.yaml.j2" %}
+
+# "test/test-dutagent-cfg.yaml"
+
+stages:
+  - name: Test file module
+    steps:
+      - cmd: shell
+        name: Create a file to upload
+        transport:
+          proto: local
+        parameters:
+          command: "echo 'uploaded-by-file-module' > upload-source.txt"
+
+      - cmd: cmd
+        name: Upload the file to the dutagent
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args:
+            [
+              {{ defaults.DUTCTL_ARGS }},
+              "{{ defaults.RPI_HOSTNAME }}",
+              "upload",
+              "upload-source.txt",
+            ]
+        options:
+          timeout: 15s
+
+      - cmd: shell
+        name: Verify the file arrived on the dutagent
+        transport: *transport_oscar
+        parameters:
+          command: "cat /tmp/dutctl-fwci-upload.txt"
+          expect:
+            - regex: "uploaded-by-file-module"
+
+      - cmd: shell
+        name: Create a file on the dutagent to download
+        transport: *transport_oscar
+        parameters:
+          command: "echo 'downloaded-by-file-module' > /tmp/dutctl-fwci-download.txt"
+
+      - cmd: cmd
+        name: Download the file from the dutagent
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args:
+            [
+              {{ defaults.DUTCTL_ARGS }},
+              "{{ defaults.RPI_HOSTNAME }}",
+              "download",
+              "download-target.txt",
+            ]
+        options:
+          timeout: 15s
+
+      - cmd: cmd
+        name: Verify the downloaded file content
+        transport:
+          proto: local
+        parameters:
+          executable: "cat"
+          args: ["download-target.txt"]
+          expect:
+            - regex: "downloaded-by-file-module"
+
+      - cmd: shell
+        name: Remove the transferred files from the dutagent
+        transport: *transport_oscar
+        parameters:
+          command: "rm -f /tmp/dutctl-fwci-upload.txt /tmp/dutctl-fwci-download.txt || true"
+
+{% include ".jinja2_templates/post.yaml.j2" -%}

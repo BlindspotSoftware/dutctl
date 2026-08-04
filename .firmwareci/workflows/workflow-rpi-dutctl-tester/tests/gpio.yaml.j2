@@ -1,0 +1,98 @@
+---
+name: GPIO power control
+description: Drive and read GPIO pins to power-cycle the DUT.
+
+defaults:
+  {%- import ".jinja2_templates/defaults.j2" as defaults %}
+  {%- macro someop() %}{% include ".jinja2_templates/defaults.yaml" with context %}{% endmacro %}
+  {{ someop()|indent(2) }}
+
+{% include ".jinja2_templates/pre.yaml.j2" %}
+
+# "test/test-dutagent-cfg.yaml"
+
+stages:
+  - name: Test GPIO power via shell script
+    steps:
+      - cmd: cmd
+        name: initial dutctl power off
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: [{{ defaults.DUTCTL_ARGS }}, "{{ defaults.RPI_HOSTNAME }}", "power", "off"]
+
+      - cmd: cmd
+        name: get dutctl power status
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: [{{ defaults.DUTCTL_ARGS }}, "{{ defaults.RPI_HOSTNAME }}", "power"]
+          expect:
+            - regex: "Current state: off"
+
+      - cmd: cmd
+        name: check pin state
+        transport: *transport_oscar
+        parameters:
+          executable: pinctrl
+          args: ["lev", "{{ defaults.GPIO_PIN_TEST_OLIMEX }}"]
+          expect:
+            - regex: "0"
+
+      - cmd: cmd
+        name: dutctl power on
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: [{{ defaults.DUTCTL_ARGS }}, "{{ defaults.RPI_HOSTNAME }}", "power", "on"]
+
+      - cmd: cmd
+        name: get dutctl power status 2
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: [{{ defaults.DUTCTL_ARGS }}, "{{ defaults.RPI_HOSTNAME }}", "power"]
+          expect:
+            - regex: "Current state: on"
+
+      - cmd: cmd
+        name: check pin state 2
+        transport: *transport_oscar
+        parameters:
+          executable: pinctrl
+          args: ["lev", "{{ defaults.GPIO_PIN_TEST_OLIMEX }}"]
+          expect:
+            - regex: "1"
+
+      - cmd: cmd
+        name: dutctl power off
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: [{{ defaults.DUTCTL_ARGS }}, "{{ defaults.RPI_HOSTNAME }}", "power", "off"]
+
+      - cmd: cmd
+        name: get dutctl power status 3
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: [{{ defaults.DUTCTL_ARGS }}, "{{ defaults.RPI_HOSTNAME }}", "power"]
+          expect:
+            - regex: "Current state: off"
+
+      - cmd: cmd
+        name: check pin state 3
+        transport: *transport_oscar
+        parameters:
+          executable: pinctrl
+          args: ["lev", "{{ defaults.GPIO_PIN_TEST_OLIMEX }}"]
+          expect:
+            - regex: "0"
+
+{% include ".jinja2_templates/post.yaml.j2" -%}

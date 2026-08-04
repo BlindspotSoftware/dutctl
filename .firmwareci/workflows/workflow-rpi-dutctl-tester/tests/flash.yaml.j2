@@ -1,0 +1,58 @@
+---
+name: flash module
+description: Flash the DUT with dpcmd through the flash module.
+
+defaults:
+  {%- import ".jinja2_templates/defaults.j2" as defaults %}
+  {%- macro someop() %}{% include ".jinja2_templates/defaults.yaml" with context %}{% endmacro %}
+  {{ someop()|indent(2) }}
+
+{% include ".jinja2_templates/pre.yaml.j2" %}
+
+# "test/test-dutagent-cfg.yaml"
+
+stages:
+  - name: Test flashing with dpcmd
+    steps:
+      - cmd: cmd
+        name: dutctl flash write
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args:
+            [
+              {{ defaults.DUTCTL_ARGS }},
+              "{{ defaults.RPI_HOSTNAME }}",
+              "flash",
+              "write",
+              "[[input.DUMMY_SPI_FLASH_ROM]]",
+            ]
+        options:
+          timeout: 300s
+
+      - cmd: cmd
+        name: dutctl flash read
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args:
+            [
+              {{ defaults.DUTCTL_ARGS }},
+              "{{ defaults.RPI_HOSTNAME }}",
+              "flash",
+              "read",
+              "flash-readback.rom",
+            ]
+        options:
+          timeout: 300s
+
+      - cmd: shell
+        name: Compare the read-back image with the written one
+        transport:
+          proto: local
+        parameters:
+          command: "cmp -n \"$(stat -c%s '[[input.DUMMY_SPI_FLASH_ROM]]')\" '[[input.DUMMY_SPI_FLASH_ROM]]' flash-readback.rom"
+
+{% include ".jinja2_templates/post.yaml.j2" -%}
