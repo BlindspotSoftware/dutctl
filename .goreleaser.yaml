@@ -117,9 +117,7 @@ nfpms:
       - rpm
       - archlinux
     replaces:
-      - golang-github-fti
-      - golang-fti
-      - fti
+      - dutctl
     bindir: /usr/bin
     section: default
     priority: extra
