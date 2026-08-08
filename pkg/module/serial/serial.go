@@ -2,14 +2,15 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package serial provides a dutagent module that runs a scripted send/expect
-// sequence against a DUT's serial port.
+// Package serial provides a dutagent module that streams a DUT's serial console,
+// runs a scripted send/expect sequence, or bridges the console interactively.
 package serial
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -47,11 +48,8 @@ const sendDrain = time.Second
 // substitute a fake port for the real hardware.
 type portOpener func(name string, baud int) (port, error)
 
-// Serial observes the DUT's serial output and runs a scripted sequence of
-// send/expect steps against the serial port.
-//
-// The module is non-interactive: all input is supplied up front as arguments,
-// which makes it suitable for scripts and automated callers.
+// Serial streams the DUT's serial output, runs a scripted send/expect sequence,
+// or bridges the console interactively, depending on its arguments.
 type Serial struct {
 	Port  string // Port is the path to the serial device on the dutagent.
 	Baud  int    // Baud is the baud rate of the serial device. If unset, DefaultBaudRate is used.
@@ -66,17 +64,28 @@ type Serial struct {
 	// open opens the serial port. It defaults to defaultOpenPort in Run; tests
 	// set it to a fake. Opening happens per Run, never on the struct.
 	open portOpener
+
+	// portPresent reports whether the configured device node still exists; it
+	// defaults to a filesystem stat of Port and is overridden in tests. It lets
+	// the read loop tell a quiet-but-healthy console apart from a vanished
+	// device when deciding whether to reconnect.
+	portPresent func() bool
+
+	// deviceLossGrace overrides deviceLossGraceDefault in tests so the
+	// device-loss path can be exercised quickly. Zero uses the default.
+	deviceLossGrace time.Duration
 }
 
 // Ensure implementing the Module interface.
 var _ module.Module = &Serial{}
 
-const abstract = `Scripted serial connection to the DUT
+const abstract = `Serial connection to the DUT
 `
 
 const usage = `
 ARGUMENTS:
 	[-t <duration>] [-eol cr|lf|crlf|none] [-keep-escapes]                 (monitor: stream output)
+	[-t <duration>] [-keep-escapes] -i                                     (interactive console)
 	[-t <duration>] [-eol cr|lf|crlf|none] [-keep-escapes] [--] <step>...  (run a step sequence)
 
 	step := expect <regex> | send <data> | send-raw <data>
@@ -84,15 +93,24 @@ ARGUMENTS:
 `
 
 const description = `
-The serial module automates interaction with the DUT's serial console. All
-input is provided up front as arguments, so it suits scripts and automated
-callers.
+The serial module interacts with the DUT's serial console. It runs in one of
+three modes, selected by its arguments:
 
-With no steps it runs in MONITOR mode: it streams the serial output to the
-client until the session is cancelled, or until -t elapses (a success). With
-one or more steps it runs them in order (see below). Serial output is forwarded
-to the client in monitor mode, while waiting for an expect, and (if the last
-step is a send) for a moment afterwards so its reply is visible.
+  - MONITOR (no arguments): stream the serial output to the client until the
+    session is cancelled, or until -t elapses (a success).
+  - INTERACTIVE (-i): bridge the client console to the serial port, forwarding
+    keystrokes to the port and streaming output back, until the session is
+    cancelled or -t elapses. Takes no steps.
+  - STEP SEQUENCE (one or more steps): run the scripted steps in order (see
+    below); suits scripts and automated callers.
+
+Serial output is forwarded to the client in monitor and interactive modes, while
+waiting for an expect, and (if the last step is a send) for a moment afterwards
+so its reply is visible.
+
+If the serial device disappears mid-session (e.g. an FTDI chip that powers down
+when the DUT loses power), the module waits for it to reappear and reconnects
+automatically instead of ending the session.
 
 STEPS (executed in order; the run fails on the first expect that times out):
 	expect <regex>   Wait until the serial output matches the RE2 regular
@@ -117,6 +135,8 @@ FLAGS (before the steps):
 	                       which is what serial consoles expect on Enter.
 	-keep-escapes          Keep terminal escape sequences (cursor moves, colour,
 	                       queries) instead of stripping them from the output.
+	-i                     Interactive: bridge the client console to the serial
+	                       port. Cannot be combined with steps.
 
 Terminal escape sequences (cursor moves, colour, queries) are stripped from the
 output before it is shown or matched, unless -keep-escapes is given. Expect
@@ -127,6 +147,7 @@ right after a send can match your own input rather than the device's reply.
 
 EXAMPLES:
 	monitor the console:            (no arguments)
+	interactive console:            -i
 	wait for a boot marker:         -- expect 'Welcome to'
 	login then run a command:       -- expect 'login:' send root expect '# ' send reboot
 	send Ctrl-C then expect shell:  -- send-raw '\x03' expect '$ '
@@ -202,6 +223,37 @@ func defaultOpenPort(name string, baud int) (port, error) {
 	return serialPort, nil
 }
 
+// reopenFunc returns a closure that reopens the configured device; the engine
+// uses it to reconnect after the device disappears.
+func (s *Serial) reopenFunc(opener portOpener) func() (port, error) {
+	return func() (port, error) {
+		return opener(s.Port, s.Baud)
+	}
+}
+
+// presentFunc reports whether the configured device node still exists. It
+// defaults to a filesystem stat of Port and is overridden in tests.
+func (s *Serial) presentFunc() func() bool {
+	if s.portPresent != nil {
+		return s.portPresent
+	}
+
+	return func() bool {
+		_, err := os.Stat(s.Port)
+
+		return err == nil
+	}
+}
+
+// graceDur is the quiet period tolerated before the device-loss node check.
+func (s *Serial) graceDur() time.Duration {
+	if s.deviceLossGrace > 0 {
+		return s.deviceLossGrace
+	}
+
+	return deviceLossGraceDefault
+}
+
 // Run opens the configured serial port and either streams its output or
 // executes a step sequence. With no steps it runs in monitor mode, streaming
 // until the session is cancelled or -t elapses (both a success). With steps it
@@ -230,7 +282,6 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 	if err != nil {
 		return err
 	}
-	defer serialPort.Close()
 
 	// Discard any stale bytes left in the kernel/driver RX buffer from a
 	// previous session, otherwise a step could match data from the last boot.
@@ -241,11 +292,8 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 
 	l.Info(fmt.Sprintf("connected to %s at %d baud", s.Port, s.Baud))
 
-	clientOut := newClientWriter(session)
-	clientOut.markerf("--- Connected to %s at %d baud ---\n", s.Port, s.Baud)
-
-	// loopCtx carries the per-sequence deadline (-t). The original ctx is kept
-	// for the post-send drain so the drain gets its own full window.
+	// loopCtx carries the per-run deadline (-t). The original ctx is kept for the
+	// post-send drain so the drain gets its own full window.
 	loopCtx := ctx
 
 	if cfg.timeout > 0 {
@@ -257,7 +305,17 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 		defer cancel()
 	}
 
+	if cfg.interactive {
+		return s.runInteractive(ctx, loopCtx, session, serialPort, opener, cfg)
+	}
+
+	clientOut := newClientWriter(session)
+	clientOut.markerf("--- Connected to %s at %d baud ---\n", s.Port, s.Baud)
+
 	eng := newEngine(serialPort, clientOut, !cfg.keepEscapes)
+	eng.withReconnect(s.reopenFunc(opener), s.presentFunc(), s.graceDur())
+
+	defer eng.closeCurrent()
 
 	// Monitor mode: no steps — stream the console until cancelled or -t elapses.
 	if len(cfg.steps) == 0 {
@@ -319,6 +377,43 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 	return nil
 }
 
+// runInteractive bridges the client console to the serial port for a live
+// session: keystrokes are forwarded to the port and port output is streamed
+// back, until the client disconnects (ctx cancel) or -t elapses. The device is
+// reopened automatically if it disappears mid-session.
+func (s *Serial) runInteractive(
+	baseCtx, loopCtx context.Context,
+	session module.Session,
+	initialPort port,
+	opener portOpener,
+	cfg scriptConfig,
+) error {
+	l := log.FromContext(baseCtx)
+
+	stdin, stdout, _ := session.Console()
+
+	l.Debug("interactive mode; bridging console to serial port")
+	fmt.Fprintf(stdout, "--- Connected to %s at %d baud ---\n", s.Port, s.Baud)
+
+	eng := newEngine(initialPort, stdout, !cfg.keepEscapes)
+	eng.withReconnect(s.reopenFunc(opener), s.presentFunc(), s.graceDur())
+
+	defer eng.closeCurrent()
+
+	// Context cancellation — the client disconnecting (an interactive quit or
+	// agent teardown) or the -t deadline — is the normal end of an open-ended
+	// session, as in monitor mode, so interactive returns nil for it. Only a
+	// genuine engine error (e.g. a broken client stream) fails the run.
+	err := eng.interactive(loopCtx, stdin)
+	if err != nil {
+		return fmt.Errorf("interactive: %w", err)
+	}
+
+	fmt.Fprintf(stdout, "\n--- Connection closed ---\n")
+
+	return nil
+}
+
 // sleepCtx pauses for d, returning ctx.Err() if ctx is done first. A
 // non-positive d returns nil immediately.
 func sleepCtx(ctx context.Context, d time.Duration) error {
@@ -353,10 +448,12 @@ func stepError(idx int, failedStep step, timeout time.Duration, err error) error
 }
 
 // clientWriter forwards serial output to the client (it is the engine's output
-// sink) and tracks whether the stream is at the start of a line. Status lines
-// go through markerf, which inserts a newline first when the preceding output
-// (e.g. a prompt with no trailing newline) did not end one — so every marker
-// lands on its own line.
+// sink in monitor and step modes) and tracks whether the stream is at the start
+// of a line. Status lines go through markerf, which inserts a newline first when
+// the preceding output (e.g. a prompt with no trailing newline) did not end one
+// — so every marker lands on its own line.
+//
+// Interactive mode instead uses the stdout writer from session.Console().
 type clientWriter struct {
 	session     module.Session
 	atLineStart bool

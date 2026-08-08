@@ -58,6 +58,7 @@ func truncate(text string, limit int) string {
 type scriptConfig struct {
 	timeout     time.Duration
 	keepEscapes bool
+	interactive bool
 	steps       []step
 }
 
@@ -74,11 +75,13 @@ func parseArgs(args []string) (scriptConfig, error) {
 		timeout     time.Duration
 		eolName     string
 		keepEscapes bool
+		interactive bool
 	)
 
 	fs.DurationVar(&timeout, "t", 0, "global timeout for the whole run (e.g. 30s, 3m); 0 = no timeout")
 	fs.StringVar(&eolName, "eol", defaultEOL, "line ending appended by 'send': cr|lf|crlf|none")
 	fs.BoolVar(&keepEscapes, "keep-escapes", false, "keep terminal escape sequences in the output instead of stripping them")
+	fs.BoolVar(&interactive, "i", false, "interactive: bridge the client console to the serial port (no steps)")
 
 	err := fs.Parse(args)
 	if err != nil {
@@ -95,7 +98,14 @@ func parseArgs(args []string) (scriptConfig, error) {
 		return scriptConfig{}, err
 	}
 
-	return scriptConfig{timeout: timeout, keepEscapes: keepEscapes, steps: steps}, nil
+	// Interactive is a whole-session mode: the client drives the port live, so a
+	// scripted step sequence would have nothing to act on. Reject the combination
+	// rather than silently ignoring one.
+	if interactive && len(steps) > 0 {
+		return scriptConfig{}, fmt.Errorf("interactive mode (-i) takes no steps, got %d", len(steps))
+	}
+
+	return scriptConfig{timeout: timeout, keepEscapes: keepEscapes, interactive: interactive, steps: steps}, nil
 }
 
 // resolveEOL maps the -eol flag value to the bytes appended by a 'send' step.
