@@ -6,6 +6,7 @@ package rpc
 
 import (
 	"context"
+	"crypto/tls"
 	"net"
 	"net/http"
 	"time"
@@ -29,26 +30,66 @@ const shutdownGracePeriod = 15 * time.Second
 func ListenAndServe(ctx context.Context, addr string, handler http.Handler) error {
 	var lc net.ListenConfig
 
-	ln, err := lc.Listen(ctx, "tcp", addr)
+	listener, err := lc.Listen(ctx, "tcp", addr)
 	if err != nil {
 		return err
 	}
 
-	return serve(ctx, ln, handler)
+	return serve(ctx, listener, handler, nil)
 }
 
-// serve runs handler on the listener ln. It blocks until ctx is cancelled — then it stops
+// ListenAndServeTLS is ListenAndServe over TLS, serving handler with cert and
+// HTTP/2 negotiated by ALPN. Everything else — binding, graceful shutdown, how
+// the caller classifies the return — matches ListenAndServe.
+//
+// The certificate is typically the agent's own self-signed one (see
+// internal/tlsutil), so the connection is encrypted but the client cannot
+// authenticate the server, and the server does not authenticate the client:
+// any client may connect. See newTLSClient for the peer's side of this.
+func ListenAndServeTLS(ctx context.Context, addr string, handler http.Handler, cert tls.Certificate) error {
+	var lc net.ListenConfig
+
+	listener, err := lc.Listen(ctx, "tcp", addr)
+	if err != nil {
+		return err
+	}
+
+	return serve(ctx, listener, handler, serverTLSConfig(cert))
+}
+
+// serverTLSConfig is the TLS configuration the RPC service serves with. TLS 1.3
+// is the floor in both directions: both peers are built from this repo, so there
+// is no legacy implementation to accommodate, and it pairs with the Ed25519 key
+// tlsutil generates. See newTLSClient for the peer's side.
+func serverTLSConfig(cert tls.Certificate) *tls.Config {
+	return &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		MinVersion:   tls.VersionTLS13,
+	}
+}
+
+// serve runs handler on the given listener, over TLS if tlsConfig is non-nil and
+// over h2c otherwise. It blocks until ctx is cancelled — then it stops
 // accepting and drains in-flight requests (bounded by shutdownGracePeriod) before
 // returning — or until the server stops on its own, in which case it returns that
-// error. It is unexported: ListenAndServe is the entry point; serve is factored out
-// so a test can drive a real in-flight request against a listener whose address it
-// controls.
-func serve(ctx context.Context, ln net.Listener, handler http.Handler) error {
-	srv := newH2CServer(ln.Addr().String(), handler)
+// error. It is unexported: ListenAndServe and ListenAndServeTLS are the entry
+// points; serve is factored out so a test can drive a real in-flight request
+// against a listener whose address it controls.
+func serve(ctx context.Context, listener net.Listener, handler http.Handler, tlsConfig *tls.Config) error {
+	srv := newServer(listener.Addr().String(), handler, tlsConfig)
 
 	errCh := make(chan error, 1)
 
-	go func() { errCh <- srv.Serve(ln) }()
+	go func() {
+		if tlsConfig != nil {
+			// Empty paths: the certificate is already in srv.TLSConfig.
+			errCh <- srv.ServeTLS(listener, "", "")
+
+			return
+		}
+
+		errCh <- srv.Serve(listener)
+	}()
 
 	select {
 	case err := <-errCh:
@@ -71,18 +112,29 @@ func serve(ctx context.Context, ln net.Listener, handler http.Handler) error {
 	}
 }
 
-// newH2CServer builds the h2c *http.Server. It is unexported: ListenAndServe is
-// the only intended entry point and drives the server's graceful Shutdown itself.
-func newH2CServer(addr string, handler http.Handler) *http.Server {
+// newServer builds the *http.Server — over TLS if tlsConfig is non-nil, h2c
+// otherwise. It is unexported: ListenAndServe and ListenAndServeTLS are the only
+// intended entry points and drive the server's graceful Shutdown themselves.
+func newServer(addr string, handler http.Handler, tlsConfig *tls.Config) *http.Server {
 	srv := &http.Server{
 		Addr:              addr,
 		Handler:           handler,
+		TLSConfig:         tlsConfig,
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 
-	// Serve HTTP/2 without TLS (h2c), keeping HTTP/1 for upgrade.
 	srv.Protocols = new(http.Protocols)
 	srv.Protocols.SetHTTP1(true)
+
+	if tlsConfig != nil {
+		// Over TLS, HTTP/2 is negotiated by ALPN; HTTP/1 stays for clients that
+		// do not offer h2.
+		srv.Protocols.SetHTTP2(true)
+
+		return srv
+	}
+
+	// Serve HTTP/2 without TLS (h2c), keeping HTTP/1 for upgrade.
 	srv.Protocols.SetUnencryptedHTTP2(true)
 
 	return srv

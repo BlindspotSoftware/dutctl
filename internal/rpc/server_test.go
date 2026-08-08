@@ -37,7 +37,7 @@ func TestServeDrainsInFlightRequest(t *testing.T) {
 
 	served := make(chan error, 1)
 
-	go func() { served <- serve(ctx, ln, handler) }()
+	go func() { served <- serve(ctx, ln, handler, nil) }()
 
 	reqDone := make(chan error, 1)
 
@@ -94,7 +94,7 @@ func TestServeReturnsOnCancel(t *testing.T) {
 
 	served := make(chan error, 1)
 
-	go func() { served <- serve(ctx, ln, http.NewServeMux()) }()
+	go func() { served <- serve(ctx, ln, http.NewServeMux(), nil) }()
 
 	select {
 	case err := <-served:

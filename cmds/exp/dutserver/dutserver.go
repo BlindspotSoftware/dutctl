@@ -9,6 +9,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/BlindspotSoftware/dutctl/internal/log"
 	"github.com/BlindspotSoftware/dutctl/internal/rpc"
+	"github.com/BlindspotSoftware/dutctl/internal/tlsutil"
 	"github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1/dutctlv1connect"
 )
 
@@ -24,6 +26,15 @@ const (
 	addressInfo  = `Server address and port in the format: address:port`
 	logLevelInfo = `Log level: debug, info, warn, or error`
 	logJSONInfo  = `Emit logs as JSON instead of human-readable text`
+	insecureInfo = `Disable TLS and serve plain HTTP/2 cleartext (h2c); also used to dial the agents`
+	tlsCertInfo  = `Path to the TLS certificate file; a self-signed pair is generated if neither it nor the key exists`
+	tlsKeyInfo   = `Path to the TLS key file; a self-signed pair is generated if neither it nor the certificate exists`
+)
+
+// Default locations of the server's TLS key pair, mirroring dutagent's.
+const (
+	defaultTLSCertPath = "/var/lib/dutserver/tls/cert.pem"
+	defaultTLSKeyPath  = "/var/lib/dutserver/tls/key.pem"
 )
 
 func newServer(exitFunc func(int), args []string) *server {
@@ -31,13 +42,16 @@ func newServer(exitFunc func(int), args []string) *server {
 
 	svr.exit = exitFunc
 
-	f := flag.NewFlagSet(args[0], flag.ExitOnError)
-	f.StringVar(&svr.address, "s", "localhost:1024", addressInfo)
-	f.StringVar(&svr.logLevel, "log", "debug", logLevelInfo)
-	f.BoolVar(&svr.logJSON, "log-json", false, logJSONInfo)
+	fs := flag.NewFlagSet(args[0], flag.ExitOnError)
+	fs.StringVar(&svr.address, "s", "localhost:1024", addressInfo)
+	fs.StringVar(&svr.logLevel, "log", "debug", logLevelInfo)
+	fs.BoolVar(&svr.logJSON, "log-json", false, logJSONInfo)
+	fs.BoolVar(&svr.insecure, "insecure", false, insecureInfo)
+	fs.StringVar(&svr.tlsCertPath, "tls-cert", defaultTLSCertPath, tlsCertInfo)
+	fs.StringVar(&svr.tlsKeyPath, "tls-key", defaultTLSKeyPath, tlsKeyInfo)
 
 	//nolint:errcheck // flag.Parse never returns an error because of flag.ExitOnError
-	f.Parse(args[1:])
+	fs.Parse(args[1:])
 
 	return &svr
 }
@@ -47,9 +61,23 @@ type server struct {
 	exit func(int)
 
 	// flags
-	address  string
-	logLevel string
-	logJSON  bool
+	address     string
+	logLevel    string
+	logJSON     bool
+	insecure    bool
+	tlsCertPath string
+	tlsKeyPath  string
+}
+
+// security is the transport the server serves on, and dials its agents with.
+// One setting covers both directions: the relay sits between dutctl and the
+// agents, and a deployment that encrypts one hop wants the other encrypted too.
+func (svr *server) security() rpc.Security {
+	if svr.insecure {
+		return rpc.Insecure
+	}
+
+	return rpc.TLS
 }
 
 type exitCode int
@@ -71,10 +99,15 @@ func (svr *server) cleanup(code exitCode) {
 // signal), draining in-flight requests, or until the server stops on its own. It
 // returns the server error, if any; the caller classifies a graceful stop via
 // ctx.Err().
+//
+// The service is served over TLS unless -insecure was given, on the same terms
+// as dutagent: the certificate comes from -tls-cert/-tls-key and is generated
+// self-signed if neither exists. See internal/tlsutil for what that protects.
 func (svr *server) startRPCService(ctx context.Context) error {
 	// TODO: load registered DUTs from a file.
 	service := &rpcService{
 		agents: make(map[string]*agent),
+		sec:    svr.security(),
 	}
 
 	mux := http.NewServeMux()
@@ -88,9 +121,24 @@ func (svr *server) startRPCService(ctx context.Context) error {
 	path, handler = dutctlv1connect.NewRelayServiceHandler(service)
 	mux.Handle(path, handler)
 
-	slog.Info("rpc service listening", "addr", svr.address)
+	if svr.insecure {
+		slog.Warn("rpc service listening WITHOUT TLS", "addr", svr.address)
 
-	return rpc.ListenAndServe(ctx, svr.address, mux)
+		return rpc.ListenAndServe(ctx, svr.address, mux)
+	}
+
+	cert, generated, err := tlsutil.LoadOrGenerateCert(svr.tlsCertPath, svr.tlsKeyPath)
+	if err != nil {
+		return fmt.Errorf("loading TLS certificate: %w", err)
+	}
+
+	if generated {
+		slog.Info("generated self-signed TLS certificate", "cert", svr.tlsCertPath, "key", svr.tlsKeyPath)
+	}
+
+	slog.Info("rpc service listening with TLS", "addr", svr.address, "cert", svr.tlsCertPath)
+
+	return rpc.ListenAndServeTLS(ctx, svr.address, mux, cert)
 }
 
 // start orchestrates the dutserver execution.

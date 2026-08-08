@@ -31,6 +31,38 @@ relations. Its interface towards a DUT Client is the same as the one from a DUT 
 from the client side to which instance to talk to. Additionally, the DUT Server could expose further interfaces like a
 REST API to observe the fleet of DUTs. 
 
+# Transport Security
+
+RPCs are carried over TLS by default, in every direction: DUT Client to DUT Agent, DUT Client to DUT Server, DUT Server
+to DUT Agent, and the DUT Agent's registration call to the DUT Server.
+
+**What this protects, and what it does not.** The DUT Agent and DUT Server serve a self-signed certificate, which they
+generate on first start if none is present. No peer verifies the certificate it is offered. The connection is therefore
+**encrypted but not authenticated**: it stops passive eavesdropping on the wire, but not an active man-in-the-middle.
+There is no client authentication either — any client that can reach an agent may talk to it, exactly as before. Supplying
+your own CA-issued certificate via `-tls-cert`/`-tls-key` does not change this today, because no client in the project
+verifies what it is offered.
+
+**Both ends must agree.** The transport is a deployment-wide setting, not something the peers negotiate: a mismatch fails
+below the RPC layer, before any headers are exchanged, so it cannot be reported as a protocol error. `dutctl` recognises
+the two mismatch cases and prints a hint naming the fix.
+
+| Flag | Applies to | Effect |
+| --- | --- | --- |
+| `-insecure` | `dutctl`, `dutagent`, `dutserver` | Use plain HTTP/2 cleartext (h2c). All participants must be started with it. |
+| `-tls-cert` | `dutagent`, `dutserver` | Path to the certificate. A self-signed pair is generated if neither it nor the key exists. |
+| `-tls-key` | `dutagent`, `dutserver` | Path to the private key, written mode `0600`. |
+
+**Generated key pairs.** `dutagent` defaults to `/var/lib/dutagent/tls/{cert,key}.pem` and `dutserver` to
+`/var/lib/dutserver/tls/{cert,key}.pem` — under `/var/lib` rather than `/etc` because the packaged systemd unit runs
+unprivileged with `ProtectSystem=strict`. Generation happens only when *neither* file exists; if one is present the pair
+is loaded as-is and a load failure is reported rather than silently overwritten. Nothing rotates a certificate, and
+expiry is never checked, since no peer verifies it.
+
+**Upgrading.** This is a breaking change. A `dutctl` from before this release cannot talk to an upgraded agent, and an
+upgraded `dutctl` cannot talk to an older agent. Either upgrade both ends together, or run every participant with
+`-insecure` to keep the previous cleartext behaviour until you can.
+
 # Communication Design
 
 The distributed entities of the DUT Control system communicate via Remote Procedure Calls (RPCs), which are defined in
