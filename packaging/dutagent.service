@@ -47,8 +47,7 @@ NoNewPrivileges=true
 LockPersonality=yes
 SystemCallArchitectures=native
 ## Restrict access to filesystem
-NoExecPaths=/
-ExecPaths=/usr/bin/dutagent
+### Exec path are not restricted to allow usage of tools like dpcmd and custom scripts
 ReadOnlyPaths=/
 ReadWritePaths=/var/lib/dutagent /var/log/dutagent
 
