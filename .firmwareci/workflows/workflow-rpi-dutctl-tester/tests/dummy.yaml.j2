@@ -1,6 +1,6 @@
 ---
-name: Test dummy modules
-description: Test that all dummy modules work
+name: dummy modules
+description: Exercise the dummy modules end to end.
 
 defaults:
   {%- import ".jinja2_templates/defaults.j2" as defaults %}
@@ -9,10 +9,10 @@ defaults:
 
 {% include ".jinja2_templates/pre.yaml.j2" %}
 
-# "contrib/dutagent-cfg-example.yaml"
+# "test/test-dutagent-cfg.yaml"
 
 stages:
-  - name: Test Device 1
+  - name: Test dummy modules
     steps:
       - cmd: cmd
         name: Test status
@@ -20,11 +20,16 @@ stages:
           proto: local
         parameters:
           executable: "[[input.DUTCTL]]"
-          args: [{{ defaults.DUTCTL_ARGS }}, "device1", "status"]
+          args:
+            [
+              {{ defaults.DUTCTL_ARGS }},
+              "{{ defaults.RPI_HOSTNAME }}",
+              "dummy-status",
+            ]
           expect:
             - regex: "Hello from dummy status module\nCalled with 0 arguments"
         options:
-          timeout: 1s
+          timeout: 10s
 
       - cmd: cmd
         name: Test status with argument
@@ -32,50 +37,45 @@ stages:
           proto: local
         parameters:
           executable: "[[input.DUTCTL]]"
-          args: [{{ defaults.DUTCTL_ARGS }}, "device1", "status", "hello"]
+          args:
+            [
+              {{ defaults.DUTCTL_ARGS }},
+              "{{ defaults.RPI_HOSTNAME }}",
+              "dummy-status",
+              "hello",
+            ]
           expect:
             - regex: "Hello from dummy status module\nCalled with 1 arguments\nArg 0: hello"
         options:
-          timeout: 1s
+          timeout: 10s
 
-  - name: Test Device 2
-    steps:
       - cmd: cmd
-        name: Test status
+        name: Test status with configured arguments
         transport:
           proto: local
         parameters:
           executable: "[[input.DUTCTL]]"
-          args: [{{ defaults.DUTCTL_ARGS }}, "device2", "status"]
+          args:
+            [
+              {{ defaults.DUTCTL_ARGS }},
+              "{{ defaults.RPI_HOSTNAME }}",
+              "dummy-status-args",
+            ]
           expect:
             - regex: "Hello from dummy status module\nCalled with 2 arguments"
         options:
-          timeout: 1s
+          timeout: 10s
 
       - cmd: shell
         name: Test repeat
         transport:
           proto: local
         parameters:
-          command: "echo -e 'hello\nhello world\n' | [[input.DUTCTL]] {{ defaults.DUTCTL_ARGS_STR }} device2 repeat"
+          command: "echo -e 'hello\nhello world\n' | [[input.DUTCTL]] {{ defaults.DUTCTL_ARGS_STR }} {{ defaults.RPI_HOSTNAME }} dummy-repeat"
           expect:
             - regex: "Hello from dummy repeat module!\nEnter one word per line."
         options:
-          timeout: 1s
-
-  - name: Test Device 3
-    steps:
-      - cmd: cmd
-        name: Test status
-        transport:
-          proto: local
-        parameters:
-          executable: "[[input.DUTCTL]]"
-          args: [{{ defaults.DUTCTL_ARGS }}, "device3", "status"]
-          expect:
-            - regex: "Hello from dummy status module\nCalled with 0 arguments"
-        options:
-          timeout: 1s
+          timeout: 10s
 
       - cmd: shell
         name: Create test file
@@ -90,11 +90,18 @@ stages:
           proto: local
         parameters:
           executable: "[[input.DUTCTL]]"
-          args: [{{ defaults.DUTCTL_ARGS }}, "device3", "file-transfer", "test.txt", "test2.txt"]
+          args:
+            [
+              {{ defaults.DUTCTL_ARGS }},
+              "{{ defaults.RPI_HOSTNAME }}",
+              "dummy-file-transfer",
+              "test.txt",
+              "test2.txt",
+            ]
           expect:
             - regex: "Hello from dummy file transfer module"
         options:
-          timeout: 1s
+          timeout: 10s
 
       - cmd: cmd
         name: Read test file

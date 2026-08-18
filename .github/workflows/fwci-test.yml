@@ -48,12 +48,6 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - build-with-goreleaser
-    strategy:
-      fail-fast: false
-      matrix:
-        configfile:
-          - ./contrib/dutagent-cfg-example.yaml
-          #- ./test/test-dutagent-cfg.yaml
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -72,13 +66,22 @@ jobs:
           echo "dutctl_path:   ${{ steps.filenames.outputs.dutctl_path }}"
           echo "dutctl_pkg_path: ${{ steps.filenames.outputs.dutctl_pkg_path }}"
 
+      - name: Install task
+        uses: arduino/setup-task@v2
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create dummy SPI flash image
+        working-directory: .firmwareci
+        run: task misc:dummy-binary-for-flashing
+
       - name: Upload to FirmwareCI
-        uses: docker://firmwareci/action:v6.0
+        uses: docker://firmwareci/action:v6.1
         with:
           TOKEN: "${{ secrets.FWCI_TOKEN }}"
           WORKFLOW_NAME: test-dutctl
           COMMIT_HASH: ${{ github.event.pull_request.head.sha || github.sha }}
-          BINARIES: DUTCTL=${{ steps.filenames.outputs.dutctl_path }};REMOTE_PKG=${{ steps.filenames.outputs.dutctl_pkg_path }};CONFIG=${{ matrix.configfile }}
+          BINARIES: DUTCTL=${{ steps.filenames.outputs.dutctl_path }};REMOTE_PKG=${{ steps.filenames.outputs.dutctl_pkg_path }};CONFIG=./test/test-dutagent-cfg.yaml;TASKFILE=./.firmwareci/Taskfile.yml;DUMMY_SPI_FLASH_ROM=./.firmwareci/dummy_binary.rom
           GITHUB_INSTALLATION_ID: 45795153
 
 

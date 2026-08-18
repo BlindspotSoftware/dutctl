@@ -1,0 +1,43 @@
+---
+name: serial module
+description: Verify serial console access through the serial module.
+
+defaults:
+  {%- import ".jinja2_templates/defaults.j2" as defaults %}
+  {%- macro someop() %}{% include ".jinja2_templates/defaults.yaml" with context %}{% endmacro %}
+  {{ someop()|indent(2) }}
+
+{% include ".jinja2_templates/pre.yaml.j2" %}
+
+# "test/test-dutagent-cfg.yaml"
+
+stages:
+  - name: Test serial
+    steps:
+      - cmd: shell
+        name: Feed the fake serial
+        transport: *transport_oscar
+        parameters:
+          command: "( for i in $(seq 1 20); do echo 'Hello World!' > {{ defaults.FAKE_SERIAL_INPUT }}; sleep 0.5; done ) >/dev/null 2>&1 & disown"
+
+      - cmd: cmd
+        name: Read serial
+        transport:
+          proto: local
+        parameters:
+          executable: task
+          args:
+            [
+              "--taskfile",
+              "[[input.TASKFILE]]",
+              "test:read-out-serial",
+              "DUTCTL=[[input.DUTCTL]]",
+              "RPI_HOSTNAME={{ defaults.RPI_HOSTNAME }}:{{ defaults.DUTAGENT_PORT }}",
+              "DUT_DEVICE={{ defaults.RPI_HOSTNAME }}",
+            ]
+          expect:
+            - regex: "Hello World!"
+        options:
+          timeout: 15s
+
+{% include ".jinja2_templates/post.yaml.j2" -%}

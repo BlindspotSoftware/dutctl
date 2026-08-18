@@ -2,6 +2,10 @@
 {%- set RPI_HOSTNAME = "fwci-dutctl-tester" %}
 {%- set RPI_FQDN = RPI_HOSTNAME ~ ".sec.9e.network" %}
 {%- set RPI_RESERVATION_SYSTEM =  "mock" %}
+## Gude PDU wired to the tester. PDU_OUTLET is 0-based (0 = first outlet) and
+## must match the outlet configured in test/test-dutagent-cfg.yaml.
+{%- set PDU_FQDN = "gpdu-2p-fwci-ductl-tester.sec.9e.network" %}
+{%- set PDU_OUTLET = "0" %}
 ## Do not change values below, unless you know what you are doing
 {%- set PKG_NAME = "dutctl" %}
 {%- set DUTCTL_CONFIG_FILE = "/etc/dutctl.yaml" %}

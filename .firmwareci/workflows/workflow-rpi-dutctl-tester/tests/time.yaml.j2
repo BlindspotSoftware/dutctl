@@ -1,0 +1,63 @@
+---
+name: time module
+description: Verify the time module reports and sets time.
+
+defaults:
+  {%- import ".jinja2_templates/defaults.j2" as defaults %}
+  {%- macro someop() %}{% include ".jinja2_templates/defaults.yaml" with context %}{% endmacro %}
+  {{ someop()|indent(2) }}
+
+{% include ".jinja2_templates/pre.yaml.j2" %}
+
+# "test/test-dutagent-cfg.yaml"
+
+stages:
+  - name: Test time module
+    steps:
+      - cmd: cmd
+        name: Wait for the configured duration
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args:
+            [
+              {{ defaults.DUTCTL_ARGS }},
+              "{{ defaults.RPI_HOSTNAME }}",
+              "wait",
+            ]
+          expect:
+            - regex: "Waiting for 1s"
+        options:
+          timeout: 15s
+
+      - cmd: cmd
+        name: Wait for a duration given on the command line
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args:
+            [
+              {{ defaults.DUTCTL_ARGS }},
+              "{{ defaults.RPI_HOSTNAME }}",
+              "wait",
+              "3s",
+            ]
+          expect:
+            - regex: "Waiting for 3s"
+        options:
+          timeout: 15s
+
+      - cmd: shell
+        name: Verify the wait really blocks
+        transport:
+          proto: local
+        parameters:
+          command: "start=$(date +%s); [[input.DUTCTL]] {{ defaults.DUTCTL_ARGS_STR }} {{ defaults.RPI_HOSTNAME }} wait 3s; end=$(date +%s); echo elapsed=$((end-start))"
+          expect:
+            - regex: "elapsed=([3-9]|[1-9][0-9]+)"
+        options:
+          timeout: 30s
+
+{% include ".jinja2_templates/post.yaml.j2" -%}

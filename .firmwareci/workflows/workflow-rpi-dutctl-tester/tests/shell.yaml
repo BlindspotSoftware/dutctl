@@ -1,6 +1,6 @@
 ---
-name: Test dummy modules
-description: Test that all dummy modules work
+name: shell module
+description: Run commands on the DUT through the shell module.
 
 defaults:
   transport_oscar: &transport_oscar
@@ -40,12 +40,11 @@ pre-stage:
       source: "[[input.REMOTE_PKG]]"
       destination: "dutctl.deb"
 
-  - cmd: cmd
+  - cmd: shell
     name: Install dutctl package
     transport: *transport_root
     parameters:
-      executable: dpkg
-      args: ["-i", "dutctl.deb"]
+      command: "apt-get -o DPkg::Lock::Timeout=300 install --reinstall --assume-yes ./dutctl.deb"
 
   - cmd: copy
     name: Copy over test config file
@@ -86,6 +85,12 @@ pre-stage:
       expect:
         - regex: "Active: active \\(running\\)"
 
+  - cmd: shell
+    name: Wait for dutagent to accept connections
+    transport: *transport_root
+    parameters:
+      command: "for i in $(seq 1 50); do ss -ltn | grep -q ':2024 ' && exit 0; sleep 0.2; done; echo 'dutagent never bound port 2024'; exit 1"
+
   # ==========================
   #  Test dutctl help command
   # ==========================
@@ -97,103 +102,110 @@ pre-stage:
       executable: "[[input.DUTCTL]]"
       args: ["--help"]
 
+  # Set sensing GPIO pins as inputs
+  - cmd: cmd
+    name: Configure input GPIO pins for testing 21
+    transport: *transport_root
+    parameters:
+      executable: "pinctrl"
+      args: ["set", "21", "ip", "pn"]
+  - cmd: cmd
+    name: Configure input GPIO pins for testing 20
+    transport: *transport_root
+    parameters:
+      executable: "pinctrl"
+      args: ["set", "20", "ip", "pn"]
+  - cmd: cmd
+    name: Configure input GPIO pins for testing 17
+    transport: *transport_root
+    parameters:
+      executable: "pinctrl"
+      args: ["set", "17", "ip", "pn"]
+  - cmd: cmd
+    name: Configure input GPIO pins for testing 27
+    transport: *transport_root
+    parameters:
+      executable: "pinctrl"
+      args: ["set", "27", "ip", "pn"]
+  - cmd: cmd
+    name: Configure input GPIO pins for testing 22
+    transport: *transport_root
+    parameters:
+      executable: "pinctrl"
+      args: ["set", "22", "ip", "pn"]
 
-# "contrib/dutagent-cfg-example.yaml"
+  - cmd: cmd
+    name: Start fake serial
+    transport: *transport_oscar
+    parameters:
+      executable: bash
+      args:
+        [
+          "-c",
+          "socat -x pty,rawer,icanon=0,nonblock,link=/home/oscar/ttyS1 pty,rawer,icanon=0,nonblock,link=/home/oscar/ttyS2 & disown",
+        ]
+    options:
+      timeout: 1s
+
+
+# "test/test-dutagent-cfg.yaml"
 
 stages:
-  - name: Test Device 1
+  - name: Test shell module
     steps:
       - cmd: cmd
-        name: Test status
+        name: Run echo through the shell module
         transport:
           proto: local
         parameters:
           executable: "[[input.DUTCTL]]"
-          args: ["-s", "fwci-dutctl-tester:2024", "device1", "status"]
+          args:
+            [
+              "-s", "fwci-dutctl-tester:2024",
+              "fwci-dutctl-tester",
+              "run",
+              "echo hello-from-shell-module",
+            ]
           expect:
-            - regex: "Hello from dummy status module\nCalled with 0 arguments"
+            - regex: "hello-from-shell-module"
         options:
-          timeout: 1s
+          timeout: 10s
 
       - cmd: cmd
-        name: Test status with argument
+        name: Verify the command runs on the dutagent
         transport:
           proto: local
         parameters:
           executable: "[[input.DUTCTL]]"
-          args: ["-s", "fwci-dutctl-tester:2024", "device1", "status", "hello"]
+          args:
+            [
+              "-s", "fwci-dutctl-tester:2024",
+              "fwci-dutctl-tester",
+              "run",
+              "hostname",
+            ]
           expect:
-            - regex: "Hello from dummy status module\nCalled with 1 arguments\nArg 0: hello"
+            - regex: "fwci-dutctl-tester"
         options:
-          timeout: 1s
+          timeout: 10s
 
-  - name: Test Device 2
-    steps:
       - cmd: cmd
-        name: Test status
+        name: Run a command with a pipe
         transport:
           proto: local
         parameters:
           executable: "[[input.DUTCTL]]"
-          args: ["-s", "fwci-dutctl-tester:2024", "device2", "status"]
+          args:
+            [
+              "-s", "fwci-dutctl-tester:2024",
+              "fwci-dutctl-tester",
+              "run",
+              "echo one two three | tr ' ' '-'",
+            ]
           expect:
-            - regex: "Hello from dummy status module\nCalled with 2 arguments"
+            - regex: "one-two-three"
         options:
-          timeout: 1s
-
-      - cmd: shell
-        name: Test repeat
-        transport:
-          proto: local
-        parameters:
-          command: "echo -e 'hello\nhello world\n' | [[input.DUTCTL]] -s fwci-dutctl-tester:2024 device2 repeat"
-          expect:
-            - regex: "Hello from dummy repeat module!\nEnter one word per line."
-        options:
-          timeout: 1s
-
-  - name: Test Device 3
-    steps:
-      - cmd: cmd
-        name: Test status
-        transport:
-          proto: local
-        parameters:
-          executable: "[[input.DUTCTL]]"
-          args: ["-s", "fwci-dutctl-tester:2024", "device3", "status"]
-          expect:
-            - regex: "Hello from dummy status module\nCalled with 0 arguments"
-        options:
-          timeout: 1s
-
-      - cmd: shell
-        name: Create test file
-        transport:
-          proto: local
-        parameters:
-          command: "echo 'hello' > test.txt"
-
-      - cmd: cmd
-        name: Test file transfer
-        transport:
-          proto: local
-        parameters:
-          executable: "[[input.DUTCTL]]"
-          args: ["-s", "fwci-dutctl-tester:2024", "device3", "file-transfer", "test.txt", "test2.txt"]
-          expect:
-            - regex: "Hello from dummy file transfer module"
-        options:
-          timeout: 1s
-
-      - cmd: cmd
-        name: Read test file
-        transport:
-          proto: local
-        parameters:
-          executable: "cat"
-          args: ["test2.txt"]
-          expect:
-            - regex: "processed by dummy.FT module"
+          timeout: 10s
 
 post-stage:
   # ===========================================

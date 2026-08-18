@@ -61,7 +61,7 @@ The list of the templates is created dynamically with the shell command:
 find './workflows/' './duts/' -type f -name '*.yaml.j2'
 ```
 
-This list is then iterated over in a for-loop, such as that it takes `./duts/dut-rpi-fti-tester/dut.yaml.j2` as input, and produces `./duts/dut-rpi-fti-tester/dut.yaml`.
+This list is then iterated over in a for-loop, such as that it takes `./duts/dut-rpi-dutctl-tester/dut.yaml.j2` as input, and produces `./duts/dut-rpi-dutctl-tester/dut.yaml`.
 
 
 ### jinja2_templates
