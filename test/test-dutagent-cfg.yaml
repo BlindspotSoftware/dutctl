@@ -29,6 +29,16 @@ devices:
             passthrough: true
             with:
               tool: "dpcmd"
+      pdu:
+        desc: "Power switch via the Gude PDU (on|off|toggle|status)"
+        uses:
+          - module: pdu
+            passthrough: true
+            with:
+              vendor: gude
+              host: "http://gpdu-2p-fwci-ductl-tester.sec.9e.network"
+              # 0-based; keep in sync with PDU_OUTLET in .jinja2_templates/defaults.j2
+              outlet: 0
       system-info:
         desc: "Report information about the dutagent system"
         uses:

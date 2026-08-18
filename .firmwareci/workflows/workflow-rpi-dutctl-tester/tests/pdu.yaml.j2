@@ -1,0 +1,102 @@
+---
+name: PDU power control
+description: Switch and read a Gude PDU outlet through the dutctl pdu module.
+
+defaults:
+  {%- import ".jinja2_templates/defaults.j2" as defaults %}
+  {%- macro someop() %}{% include ".jinja2_templates/defaults.yaml" with context %}{% endmacro %}
+  {{ someop()|indent(2) }}
+
+{% include ".jinja2_templates/pre.yaml.j2" %}
+
+# "test/test-dutagent-cfg.yaml"
+
+stages:
+  - name: Reach the PDU and read its state
+    steps:
+      - cmd: cmd
+        name: pdu status
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: [{{ defaults.DUTCTL_ARGS }}, "{{ defaults.RPI_HOSTNAME }}", "pdu", "status"]
+          expect:
+            - regex: "PDU outlet {{ defaults.PDU_OUTLET }} state: (on|off)"
+
+      # A rejected command exits non-zero, so run it through a shell: this checks
+      # the module's error reaches the client rather than the outlet state.
+      - cmd: shell
+        name: pdu rejects an unknown command
+        transport:
+          proto: local
+        parameters:
+          command: "[[input.DUTCTL]] {{ defaults.DUTCTL_ARGS_STR }} {{ defaults.RPI_HOSTNAME }} pdu nonsense 2>&1 || true"
+          expect:
+            - regex: "unknown command"
+
+  - name: Switch the PDU outlet
+    steps:
+      - cmd: cmd
+        name: pdu off
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: [{{ defaults.DUTCTL_ARGS }}, "{{ defaults.RPI_HOSTNAME }}", "pdu", "off"]
+          expect:
+            - regex: "PDU outlet {{ defaults.PDU_OUTLET }} powered off"
+
+      - cmd: cmd
+        name: pdu status reports off
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: [{{ defaults.DUTCTL_ARGS }}, "{{ defaults.RPI_HOSTNAME }}", "pdu", "status"]
+          expect:
+            - regex: "PDU outlet {{ defaults.PDU_OUTLET }} state: off"
+
+      - cmd: cmd
+        name: pdu on
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: [{{ defaults.DUTCTL_ARGS }}, "{{ defaults.RPI_HOSTNAME }}", "pdu", "on"]
+          expect:
+            - regex: "PDU outlet {{ defaults.PDU_OUTLET }} powered on"
+
+      - cmd: cmd
+        name: pdu status reports on
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: [{{ defaults.DUTCTL_ARGS }}, "{{ defaults.RPI_HOSTNAME }}", "pdu", "status"]
+          expect:
+            - regex: "PDU outlet {{ defaults.PDU_OUTLET }} state: on"
+
+      - cmd: cmd
+        name: pdu toggle back to off
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: [{{ defaults.DUTCTL_ARGS }}, "{{ defaults.RPI_HOSTNAME }}", "pdu", "toggle"]
+          expect:
+            - regex: "PDU outlet {{ defaults.PDU_OUTLET }} powered off"
+
+      # The toggle leaves the outlet off, which is how the PDU was found.
+      - cmd: cmd
+        name: pdu status reports off after toggle
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: [{{ defaults.DUTCTL_ARGS }}, "{{ defaults.RPI_HOSTNAME }}", "pdu", "status"]
+          expect:
+            - regex: "PDU outlet {{ defaults.PDU_OUTLET }} state: off"
+
+
+{% include ".jinja2_templates/post.yaml.j2" -%}
