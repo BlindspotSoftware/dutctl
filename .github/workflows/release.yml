@@ -22,6 +22,16 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
+      # The 'prerelease' setting in release-please-config.json is required to
+      # keep the semver prerelease suffix (e.g. -alpha.N) when bumping, but it
+      # also marks the GitHub Release as pre-release. The latter is not wanted,
+      # so revert the marking right after the release is created.
+      - name: Unmark GitHub pre-release flag
+        if: ${{ steps.release.outputs.release_created }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit ${{ steps.release.outputs.tag_name }} --repo ${{ github.repository }} --prerelease=false
+
       - if: ${{ steps.release.outputs.release_created }}
         uses: actions/checkout@v7
       - name: Set up Go
