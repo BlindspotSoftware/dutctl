@@ -40,7 +40,14 @@ For detailed information on the system architecture, see the [Documentation](./d
 ## Getting Started
 
 Download the [latest release](https://github.com/BlindspotSoftware/dutctl/releases) or use the 
-[go toolchain](https://go.dev/) to install the components: `go install github.com/BlindspotSoftware/dutctl/cmds/dutctl@latest github.com/BlindspotSoftware/dutctl/cmds/dutagent@latest`
+[go toolchain](https://go.dev/) to install the components:
+
+<!-- x-release-please-start-version -->
+```bash
+go install github.com/BlindspotSoftware/dutctl/cmds/dutctl@v1.0.0-alpha.1
+go install github.com/BlindspotSoftware/dutctl/cmds/dutagent@v1.0.0-alpha.1
+```
+<!-- x-release-please-end -->
 
 
 1. **Start the DUT Agent**

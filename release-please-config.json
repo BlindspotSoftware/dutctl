@@ -52,6 +52,7 @@
         ".": {
             "extra-files": [
                 "internal/buildinfo/version.go",
+                "README.md",
                 {
                     "type": "yaml",
                     "path": "contrib/*.yaml",
