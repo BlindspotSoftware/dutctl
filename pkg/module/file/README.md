@@ -27,7 +27,32 @@ Path Processing:
   - Internal '..' references are resolved: dir/../other/file.bin → other/file.bin
 ```
 
-See [file-example-cfg.yml](./file-example-cfg.yml) for examples.
+## Examples
+
+The commands below refer to the configuration in
+[file-example-cfg.yml](./file-example-cfg.yml). `$WD` is a placeholder for the
+working directory on the client and the dutagent respectively.
+
+```
+# No paths configured: the argument is source and destination.
+dutctl example-device upload ./build/firmware.bin
+→ uploads to $WD/firmware.bin (preserves directory structure)
+
+dutctl example-device upload ./firmware.bin:custom/firmware.bin
+→ uploads to $WD/custom/firmware.bin (custom destination via colon syntax)
+
+# Destination configured: the argument becomes the source.
+dutctl example-device upload-script ./scripts/init.sh
+→ uploads to /opt/scripts/install.sh on the device
+
+# Source configured: the argument becomes the destination.
+dutctl example-device fetch-logs ./local-log.txt
+→ downloads /var/log.txt to ./local-log.txt on the client
+
+# Both paths configured: no argument allowed.
+dutctl example-device upload-config
+→ uploads ./configs/device.conf to /etc/device/device.conf
+```
 
 ## Configuration Options
 
