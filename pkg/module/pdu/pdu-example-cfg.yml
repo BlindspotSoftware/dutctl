@@ -1,10 +1,10 @@
-version: 1.0.0-alpha.1 # x-release-please-version
+version: 1.0.0-alpha.1
 devices:
   fancy-server:
-    desc: "A server with power control via an Intellinet PDU"
+    desc: A server with power control via an Intellinet PDU
     cmds:
       power:
-        desc: "Control the power (on|off|toggle|status) via PDU"
+        desc: Control the power (on|off|toggle|status) via PDU
         uses:
           - module: pdu
             passthrough: true
@@ -15,10 +15,10 @@ devices:
               password: admin
               outlet: 6
   lab-server:
-    desc: "A server with power control via a Gude PDU"
+    desc: A server with power control via a Gude PDU
     cmds:
       power:
-        desc: "Control the power (on|off|toggle|status) via PDU"
+        desc: Control the power (on|off|toggle|status) via PDU
         uses:
           - module: pdu
             passthrough: true
