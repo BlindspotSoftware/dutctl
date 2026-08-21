@@ -1,4 +1,4 @@
-version: 1.0.0-alpha.1
+version: 1.0.0-alpha.2
 devices:
   nous-a1t:
     desc: Device powered via Tasmota NOUS A1T WiFi socket
