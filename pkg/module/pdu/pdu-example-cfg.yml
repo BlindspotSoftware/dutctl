@@ -1,4 +1,4 @@
-version: 1.0.0-alpha.1
+version: 1.0.0-alpha.2
 devices:
   fancy-server:
     desc: A server with power control via an Intellinet PDU
