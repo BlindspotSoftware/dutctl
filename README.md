@@ -68,21 +68,44 @@ go install github.com/BlindspotSoftware/dutctl/cmds/dutagent@v1.0.0-alpha.1
    dutctl -h
    ```
 
+## Release Plan
+
+_dutctl_ is on its way to a stable v1.0.0. Before promising backwards compatibility, we use two pre-release phases
+to validate in real-world use that we got the idea of the public interfaces right:
+
+- **Alpha** (current, released as `v1.0.0-alpha.N`) — focus on automated use.
+  A CI team stresses the features relevant for automated operation of _dutctl_, e.g. in test pipelines and scripted
+  workflows. The automation surface is the smaller one to harden, so it comes first.
+
+- **Beta** (released as `v1.0.0-beta.N`) — focus on interactive use.
+  Once automated operation proves stable, a team of firmware developers additionally uses _dutctl_ in their daily,
+  interactive work with their devices.
+
+- **Stable** (`v1.0.0`) — the primary public interfaces below become subject to the backwards-compatibility promise.
+
+During the alpha and beta phases, releases are cut monthly at the latest — earlier when major features, fixes, or
+interface changes land. Expect the interfaces to still change in response to testing feedback; changes are announced
+in the release notes.
+
 ## Public Interfaces
 
-With the current pre-release state, we are working towards a stable and backwards compatible v1. Therefore, we
-identified the following public interfaces, which will become stable with the first major release:
+The project's public interfaces fall into two tiers:
 
-1) Command-line interfaces for the project's applications:
+**Primary — the API contract.** These interfaces will become stable and backwards compatible with v1.0.0:
+
+1) DUT Agent configuration grammar:
+   - See the [YAML specification](./docs/dutagent-config.md)
+
+2) RPC communication protocol for interacting with agents:
+   - See the [Protobuf definitions](./protobuf/dutctl/v1/dutctl.proto)
+
+**Secondary — best effort.** These interfaces are kept stable where possible, but are not covered by the strict
+compatibility promise:
+
+- Command-line interfaces for the project's applications:
    - DUT Client - see `dutctl -h`
    - DUT Agent - see `dutagent -h`
    - DUT Server (in development, currently at proof-of-concept stage)
-
-2) DUT Agent configuration:
-   - See the [YAML specification](./docs/dutagent-config.md)
-
-3) RPC communication protocol for interacting with agents:
-   - See the [Protobuf definitions](./protobuf/dutctl/v1/dutctl.proto)
 
 ## Individual Setup
 
