@@ -15,6 +15,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"connectrpc.com/connect"
@@ -57,6 +58,10 @@ releases it; add the force keyword to release a lock held by another user.
 Locks are advisory, so reserve a device only as long as you need it.
 
 When dutctl is run without any positional arguments, it defaults to the list command.
+
+dutctl talks to the agent over TLS by default. The agent's certificate is not
+verified, so the connection is encrypted but not authenticated. Use -insecure to
+talk to an agent that was started with -insecure; both ends must agree.
 `
 
 // Usage strings for the command-line flags, shown in the OPTIONS section of dutctl -h.
@@ -67,6 +72,7 @@ const (
 	noColorUsage      = `Disable colored output`
 	userUsage         = `User Identity of the user of the device, defaults to <user>@<host>`
 	logUsage          = `Client-side diagnostic logging (on stderr), debug|warn|none, default is warn`
+	insecureUsage     = `Disable TLS and talk plain HTTP/2 cleartext (h2c); for an agent started with -insecure`
 )
 
 func newApp(stdin io.Reader, stdout, stderr io.Writer, exitFunc func(int), args []string) *application {
@@ -94,6 +100,7 @@ func newApp(stdin io.Reader, stdout, stderr io.Writer, exitFunc func(int), args 
 	fs.BoolVar(&app.verbose, "v", false, verboseUsage)
 	fs.BoolVar(&app.noColor, "no-color", false, noColorUsage)
 	fs.StringVar(&app.user, "u", auth.Default().User(), userUsage)
+	fs.BoolVar(&app.insecure, "insecure", false, insecureUsage)
 
 	mode := logModeWarn
 	fs.Var(&mode, "log", logUsage)
@@ -136,6 +143,7 @@ type application struct {
 	verbose           bool
 	noColor           bool
 	user              string
+	insecure          bool
 	args              []string
 	printFlagDefaults func()
 
@@ -150,8 +158,14 @@ type application struct {
 }
 
 func (app *application) setupRPCClient() {
+	sec := rpc.TLS
+	if app.insecure {
+		sec = rpc.Insecure
+	}
+
 	app.rpcClient = rpc.NewDeviceClient(
 		app.serverAddr,
+		sec,
 		connect.WithInterceptors(rpc.NewVersionAdvisor(buildinfo.Version)),
 	)
 }
@@ -316,7 +330,7 @@ func (app *application) exit(err error) {
 	// Render the terminating error through the formatter (stderr, format-aware).
 	app.formatter.WriteContent(output.Content{
 		Type:    output.TypeGeneral,
-		Data:    userFacingError(err, app.serverAddr),
+		Data:    userFacingError(err, app.serverAddr, app.insecure),
 		IsError: true,
 	})
 
@@ -334,17 +348,46 @@ func (app *application) exit(err error) {
 // gives the common "agent unreachable" case a friendlier line; other errors —
 // including client-side ones like a bad command line or a missing local file —
 // render unchanged.
-func userFacingError(err error, serverAddr string) string {
+func userFacingError(err error, serverAddr string, insecure bool) string {
 	var connErr *connect.Error
 	if !errors.As(err, &connErr) {
 		return err.Error()
 	}
 
 	if connErr.Code() == connect.CodeUnavailable {
-		return fmt.Sprintf("cannot reach dutagent at %s (%s)", serverAddr, connErr.Message())
+		msg := fmt.Sprintf("cannot reach dutagent at %s (%s)", serverAddr, connErr.Message())
+
+		if hint := transportHint(connErr.Message(), insecure); hint != "" {
+			msg += "\n" + hint
+		}
+
+		return msg
 	}
 
 	return connErr.Message()
+}
+
+// transportHint names the fix for a client/agent transport mismatch, which is
+// otherwise near-undiagnosable from the client side. The mismatch happens below
+// the RPC layer, so the version interceptors never exchange headers and cannot
+// report it; all the user gets is a dial failure whose message ("unexpected EOF")
+// says nothing about TLS. It matches on the transport's message text because
+// neither side surfaces a typed error for this.
+func transportHint(msg string, insecure bool) string {
+	// A cleartext client reaching a TLS agent: the agent drops the connection on
+	// a request that is not a TLS handshake, which surfaces here as a truncated
+	// read.
+	if insecure && strings.Contains(msg, "unexpected EOF") {
+		return "hint: the agent may be serving TLS; retry without -insecure"
+	}
+
+	// A TLS client reaching a cleartext agent: Go's transport recognises the
+	// plain HTTP response and says so.
+	if !insecure && strings.Contains(msg, "server gave HTTP response to HTTPS client") {
+		return "hint: the agent is serving cleartext; retry with -insecure, or upgrade the agent"
+	}
+
+	return ""
 }
 
 func (app *application) printVersion() {

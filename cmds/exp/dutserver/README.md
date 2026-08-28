@@ -31,7 +31,7 @@ As a proof of concept, this implementation has several limitations that would ne
 - **No Agent Health Monitoring:** Lacks handshake or keep-alive mechanisms for registered agents.
 - **Limited Error Handling:** Error recovery in network failure scenarios is minimal.
 - **No Load Balancing:** Does not support multiple server instances or load balancing.
-- **No TLS Configuration:** Communication is not secured by default.
+- **No Certificate Verification:** TLS is on by default (see [Transport Security](../../../docs/README.md#transport-security)), but the self-signed certificate is not verified in either direction, and there is no client authentication.
 
 ## Demo
 
@@ -43,12 +43,15 @@ go build ./cmds/exp/dutserver
 ```
 Open up four terminal sessions referred to as `T1`, `T2`, `T3`, `T4`,
 
+All three binaries below are started with `-insecure`, which keeps the demo on plain HTTP. The transport is a
+deployment-wide setting: client, agents and server must all agree, so dropping the flag means dropping it everywhere.
+
 ### Starting the Server
 In `T1` start the DUT Server with default settings:
 
 ```bash
 # Start the DUT Server locally on default port (1024)
-./dutserver
+./dutserver -insecure
 ```
 
 ### Registering Devices
@@ -57,7 +60,7 @@ Start a first agent in `T3` using a basic example configuration with one device 
 
 ```bash
 # Configure the agent to connect to the server
-./dutagent -a localhost:1025 -c ./cmds/exp/contrib/config-1.yaml -server localhost:1024
+./dutagent -a localhost:1025 -c ./cmds/exp/contrib/config-1.yaml -server localhost:1024 -insecure
 
 ```
 
@@ -65,7 +68,7 @@ In `T4` start a second agent with different port and another basic example confi
 
 ```bash
 # Configure the agent to connect to the server
-./dutagent -a localhost:1026 -c ./cmds/exp/contrib/config-2.yaml -server localhost:1024
+./dutagent -a localhost:1026 -c ./cmds/exp/contrib/config-2.yaml -server localhost:1024 -insecure
 
 ```
 
@@ -75,13 +78,13 @@ Play around with the DUT Client in `T2`
 
 ```bash
 # List available devices using the default address localhost:1024 which is the DUT server
-./dutctl list
+./dutctl list -insecure
 
 # List the devices of a dedicated agent only
-./dutctl -s localhost:1025 list
+./dutctl -s localhost:1025 -insecure list
 
 # Run a interactive command on a remote device via the DUT server
-./dutctl device2 repeat
+./dutctl -insecure device2 repeat
 ```
 
 The complete functionality of the client is available via the DUT Server, see `./dutctl -h`
