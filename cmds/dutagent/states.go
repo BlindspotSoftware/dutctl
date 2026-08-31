@@ -38,6 +38,11 @@ type runCmdArgs struct {
 	locker     *locker.Locker
 	user       string
 	autoLock   *autoLockHold
+	// broker carries module<->client traffic while the modules run. Run owns it:
+	// it must not outlive the handler (see session.Broker.Stop), and only a
+	// deferred stop in the handler covers every exit path, including a panic
+	// unwinding past the FSM.
+	broker *session.Broker
 
 	// fields for the states used during execution
 	cmdMsg      *pb.Command
@@ -187,10 +192,13 @@ func executeModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State
 	ctx = log.With(log.WithScope(ctx, "agent"), "device", args.cmdMsg.GetDevice(), "command", args.cmdMsg.GetCommand())
 	l := log.FromContext(ctx)
 
-	broker := &session.Broker{}
+	// Deferred initialization of the broker and the moduleErr channel: only create
+	// if not already provided (Run supplies the broker so its deferred stop covers
+	// every exit path; tests may still pass their own).
+	if args.broker == nil {
+		args.broker = &session.Broker{}
+	}
 
-	// Deferred initialization of the moduleErr channel: only create if not already provided
-	// (tests may still pass a custom channel).
 	if args.moduleErrCh == nil {
 		args.moduleErrCh = make(chan error, 1)
 	}
@@ -198,7 +206,7 @@ func executeModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State
 	rpcCtx := ctx
 	modCtx, modCtxCancel := context.WithCancel(rpcCtx)
 
-	moduleSession, brokerErrCh := broker.Start(modCtx, args.stream)
+	moduleSession, brokerErrCh := args.broker.Start(modCtx, args.stream)
 	args.brokerErrCh = brokerErrCh
 	args.session = moduleSession
 
@@ -302,9 +310,9 @@ func waitModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State[ru
 		}
 	}
 
-	// Success: the auto-lock is released by the deferred cleanup in Run, which
-	// covers every exit path including a panic, so no explicit release state is
-	// needed here.
+	// Success: the auto-lock is released and the broker is stopped by the
+	// deferred cleanup in Run, which covers every exit path including a panic,
+	// so no explicit release state is needed here.
 	return args, nil, nil
 }
 

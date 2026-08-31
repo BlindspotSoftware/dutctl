@@ -14,6 +14,7 @@ import (
 	"connectrpc.com/connect"
 	"github.com/BlindspotSoftware/dutctl/internal/auth"
 	"github.com/BlindspotSoftware/dutctl/internal/dutagent/locker"
+	"github.com/BlindspotSoftware/dutctl/internal/dutagent/session"
 	"github.com/BlindspotSoftware/dutctl/internal/fsm"
 	"github.com/BlindspotSoftware/dutctl/internal/keyword"
 	"github.com/BlindspotSoftware/dutctl/internal/log"
@@ -388,12 +389,24 @@ func (a *rpcService) Run(
 		}
 	}()
 
+	// The broker is created here, not where it is started, so that this handler
+	// owns its lifetime: stopping it on every exit path, before the auto-lock is
+	// released above and before the handler returns. Deferred for the same reason
+	// as the lock: a panic in a state function unwinds past the FSM, and fsm.Run
+	// also skips the remaining states once ctx is done, so no state function can
+	// guarantee this. The handler must not return while a worker is still sending
+	// - see session.Broker.Stop for what happens if it does. Stopping a broker
+	// the run never started is a no-op.
+	broker := &session.Broker{}
+	defer broker.Stop(ctx)
+
 	fsmArgs := runCmdArgs{
 		stream:     rpc.NewRunStream(stream),
 		deviceList: a.devices,
 		locker:     a.locker,
 		user:       user,
 		autoLock:   autoLock,
+		broker:     broker,
 	}
 
 	_, err = fsm.Run(ctx, fsmArgs, receiveCommandRPC)
