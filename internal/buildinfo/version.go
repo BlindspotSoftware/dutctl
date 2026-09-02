@@ -6,4 +6,4 @@ package buildinfo
 
 // Version is the released semantic version of the application.
 // It is bumped automatically by release-please on every release.
-const Version = "1.0.0-alpha.2" // x-release-please-version
+const Version = "1.0.0-alpha.3" // x-release-please-version

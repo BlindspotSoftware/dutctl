@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.0-alpha.3](https://github.com/BlindspotSoftware/dutctl/compare/v1.0.0-alpha.2...v1.0.0-alpha.3) (2026-09-02)
+
+
+### Other Work
+
+* cover every dutctl module in firmware CI ([0645253](https://github.com/BlindspotSoftware/dutctl/commit/06452538fc5b1796066b5dd202df54e62485ec16))
+
 ## [1.0.0-alpha.2](https://github.com/BlindspotSoftware/dutctl/compare/v1.0.0-alpha.1...v1.0.0-alpha.2) (2026-08-24)
 
 
