@@ -890,6 +890,7 @@ type File struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Path          string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
 	Content       []byte                 `protobuf:"bytes,2,opt,name=content,proto3" json:"content,omitempty"`
+	Sha256        []byte                 `protobuf:"bytes,3,opt,name=sha256,proto3" json:"sha256,omitempty"` // Raw 32-byte SHA-256 of content. Empty only from peers predating this field.
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -934,6 +935,13 @@ func (x *File) GetPath() string {
 func (x *File) GetContent() []byte {
 	if x != nil {
 		return x.Content
+	}
+	return nil
+}
+
+func (x *File) GetSha256() []byte {
+	if x != nil {
+		return x.Sha256
 	}
 	return nil
 }
@@ -1283,10 +1291,11 @@ const file_dutctl_v1_dutctl_proto_rawDesc = "" +
 	"\x06stderr\x18\x03 \x01(\fH\x00R\x06stderrB\x06\n" +
 	"\x04data\"!\n" +
 	"\vFileRequest\x12\x12\n" +
-	"\x04path\x18\x01 \x01(\tR\x04path\"4\n" +
+	"\x04path\x18\x01 \x01(\tR\x04path\"L\n" +
 	"\x04File\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x18\n" +
-	"\acontent\x18\x02 \x01(\fR\acontent\"P\n" +
+	"\acontent\x18\x02 \x01(\fR\acontent\x12\x16\n" +
+	"\x06sha256\x18\x03 \x01(\fR\x06sha256\"P\n" +
 	"\vLockRequest\x12\x16\n" +
 	"\x06device\x18\x01 \x01(\tR\x06device\x12)\n" +
 	"\x10duration_seconds\x18\x02 \x01(\x03R\x0fdurationSeconds\"P\n" +

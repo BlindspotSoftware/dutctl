@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"github.com/BlindspotSoftware/dutctl/internal/digest"
 	"github.com/BlindspotSoftware/dutctl/internal/output"
 	"github.com/BlindspotSoftware/dutctl/pkg/headers"
 
@@ -330,11 +331,14 @@ func (app *application) runRPC(ctx context.Context, device, command string, cmdA
 					return
 				}
 
+				sum := digest.Sum(content)
+
 				err = stream.Send(&pb.RunRequest{
 					Msg: &pb.RunRequest_File{
 						File: &pb.File{
 							Path:    path,
 							Content: content,
+							Sha256:  sum,
 						},
 					},
 				})
@@ -345,16 +349,35 @@ func (app *application) runRPC(ctx context.Context, device, command string, cmdA
 				}
 
 				app.formatter.WriteContent(output.Content{
-					Type:     output.TypeFileTransfer,
-					Data:     output.FileTransfer{Direction: "sent", Path: path, Bytes: len(content)},
+					Type: output.TypeFileTransfer,
+					Data: output.FileTransfer{
+						Direction: "sent",
+						Path:      path,
+						Bytes:     len(content),
+						SHA256:    digest.Hex(sum),
+					},
 					Metadata: metadata,
 				})
 			case *pb.RunResponse_File:
 				path := msg.File.GetPath()
 				content := msg.File.GetContent()
+				want := msg.File.GetSha256()
 
 				if len(content) == 0 {
 					slog.Warn("received empty file content", "path", path)
+				}
+
+				sum := digest.Sum(content)
+
+				// Verified before the write: corrupted bytes must not reach disk.
+				switch {
+				case digest.Missing(want):
+					slog.Warn("agent sent no checksum, file not verified", "path", path)
+				case !digest.Match(sum, want):
+					errChan <- fmt.Errorf("received file %q: %w: want %s, got %s (%d bytes)",
+						path, digest.ErrMismatch, digest.Hex(want), digest.Hex(sum), len(content))
+
+					return
 				}
 
 				perm := 0600
@@ -367,8 +390,13 @@ func (app *application) runRPC(ctx context.Context, device, command string, cmdA
 				}
 
 				app.formatter.WriteContent(output.Content{
-					Type:     output.TypeFileTransfer,
-					Data:     output.FileTransfer{Direction: "received", Path: path, Bytes: len(content)},
+					Type: output.TypeFileTransfer,
+					Data: output.FileTransfer{
+						Direction: "received",
+						Path:      path,
+						Bytes:     len(content),
+						SHA256:    digest.Hex(sum),
+					},
 					Metadata: metadata,
 				})
 

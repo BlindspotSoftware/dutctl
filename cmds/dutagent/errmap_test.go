@@ -40,8 +40,9 @@ func TestCancelCode(t *testing.T) {
 }
 
 // TestBrokerError locks the broker-error wire-status classification: a client
-// protocol violation is CodeInvalidArgument, an already-typed connect error keeps
-// its code, and anything else is CodeInternal.
+// protocol violation is CodeInvalidArgument, a corrupted transfer is
+// CodeDataLoss, an already-typed connect error keeps its code, and anything
+// else is CodeInternal.
 func TestBrokerError(t *testing.T) {
 	tests := []struct {
 		name string
@@ -49,6 +50,7 @@ func TestBrokerError(t *testing.T) {
 		want connect.Code
 	}{
 		{"bad file transfer", fmt.Errorf("%w: empty file", session.ErrBadFileTransfer), connect.CodeInvalidArgument},
+		{"corrupt file transfer", fmt.Errorf("%w: %q", session.ErrFileCorrupt, "fw.bin"), connect.CodeDataLoss},
 		{"typed connect code preserved", connect.NewError(connect.CodeCanceled, errors.New("client gone")), connect.CodeCanceled},
 		{"plain error is internal", errors.New("boom"), connect.CodeInternal},
 	}
