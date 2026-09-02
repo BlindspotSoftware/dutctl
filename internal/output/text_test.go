@@ -409,6 +409,16 @@ func TestWriteFileTransfer(t *testing.T) {
 			data: FileTransfer{Direction: "received", Path: "result.log", Bytes: 4096},
 			want: "↓ received \"result.log\" (4.0 KiB)\n",
 		},
+		{
+			name: "with digest",
+			data: FileTransfer{
+				Direction: "sent",
+				Path:      "firmware.bin",
+				Bytes:     1258291,
+				SHA256:    "4d6b5416b5c54810cfef68584f0b6e6bacd00cdc",
+			},
+			want: "↑ sent \"firmware.bin\" (1.2 MiB, sha256 4d6b5416b5c5…)\n",
+		},
 	}
 
 	for _, tt := range tests {
