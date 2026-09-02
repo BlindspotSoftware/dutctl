@@ -4,7 +4,7 @@ name: fwci-dutctl-tester
 label: fwci-dutctl-tester
 reservation-system: mock
 attributes:
-  Host: "fwci-dutctl-tester.sec.9e.network"
+  Host: "fwci-dutctl-tester.firmwareci.9e.network"
   # The name dutctl addresses this device by.
   DeviceName: "fwci-dutctl-tester"
   # The dutagent this tester runs, as dutctl addresses it.
