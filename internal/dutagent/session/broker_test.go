@@ -11,8 +11,11 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/BlindspotSoftware/dutctl/pkg/module"
 
 	pb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1"
 )
@@ -403,5 +406,170 @@ func TestBrokerReceiveLoopExitsOnCancel(t *testing.T) {
 				runtime.NumGoroutine(), base)
 		case <-time.After(10 * time.Millisecond):
 		}
+	}
+}
+
+// These tests cover Stop, the guarantee the RPC handler relies on: when Stop
+// returns, no worker is inside a stream call any more. A handler that returns
+// while one is takes the whole agent down, see Broker.Stop.
+
+// slowStream is a Stream whose Send takes measurable time and can be made to
+// block indefinitely or to panic, standing in for a transport where a send
+// outlives the call that triggered it.
+type slowStream struct {
+	sendFor   time.Duration
+	sendBlock chan struct{} // if non-nil, Send waits for it to close
+	sendPanic bool
+	closed    chan struct{} // closed by the test to end the stream
+	inFlight  atomic.Int32
+	sends     atomic.Int32
+}
+
+// Receive blocks until the test ends the stream, mimicking a client that keeps
+// it open for the duration of the run. An immediate io.EOF would tear the
+// broker down before there is anything to stop.
+func (s *slowStream) Receive() (*pb.RunRequest, error) {
+	<-s.closed
+
+	return nil, io.EOF
+}
+
+func (s *slowStream) Send(_ *pb.RunResponse) error {
+	s.sends.Add(1)
+	s.inFlight.Add(1)
+
+	defer s.inFlight.Add(-1)
+
+	if s.sendPanic {
+		panic("Write called after Handler finished")
+	}
+
+	if s.sendBlock != nil {
+		<-s.sendBlock
+	}
+
+	time.Sleep(s.sendFor)
+
+	return nil
+}
+
+// printFrom drives one Print through the session, so a send is in flight.
+func printFrom(t *testing.T, s module.Session) {
+	t.Helper()
+
+	done := make(chan struct{})
+
+	go func() {
+		s.Print("module output")
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Print did not reach a worker")
+	}
+}
+
+func TestBrokerStopWaitsForInFlightSend(t *testing.T) {
+	stream := &slowStream{sendFor: 100 * time.Millisecond, closed: make(chan struct{})}
+	defer close(stream.closed)
+
+	b := &Broker{}
+	sesh, _ := b.Start(context.Background(), stream)
+
+	printFrom(t, sesh)
+
+	b.Stop(context.Background())
+
+	if stream.sends.Load() == 0 {
+		t.Fatal("no send happened, the test does not exercise the seam")
+	}
+
+	if got := stream.inFlight.Load(); got != 0 {
+		t.Errorf("Stop returned with %d send(s) in flight", got)
+	}
+}
+
+func TestBrokerStopAbandonsStuckWorker(t *testing.T) {
+	stream := &slowStream{sendBlock: make(chan struct{}), closed: make(chan struct{})}
+
+	defer close(stream.closed)
+	defer close(stream.sendBlock)
+
+	// Shortened so the test does not wait out the production timeout.
+	const stopTimeout = 100 * time.Millisecond
+
+	b := &Broker{stopTimeout: stopTimeout}
+	sesh, _ := b.Start(context.Background(), stream)
+
+	printFrom(t, sesh)
+
+	start := time.Now()
+
+	b.Stop(context.Background())
+
+	waited := time.Since(start)
+
+	// Stop must have tried: anything quicker than its own timeout means it did
+	// not wait for the worker at all.
+	if waited < stopTimeout {
+		t.Errorf("Stop returned after %v, it did not wait out its %v timeout", waited, stopTimeout)
+	}
+
+	// Blocking the handler forever is the worse outcome, so Stop gives up. The
+	// send it abandoned is still running - that is what the workers' recover is
+	// for.
+	if waited > time.Second {
+		t.Errorf("Stop waited %v for a stuck worker, it must give up at its timeout", waited)
+	}
+
+	if got := stream.inFlight.Load(); got != 1 {
+		t.Errorf("expected the abandoned send to still be in flight, got %d", got)
+	}
+}
+
+func TestBrokerStopWithoutStartAndTwice(t *testing.T) {
+	b := &Broker{}
+
+	start := time.Now()
+
+	b.Stop(context.Background()) // never started
+
+	stream := &testStream{recvErrs: []error{io.EOF}}
+	b.Start(context.Background(), stream)
+
+	b.Stop(context.Background())
+	b.Stop(context.Background())
+
+	// None of these has anything to wait for, so none may spend its timeout.
+	if waited := time.Since(start); waited > time.Second {
+		t.Errorf("stopping an unstarted or already stopped broker took %v", waited)
+	}
+}
+
+// TestBrokerWorkerPanicIsRecovered covers the case Stop cannot prevent: a send
+// abandoned at the stop timeout panics later, in a goroutine outside the RPC
+// handler's recover. Unrecovered, that takes the whole agent - and every other
+// run in flight - down with it. The run must fail with it, not look like a
+// broker that finished cleanly.
+func TestBrokerWorkerPanicIsRecovered(t *testing.T) {
+	stream := &slowStream{sendPanic: true, closed: make(chan struct{})}
+	defer close(stream.closed)
+
+	b := &Broker{}
+	sesh, errCh := b.Start(context.Background(), stream)
+
+	printFrom(t, sesh)
+
+	// The workers must terminate on their own after the panic, not hang.
+	errs := collectErrors(t, errCh, time.Second)
+
+	if len(errs) != 1 {
+		t.Fatalf("expected the panic to be reported once, got %v", errs)
+	}
+
+	if !strings.Contains(errs[0].Error(), "panicked") {
+		t.Errorf("error does not name the panic: %v", errs[0])
 	}
 }
