@@ -5,3 +5,20 @@ label: fwci-dutctl-tester
 reservation-system: mock
 attributes:
   Host: "fwci-dutctl-tester.sec.9e.network"
+  # The name dutctl addresses this device by.
+  DeviceName: "fwci-dutctl-tester"
+  # The dutagent this tester runs, as dutctl addresses it.
+  DutagentEndpoint: "fwci-dutctl-tester:2024"
+  DutagentPort: "2024"
+  DutagentService: "dutagent.service"
+  # Gude PDU wired to the tester. PduOutlet is 0-based (0 = first outlet) and
+  # must match the outlet configured in test/test-dutagent-cfg.yaml.
+  PduHost: "gpdu-2p-fwci-ductl-tester.firmwareci.9e.network"
+  PduOutlet: "0"
+  PackageName: "dutctl"
+  ConfigFile: "/etc/dutctl.yaml"
+  # Pins the tester senses on. GpioTestPin is the one wired to the Olimex.
+  GpioTestPin: "21"
+  # socat endpoints for the fake serial the serial test drives.
+  FakeSerialInput: "/home/oscar/ttyS1"
+  FakeSerialOutput: "/home/oscar/ttyS2"

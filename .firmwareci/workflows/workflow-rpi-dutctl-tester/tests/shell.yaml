@@ -1,0 +1,60 @@
+---
+name: shell module
+description: Run commands on the DUT through the shell module.
+
+stages:
+  - name: Test shell module
+    steps:
+      - cmd: cmd
+        name: Run echo through the shell module
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args:
+            [
+              "-s", "[[attributes.DutagentEndpoint]]",
+              "[[attributes.DeviceName]]",
+              "run",
+              "echo hello-from-shell-module",
+            ]
+          expect:
+            - regex: "hello-from-shell-module"
+        options:
+          timeout: 10s
+
+      - cmd: cmd
+        name: Verify the command runs on the dutagent
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args:
+            [
+              "-s", "[[attributes.DutagentEndpoint]]",
+              "[[attributes.DeviceName]]",
+              "run",
+              "hostname",
+            ]
+          expect:
+            - regex: "[[attributes.DeviceName]]"
+        options:
+          timeout: 10s
+
+      - cmd: cmd
+        name: Run a command with a pipe
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args:
+            [
+              "-s", "[[attributes.DutagentEndpoint]]",
+              "[[attributes.DeviceName]]",
+              "run",
+              "echo one two three | tr ' ' '-'",
+            ]
+          expect:
+            - regex: "one-two-three"
+        options:
+          timeout: 10s

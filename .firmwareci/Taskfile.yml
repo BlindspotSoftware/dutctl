@@ -1,11 +1,31 @@
 ---
 version: "3"
+# Taskfile specific to FWCI
+
+vars:
+  DUTCTL: "dutctl"
+  RPI_HOSTNAME: "fwci-dutctl-tester:2024"
+  DUT_DEVICE: "fwci-dutctl-tester"
 
 tasks:
-  jinja2:templates:
-    desc: Run jinja2 on template files
+  test:read-out-serial:
+    desc: For running inside FWCI - read out serial with dutctl
     cmds:
-      - task: jinja2:find-and-process-all-tempaltes
+      - timeout 5s bash -c "{{.DUTCTL}} -s '{{.RPI_HOSTNAME}}' {{.DUT_DEVICE}} serial" || true
+
+  misc:dummy-binary-for-flashing:
+    desc: Create a dummy binary file to be flashed to SPI flash chip
+    vars:
+      SPI_SIZE_BYTES: "8M"
+      DUMMY_BINARY: "dummy_binary.rom"
+      FF_BYTES: "8"
+      DUMMY_FF: ".dummy_ff.rom"
+    cmds:
+      - dd if=/dev/zero of={{.DUMMY_BINARY}} ibs={{.SPI_SIZE_BYTES}} count=1
+      - dd if=/dev/zero ibs=1 count={{.FF_BYTES}} | LC_ALL=C tr "\000" "\377" >{{.DUMMY_FF}}
+      - dd if={{.DUMMY_FF}} of={{.DUMMY_BINARY}} conv=notrunc
+    status:
+      - test -f dummy_binary.rom
 
   fwci:validate:
     desc: Validate FWCI files
@@ -16,35 +36,3 @@ tasks:
   # Internal tasks
   #================
 
-  jinja2:find-and-process-all-tempaltes:
-    desc: Run jinja2 on jinja2 templates
-    internal: true
-    label: 'jinja2-tests-{{.REPO}}'
-    vars:
-      WORKFLOWS:
-        sh: find './workflows/' './duts/' -type f -name '*.yaml.j2'
-    sources:
-      - .jinja2_templates/*
-      - duts/**/*.yaml.j2
-      - workflows/workflow-*/defaults.j2
-      - workflows/workflow-*/**/*.yaml.j2
-    cmds:
-      - for:
-          var: WORKFLOWS
-        task: jinja2:run-on-file
-        vars:
-          INPUTFILE:
-            sh: echo "{{.ITEM}}"
-          OUTPUTFILE:
-            sh: echo "{{.ITEM}}" | sed -E 's/\.j2$//g'
-
-  jinja2:run-on-file:
-    desc: Run jinja2 on a file
-    internal: true
-    cmds:
-      - pwd
-      - echo 'INPUTFILE = {{.INPUTFILE}}'
-      - echo 'OUTPUTFILE = {{.OUTPUTFILE}}'
-      - j2 --format env -o '{{.OUTPUTFILE}}' '{{.INPUTFILE}}'
-    requires:
-      vars: ["INPUTFILE", "OUTPUTFILE"]

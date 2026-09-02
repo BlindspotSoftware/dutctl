@@ -1,0 +1,52 @@
+---
+# Default teardown for every test on this tester: stop the dutagent, remove the
+# package and config the pre-stage installed, and shut the fake serial down.
+
+defaults:
+  transport_root: &transport_root
+    proto: ssh
+    options:
+      host: "[[attributes.Host]]"
+      user: root
+      identity_file: "/root/.ssh/fwci"
+
+  transport_oscar: &transport_oscar
+    proto: ssh
+    options:
+      host: "[[attributes.Host]]"
+      user: oscar
+      identity_file: "/root/.ssh/fwci"
+
+post-stage:
+  # ===========================================
+  #  Delete the files copied over for the test
+  # ===========================================
+  - cmd: shell
+    name: Stop remotelab-server systemd service
+    transport: *transport_root
+    parameters:
+      command: "systemctl stop [[attributes.DutagentService]] || true"
+
+  - cmd: shell
+    name: Uninstall the package
+    transport: *transport_root
+    parameters:
+      command: "apt remove --assume-yes [[attributes.PackageName]] || true"
+
+  - cmd: shell
+    name: Delete testing configuration file
+    transport: *transport_root
+    parameters:
+      command: "rm [[attributes.ConfigFile]] || true"
+
+  - cmd: shell
+    name: Delete package
+    transport: *transport_root
+    parameters:
+      command: "rm [[attributes.PackageName]].deb || true"
+
+  - cmd: shell
+    name: Shutdown fake serial
+    transport: *transport_oscar
+    parameters:
+      command: "pkill socat || true"
