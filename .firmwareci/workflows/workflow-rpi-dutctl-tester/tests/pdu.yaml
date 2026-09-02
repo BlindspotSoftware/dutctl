@@ -1,0 +1,90 @@
+---
+name: PDU power control
+description: Switch and read a Gude PDU outlet through the dutctl pdu module.
+
+stages:
+  - name: Reach the PDU and read its state
+    steps:
+      - cmd: cmd
+        name: pdu status
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: ["-s", "[[attributes.DutagentEndpoint]]", "[[attributes.DeviceName]]", "pdu", "status"]
+          expect:
+            - regex: "PDU outlet 0 state: (on|off)"
+
+      # A rejected command exits non-zero, so run it through a shell: this checks
+      # the module's error reaches the client rather than the outlet state.
+      - cmd: shell
+        name: pdu rejects an unknown command
+        transport:
+          proto: local
+        parameters:
+          command: "[[input.DUTCTL]] -s [[attributes.DutagentEndpoint]] [[attributes.DeviceName]] pdu nonsense 2>&1 || true"
+          expect:
+            - regex: "unknown command"
+
+  - name: Switch the PDU outlet
+    steps:
+      - cmd: cmd
+        name: pdu off
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: ["-s", "[[attributes.DutagentEndpoint]]", "[[attributes.DeviceName]]", "pdu", "off"]
+          expect:
+            - regex: "PDU outlet 0 powered off"
+
+      - cmd: cmd
+        name: pdu status reports off
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: ["-s", "[[attributes.DutagentEndpoint]]", "[[attributes.DeviceName]]", "pdu", "status"]
+          expect:
+            - regex: "PDU outlet 0 state: off"
+
+      - cmd: cmd
+        name: pdu on
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: ["-s", "[[attributes.DutagentEndpoint]]", "[[attributes.DeviceName]]", "pdu", "on"]
+          expect:
+            - regex: "PDU outlet 0 powered on"
+
+      - cmd: cmd
+        name: pdu status reports on
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: ["-s", "[[attributes.DutagentEndpoint]]", "[[attributes.DeviceName]]", "pdu", "status"]
+          expect:
+            - regex: "PDU outlet 0 state: on"
+
+      - cmd: cmd
+        name: pdu toggle back to off
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: ["-s", "[[attributes.DutagentEndpoint]]", "[[attributes.DeviceName]]", "pdu", "toggle"]
+          expect:
+            - regex: "PDU outlet 0 powered off"
+
+      # The toggle leaves the outlet off, which is how the PDU was found.
+      - cmd: cmd
+        name: pdu status reports off after toggle
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: ["-s", "[[attributes.DutagentEndpoint]]", "[[attributes.DeviceName]]", "pdu", "status"]
+          expect:
+            - regex: "PDU outlet 0 state: off"

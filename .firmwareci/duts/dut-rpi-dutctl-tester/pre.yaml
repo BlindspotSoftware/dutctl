@@ -1,0 +1,147 @@
+---
+# Default setup for every test on this tester: install the dutctl package under
+# test, start the dutagent, and put the sensing GPIO pins and the fake serial in
+# a known state. A test that needs a different setup declares its own pre-stage.
+
+defaults:
+  transport_root: &transport_root
+    proto: ssh
+    options:
+      host: "[[attributes.Host]]"
+      user: root
+      identity_file: "/root/.ssh/fwci"
+      # TODO: The ssh keys (identity_file) are hard-coded in the FWCI docker at the moment
+
+  transport_oscar: &transport_oscar
+    proto: ssh
+    options:
+      host: "[[attributes.Host]]"
+      user: oscar
+      identity_file: "/root/.ssh/fwci"
+
+pre-stage:
+  # Fix permissions
+  - cmd: cmd
+    name: chmod dutctl
+    transport:
+      proto: local
+    parameters:
+      executable: chmod
+      args: ["755", "[[input.DUTCTL]]"]
+
+  # ========================
+  #  Copy files over to RPI
+  # ========================
+  - cmd: copy
+    name: Copy over dutctl debian package
+    transport: *transport_root
+    parameters:
+      source: "[[input.REMOTE_PKG]]"
+      destination: "[[attributes.PackageName]].deb"
+
+  - cmd: shell
+    name: Install dutctl package
+    transport: *transport_root
+    parameters:
+      command: "apt-get -o DPkg::Lock::Timeout=300 install --reinstall --assume-yes ./[[attributes.PackageName]].deb"
+
+  - cmd: copy
+    name: Copy over test config file
+    transport: *transport_root
+    parameters:
+      source: "[[input.CONFIG]]"
+      destination: "[[attributes.ConfigFile]]"
+
+  - cmd: cmd
+    name: chmod config file
+    transport: *transport_root
+    parameters:
+      executable: chmod
+      args: ["644", "[[attributes.ConfigFile]]"]
+
+  # ==============
+  #  Start server
+  # ==============
+  - cmd: cmd
+    name: Reload systemctl daemon
+    transport: *transport_root
+    parameters:
+      executable: systemctl
+      args: ["daemon-reload"]
+
+  - cmd: cmd
+    name: Start systemd service
+    transport: *transport_root
+    parameters:
+      executable: systemctl
+      args: ["start", "[[attributes.DutagentService]]"]
+
+  - cmd: shell
+    name: Status systemd service
+    transport: *transport_root
+    parameters:
+      command: "systemctl status --no-pager [[attributes.DutagentService]]"
+      expect:
+        - regex: "Active: active \\(running\\)"
+
+  - cmd: shell
+    name: Wait for dutagent to accept connections
+    transport: *transport_root
+    parameters:
+      command: "for i in $(seq 1 50); do ss -ltn | grep -q ':[[attributes.DutagentPort]] ' && exit 0; sleep 0.2; done; echo 'dutagent never bound port [[attributes.DutagentPort]]'; exit 1"
+
+  # ==========================
+  #  Test dutctl help command
+  # ==========================
+  - cmd: cmd
+    name: dutctl help
+    transport:
+      proto: local
+    parameters:
+      executable: "[[input.DUTCTL]]"
+      args: ["--help"]
+
+  # Set sensing GPIO pins as inputs
+  - cmd: cmd
+    name: Configure input GPIO pins for testing 21
+    transport: *transport_root
+    parameters:
+      executable: "pinctrl"
+      args: ["set", "21", "ip", "pn"]
+  - cmd: cmd
+    name: Configure input GPIO pins for testing 20
+    transport: *transport_root
+    parameters:
+      executable: "pinctrl"
+      args: ["set", "20", "ip", "pn"]
+  - cmd: cmd
+    name: Configure input GPIO pins for testing 17
+    transport: *transport_root
+    parameters:
+      executable: "pinctrl"
+      args: ["set", "17", "ip", "pn"]
+  - cmd: cmd
+    name: Configure input GPIO pins for testing 27
+    transport: *transport_root
+    parameters:
+      executable: "pinctrl"
+      args: ["set", "27", "ip", "pn"]
+  - cmd: cmd
+    name: Configure input GPIO pins for testing 22
+    transport: *transport_root
+    parameters:
+      executable: "pinctrl"
+      args: ["set", "22", "ip", "pn"]
+
+  - cmd: cmd
+    name: Start fake serial
+    transport: *transport_oscar
+    parameters:
+      executable: bash
+      args:
+        [
+          "-c",
+          "socat -x pty,rawer,icanon=0,nonblock,link=[[attributes.FakeSerialInput]] pty,rawer,icanon=0,nonblock,link=[[attributes.FakeSerialOutput]] & disown",
+        ]
+    options:
+      timeout: 1s

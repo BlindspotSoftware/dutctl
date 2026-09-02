@@ -1,0 +1,104 @@
+---
+name: GPIO power control
+description: Drive and read GPIO pins to power-cycle the DUT.
+
+defaults:
+  transport_oscar: &transport_oscar
+    proto: ssh
+    options:
+      host: "[[attributes.Host]]"
+      user: oscar
+      identity_file: "/root/.ssh/fwci"
+      # TODO: The ssh keys (identity_file) are hard-coded in the FWCI docker at the moment
+
+  transport_root: &transport_root
+    proto: ssh
+    options:
+      host: "[[attributes.Host]]"
+      user: root
+      identity_file: "/root/.ssh/fwci"
+      # TODO: The ssh keys (identity_file) are hard-coded in the FWCI docker at the moment
+
+stages:
+  - name: Test GPIO power via shell script
+    steps:
+      - cmd: cmd
+        name: initial dutctl power off
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: ["-s", "[[attributes.DutagentEndpoint]]", "[[attributes.DeviceName]]", "power", "off"]
+
+      - cmd: cmd
+        name: get dutctl power status
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: ["-s", "[[attributes.DutagentEndpoint]]", "[[attributes.DeviceName]]", "power"]
+          expect:
+            - regex: "Current state: off"
+
+      - cmd: cmd
+        name: check pin state
+        transport: *transport_oscar
+        parameters:
+          executable: pinctrl
+          args: ["lev", "21"]
+          expect:
+            - regex: "0"
+
+      - cmd: cmd
+        name: dutctl power on
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: ["-s", "[[attributes.DutagentEndpoint]]", "[[attributes.DeviceName]]", "power", "on"]
+
+      - cmd: cmd
+        name: get dutctl power status 2
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: ["-s", "[[attributes.DutagentEndpoint]]", "[[attributes.DeviceName]]", "power"]
+          expect:
+            - regex: "Current state: on"
+
+      - cmd: cmd
+        name: check pin state 2
+        transport: *transport_oscar
+        parameters:
+          executable: pinctrl
+          args: ["lev", "21"]
+          expect:
+            - regex: "1"
+
+      - cmd: cmd
+        name: dutctl power off
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: ["-s", "[[attributes.DutagentEndpoint]]", "[[attributes.DeviceName]]", "power", "off"]
+
+      - cmd: cmd
+        name: get dutctl power status 3
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: ["-s", "[[attributes.DutagentEndpoint]]", "[[attributes.DeviceName]]", "power"]
+          expect:
+            - regex: "Current state: off"
+
+      - cmd: cmd
+        name: check pin state 3
+        transport: *transport_oscar
+        parameters:
+          executable: pinctrl
+          args: ["lev", "21"]
+          expect:
+            - regex: "0"

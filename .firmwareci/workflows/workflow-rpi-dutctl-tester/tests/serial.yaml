@@ -1,0 +1,49 @@
+---
+name: serial module
+description: Verify serial console access through the serial module.
+
+defaults:
+  transport_oscar: &transport_oscar
+    proto: ssh
+    options:
+      host: "[[attributes.Host]]"
+      user: oscar
+      identity_file: "/root/.ssh/fwci"
+      # TODO: The ssh keys (identity_file) are hard-coded in the FWCI docker at the moment
+
+  transport_root: &transport_root
+    proto: ssh
+    options:
+      host: "[[attributes.Host]]"
+      user: root
+      identity_file: "/root/.ssh/fwci"
+      # TODO: The ssh keys (identity_file) are hard-coded in the FWCI docker at the moment
+
+stages:
+  - name: Test serial
+    steps:
+      - cmd: shell
+        name: Feed the fake serial
+        transport: *transport_oscar
+        parameters:
+          command: "( for i in $(seq 1 20); do echo 'Hello World!' > [[attributes.FakeSerialInput]]; sleep 0.5; done ) >/dev/null 2>&1 & disown"
+
+      - cmd: cmd
+        name: Read serial
+        transport:
+          proto: local
+        parameters:
+          executable: task
+          args:
+            [
+              "--taskfile",
+              "[[input.TASKFILE]]",
+              "test:read-out-serial",
+              "DUTCTL=[[input.DUTCTL]]",
+              "RPI_HOSTNAME=[[attributes.DutagentEndpoint]]",
+              "DUT_DEVICE=[[attributes.DeviceName]]",
+            ]
+          expect:
+            - regex: "Hello World!"
+        options:
+          timeout: 15s

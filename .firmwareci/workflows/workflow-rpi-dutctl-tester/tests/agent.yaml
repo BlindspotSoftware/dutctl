@@ -1,0 +1,23 @@
+---
+name: dutagent module
+description: Report system info through the dutagent module.
+
+stages:
+  - name: Test agent module
+    steps:
+      - cmd: cmd
+        name: Report dutagent system info
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args:
+            [
+              "-s", "[[attributes.DutagentEndpoint]]",
+              "[[attributes.DeviceName]]",
+              "system-info",
+            ]
+          expect:
+            - regex: "Linux [[attributes.DeviceName]]"
+        options:
+          timeout: 10s

@@ -15,26 +15,26 @@ For detailed information on FirmwareCI, please refer to the [official documentat
 
 ## Design decisions
 
-### Jinja templating
-We want to test multiple features (flashing, power control, serial, etc). And to keep everything nicely organised we need to have each feature-specific test as it's own test.
+### One test per module, shared setup on the DUT
+Each dutctl module gets its own test file, so a failure names the module that
+broke instead of one combined run.
 
-However, the setup and tear-down of the tests is rather complex:
+The setup and tear-down around every test is the same and rather involved:
+
 - copy over the compiled binaries
 - copy over configuration files
 - spin up the server (agent)
 - execute the test
-- shut-down the server
+- shut down the server
 - delete the copied binaries
 - delete configuration files
 
-In case of the serial feature, it also means spinning-up "fake" / "dummy" serial that can be used for the testing.
+For the serial feature it also means spinning up a "fake" serial to test against.
 
-It would be stupid to copy-paste all this setup into each test file, especially because keeping all of them in sync would be a nightmare.
-
-For this reason I have decided to use [jinja2 templates](https://jinja.palletsprojects.com/en/stable/api/) to automate this menial and error-prone work. To make it even simpler, I have also included [Taskfile](https://taskfile.dev/docs/guide) which has already all the jobs written there, so to generate all of the templates is as easy as simply calling `task jinja2:templates`.
-
-Thanks to jinja templating, and how the tests are structured, tests are parametric and easy to expand.
-
+Rather than repeating that in every test, it lives once in the DUT's own
+`pre.yaml` and `post.yaml`. FirmwareCI applies them to every test that runs on
+this DUT, and a test that needs something different declares its own
+`pre-stage` / `post-stage` to override them.
 
 ### Debian packaging magic
 As you might notice, instead of simply copying over the compiled binaries (`dutctl` / `dutagent` / ...) we use Debian packages.
@@ -46,63 +46,42 @@ Another huge advantage is, that with this approach, that run-time dependencies a
 
 ## Project structure
 
-The most important files / directories are:
-- `.firmwareci/Taskfile.yml`
-- `.firmwareci/.jinja2_templates/`
-- `.firmwareci/workflows/`
-
-### Taskfile
-The `.firmwareci/Taskfile.yml` is there to help and automate some mundane and repetitive jobs.
-
-Contains task `jinja2:templates` which finds all jinja tempaltes in `.firmwareci/workflows/` and `.firmwareci/duts/` and runs a tempalting engine on them.
-
-The list of the templates is created dynamically with the shell command:
-```bash
-find './workflows/' './duts/' -type f -name '*.yaml.j2'
+```
+.firmwareci/
+├── Taskfile.yml
+├── duts/dut-rpi-dutctl-tester/
+│   ├── dut.yaml            device definition
+│   ├── pre.yaml            setup applied to every test on this DUT
+│   └── post.yaml           tear-down applied to every test on this DUT
+└── workflows/workflow-rpi-dutctl-tester/
+    ├── workflow.yaml
+    └── tests/              one file per dutctl module
 ```
 
-This list is then iterated over in a for-loop, such as that it takes `./duts/dut-rpi-fti-tester/dut.yaml.j2` as input, and produces `./duts/dut-rpi-fti-tester/dut.yaml`.
+### Taskfile
+`.firmwareci/Taskfile.yml` automates a few repetitive jobs:
 
+- `misc:dummy-binary-for-flashing` builds the dummy image the flash test writes
+- `test:read-out-serial` reads the serial console through dutctl
+- `fwci:validate` validates the FirmwareCI files
 
-### jinja2_templates
-The `.firmwareci/.jinja2_templates` contains the "common" building-blocks that are shared across templates. The `defaults.j2` and `defaults.yaml` are for storing some basics (they are intentionally separate):
-- `defaults.j2`
-    - this is pure jinja2 syntax, and is imported into template with
-      ```j2
-      {%- import ".jinja2_templates/defaults.j2" as defaults %}
-      ```
-    - import means that the variables will become accessible, and can then be accessed in the template with:
-      ```j2
-      {{ defaults.DUTCTL_ARGS }}
-      ```
-- `defaults.yaml`
-    - this is pure YAML file to be `include`d into a template with
-	  ```j2
-	  {% include ".jinja2_templates/defaults.yaml" with context %}
-	  ```
-	- essentially this is to just simply render the content of the file, ignoring any variable assignments or macros within it
-	- technically speaking it could be renamed to `defaults.yaml.j2`, but it does not contain any jinja2 code and renaming it would have no effect
-- `pre.yaml.j2` and `post.yaml.j2`
-    - for pre-stage and post-stage respectively
-    - they are copy-pasted into each test (they are `include`d in tests, meaning that their content will be rendered)
-
+### duts
+The DUT definition and the pre/post stages every test on it inherits. Values the
+tests reference (`[[attributes.DeviceName]]`, `[[attributes.DutagentEndpoint]]`,
+`[[attributes.Host]]`) come from `dut.yaml`, so a test never hardcodes a
+hostname or port.
 
 ### workflows
 The `workflows` directory is where the tests live.
 
-### Systemd service
-The `dutagent.service` file is a systemd service file to start a dutagent on dutworker.
 
-At the moment it is only used for firmware-ci testing.
+## Adding a new test
 
+Create a new `.yaml` file in `.firmwareci/workflows/workflow-rpi-dutctl-tester/tests/`.
+Copying an existing test is the quickest start; `dummy.yaml` is a simple one.
 
-## Adding completely new test
-To add a completely new tests from scratch, create a new `.yaml.j2` file in `.firmwareci/workflows/workflow-rpi-dutctl-tester/`. I would recommend to copy-paste some existing test (for example the `dummy-modules.yaml.j2` is rather simple) and use it as basis.
+A test needs only `name`, `description` and `stages` — the setup and tear-down
+come from the DUT. Refer to the device through `[[attributes.*]]` rather than
+writing the hostname or port into the test.
 
-Then update the test according to your needs.
-
-Run `task fwci:jinja2:templates` and it will automatically generate a complete tests. That is it. It is as simple as that.
-
-Next, I recommend to run `fwci fwci:validate`.
-
-As the last step, add all new files (even those jinja2 generated) into git commit. This is because FirmwareCI cannot pre-process the tests on it's own, which is why we have to include even the "generated code".
+Then run `task fwci:validate` before committing.
