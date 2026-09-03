@@ -174,7 +174,7 @@ func (f *Flash) Run(ctx context.Context, sesh module.Session, args ...string) er
 	f.localImagePath = localImagePath
 
 	if f.op == opWrite {
-		err := uploadImage(sesh, f.clientImagePath, f.localImagePath)
+		err := uploadImage(ctx, sesh, f.clientImagePath, f.localImagePath)
 		if err != nil {
 			return err
 		}
@@ -202,7 +202,7 @@ func (f *Flash) Run(ctx context.Context, sesh module.Session, args ...string) er
 	time.Sleep(1 * time.Second)
 
 	if f.op == opRead {
-		err := downloadImage(sesh, f.localImagePath, f.clientImagePath)
+		err := downloadImage(ctx, sesh, f.localImagePath, f.clientImagePath)
 		if err != nil {
 			return err
 		}
@@ -278,8 +278,8 @@ func (f *Flash) cmdline() []string {
 }
 
 // uploadImage receives the flash image file from sesh and saves it locally.
-func uploadImage(sesh module.Session, remote, local string) error {
-	img, err := sesh.RequestFile(remote)
+func uploadImage(ctx context.Context, sesh module.Session, remote, local string) error {
+	img, err := sesh.RequestFile(ctx, remote)
 	if err != nil {
 		return fmt.Errorf("request flash image from client for write operation: %w", err)
 	}
@@ -288,6 +288,7 @@ func uploadImage(sesh module.Session, remote, local string) error {
 	if err != nil {
 		return fmt.Errorf("save flash image on dutagent for write operation: %w", err)
 	}
+	defer imgFile.Close()
 
 	_, err = io.Copy(imgFile, img)
 	if err != nil {
@@ -298,14 +299,26 @@ func uploadImage(sesh module.Session, remote, local string) error {
 }
 
 // downloadImage sends the local flash image file to sesh.
-func downloadImage(sesh module.Session, local, remote string) error {
+func downloadImage(ctx context.Context, sesh module.Session, local, remote string) error {
 	file, err := os.Open(local)
 	if err != nil {
 		return fmt.Errorf("open flash image on dutagent after read operation: %w", err)
 	}
 
-	err = sesh.SendFile(remote, file)
+	fileInfo, err := file.Stat()
 	if err != nil {
+		file.Close()
+
+		return fmt.Errorf("stat flash image on dutagent after read operation: %w", err)
+	}
+
+	// SendFile takes ownership of the file on success — the transfer is chunked
+	// and finishes after this returns, so the session closes it, not us. On error
+	// ownership stays here.
+	err = sesh.SendFile(ctx, remote, fileInfo.Size(), file)
+	if err != nil {
+		file.Close()
+
 		return fmt.Errorf("send flash image to client after read operation: %w", err)
 	}
 

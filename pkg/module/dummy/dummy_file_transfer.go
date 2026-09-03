@@ -63,7 +63,7 @@ func (d *FT) Run(ctx context.Context, s module.Session, args ...string) error {
 	inFile := args[0]
 	s.Printf("Requesting file %q passed in arg[0] as input\n", inFile)
 
-	fileReader, err := s.RequestFile(inFile)
+	fileReader, err := s.RequestFile(ctx, inFile)
 	if err != nil {
 		return fmt.Errorf("file request failed: %v", err)
 	}
@@ -87,7 +87,7 @@ func (d *FT) Run(ctx context.Context, s module.Session, args ...string) error {
 
 	outFile := args[1]
 
-	err = s.SendFile(outFile, bytes.NewBuffer(result))
+	err = s.SendFile(ctx, outFile, int64(len(result)), bytes.NewBuffer(result))
 	if err != nil {
 		return fmt.Errorf("failed to send file: %v", err)
 	}
