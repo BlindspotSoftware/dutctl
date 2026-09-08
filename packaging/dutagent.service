@@ -50,6 +50,9 @@ SystemCallArchitectures=native
 ### Exec path are not restricted to allow usage of tools like dpcmd and custom scripts
 ReadOnlyPaths=/
 ReadWritePaths=/var/lib/dutagent /var/log/dutagent
+## Allow GPIO access (Raspberry Pi)
+DeviceAllow=/dev/gpiomem rw
+DeviceAllow=/dev/mem rw
 
 # Networking
 SocketBindDeny=any
