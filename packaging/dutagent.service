@@ -53,6 +53,10 @@ ReadWritePaths=/var/lib/dutagent /var/log/dutagent
 ## Allow GPIO access (Raspberry Pi)
 DeviceAllow=/dev/gpiomem rw
 DeviceAllow=/dev/mem rw
+## Any device left out is refused with EPERM, group membership does not help
+DeviceAllow=char-ttyUSB rw
+DeviceAllow=char-ttyAMA rw
+DeviceAllow=char-usb_device rw
 
 # Networking
 SocketBindDeny=any
