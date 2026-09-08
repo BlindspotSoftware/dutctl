@@ -33,7 +33,7 @@ func newServer(exitFunc func(int), args []string) *server {
 
 	f := flag.NewFlagSet(args[0], flag.ExitOnError)
 	f.StringVar(&svr.address, "s", "localhost:1024", addressInfo)
-	f.StringVar(&svr.logLevel, "log", "debug", logLevelInfo)
+	f.StringVar(&svr.logLevel, "log", "info", logLevelInfo)
 	f.BoolVar(&svr.logJSON, "log-json", false, logJSONInfo)
 
 	//nolint:errcheck // flag.Parse never returns an error because of flag.ExitOnError
