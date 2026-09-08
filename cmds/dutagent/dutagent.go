@@ -57,7 +57,7 @@ func newAgent(stdout io.Writer, exitFunc func(int), args []string) *agent {
 	fs.BoolVar(&agt.dryRun, "dry-run", false, dryRunInfo)
 	fs.StringVar(&agt.server, "server", "", serverInfo)
 	fs.BoolVar(&agt.versionFlag, "v", false, versionFlagInfo)
-	fs.StringVar(&agt.logLevel, "log", "debug", logLevelInfo)
+	fs.StringVar(&agt.logLevel, "log", "info", logLevelInfo)
 	fs.BoolVar(&agt.logJSON, "log-json", false, logJSONInfo)
 	//nolint:errcheck // flag.Parse always returns no error because of flag.ExitOnError
 	fs.Parse(args[1:])
