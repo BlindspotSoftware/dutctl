@@ -29,6 +29,8 @@ type agent struct {
 
 	// address is the address of the DUT agent.
 	address string
+	// sec is the transport to dial the agent with, inherited from the server.
+	sec rpc.Security
 	// client is the Connect RPC client for the DUT agent.
 	// Do not use this client directly, but use agent's conn method.
 	client dutctlv1connect.DeviceServiceClient
@@ -45,7 +47,7 @@ func (a *agent) conn(ctx context.Context) dutctlv1connect.DeviceServiceClient {
 		// tying it to a single request's context would be a bug. A per-RPC
 		// deadline belongs on the call context passed to the forwarders.
 		log.FromContext(ctx).Debug("spawning client for agent", "agent", a.address)
-		a.client = rpc.NewDeviceClient(a.address)
+		a.client = rpc.NewDeviceClient(a.address, a.sec)
 	}
 
 	return a.client
@@ -65,6 +67,11 @@ type rpcService struct {
 
 	// agents holds handles of the registered DUT agents.
 	agents map[string]*agent
+
+	// sec is the transport used to dial the agents. It follows the server's own
+	// -insecure flag: the relay does not know how each agent was started, so a
+	// deployment runs all three binaries on the same setting.
+	sec rpc.Security
 }
 
 // findAgent returns the handle for the DUT agent, that controls the device with the given name.
@@ -96,7 +103,7 @@ func (s *rpcService) addAgent(ctx context.Context, address string, devices []str
 	}
 
 	for _, device := range devices {
-		s.agents[device] = &agent{address: address}
+		s.agents[device] = &agent{address: address, sec: s.sec}
 	}
 
 	l.Info("agent registered", "agent", address, "devices", devices)
@@ -149,7 +156,7 @@ func (s *rpcService) Commands(
 		return nil, connect.NewError(connect.CodeNotFound, err)
 	}
 
-	res, err := forwardCommandsReq(log.WithScope(ctx, "relay"), agent.address, req)
+	res, err := forwardCommandsReq(log.WithScope(ctx, "relay"), agent.address, s.sec, req)
 	if err != nil {
 		l.Error("forwarding to agent failed", "agent", agent.address, "err", err)
 
@@ -189,7 +196,7 @@ func (s *rpcService) Details(
 		return nil, connect.NewError(connect.CodeNotFound, err)
 	}
 
-	res, err := forwardDetailsReq(log.WithScope(ctx, "relay"), agent.address, req)
+	res, err := forwardDetailsReq(log.WithScope(ctx, "relay"), agent.address, s.sec, req)
 	if err != nil {
 		l.Error("forwarding to agent failed", "agent", agent.address, "err", err)
 
@@ -481,12 +488,13 @@ func responseKind(res *pb.RunResponse) string {
 func forwardCommandsReq(
 	ctx context.Context,
 	url string,
+	sec rpc.Security,
 	req *connect.Request[pb.CommandsRequest],
 ) (*connect.Response[pb.CommandsResponse], error) {
 	log.FromContext(ctx).Debug("forwarding commands request to agent", "agent", url)
 	// TODO: potential resource leak. Investigate how clients can be reused or closed.
 	// For now, we spawn a new client for each request.
-	client := rpc.NewDeviceClient(url)
+	client := rpc.NewDeviceClient(url, sec)
 
 	// ctx carries the caller's cancellation and, since the dutctl client now sets a
 	// per-call deadline that connect propagates as a grpc-timeout header, an
@@ -501,12 +509,13 @@ func forwardCommandsReq(
 func forwardDetailsReq(
 	ctx context.Context,
 	url string,
+	sec rpc.Security,
 	req *connect.Request[pb.DetailsRequest],
 ) (*connect.Response[pb.DetailsResponse], error) {
 	log.FromContext(ctx).Debug("forwarding details request to agent", "agent", url)
 	// TODO: potential resource leak. Investigate how clients can be reused or closed.
 	// For now, we spawn a new client for each request.
-	client := rpc.NewDeviceClient(url)
+	client := rpc.NewDeviceClient(url, sec)
 
 	// ctx carries the caller's cancellation and, since the dutctl client now sets a
 	// per-call deadline that connect propagates as a grpc-timeout header, an

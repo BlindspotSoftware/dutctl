@@ -17,3 +17,5 @@ The systemd service needs a non-root user to run, with correct privileges (for e
 
 ## `packaging/dutagent.tmpfiles`
 Just like with `sysusers` case, we use `systemd-tmpfiles` tool to create directories needed by `dutagent`, with correct ownership and permissions. This is done automatically by `systemd` on installation of the distribution package.
+
+`/var/lib/dutagent/tls` holds the agent's TLS key pair, which `dutagent` generates on first start. It is mode `0750` because the private key must not be world-readable, and it lives under `/var/lib` rather than `/etc` because the service unit sets `ProtectSystem=strict` and only lists `/var/lib/dutagent` and `/var/log/dutagent` in `ReadWritePaths`.

@@ -9,6 +9,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"flag"
 	"fmt"
@@ -26,6 +27,7 @@ import (
 	"github.com/BlindspotSoftware/dutctl/internal/dutagent/locker"
 	"github.com/BlindspotSoftware/dutctl/internal/log"
 	"github.com/BlindspotSoftware/dutctl/internal/rpc"
+	"github.com/BlindspotSoftware/dutctl/internal/tlsutil"
 	"github.com/BlindspotSoftware/dutctl/pkg/dut"
 	"github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1/dutctlv1connect"
 	"gopkg.in/yaml.v3"
@@ -42,6 +44,19 @@ const (
 	versionFlagInfo = `Print version information and exit`
 	logLevelInfo    = `Log level: debug, info, warn, or error`
 	logJSONInfo     = `Emit logs as JSON instead of human-readable text`
+	insecureInfo    = `Disable TLS and serve plain HTTP/2 cleartext (h2c); clients must match`
+	tlsCertInfo     = `Path to the TLS certificate file; a self-signed pair is generated if neither it nor the key exists`
+	tlsKeyInfo      = `Path to the TLS key file; a self-signed pair is generated if neither it nor the certificate exists`
+)
+
+// Default locations of the agent's TLS key pair. Both are generated on first
+// start if neither exists — see internal/tlsutil. They live under /var/lib
+// rather than /etc because the packaged unit runs unprivileged with
+// ProtectSystem=strict, which makes /etc read-only; /var/lib/dutagent is the
+// one path it may write (see packaging/dutagent.service).
+const (
+	defaultTLSCertPath = "/var/lib/dutagent/tls/cert.pem"
+	defaultTLSKeyPath  = "/var/lib/dutagent/tls/key.pem"
 )
 
 func newAgent(stdout io.Writer, exitFunc func(int), args []string) *agent {
@@ -59,6 +74,9 @@ func newAgent(stdout io.Writer, exitFunc func(int), args []string) *agent {
 	fs.BoolVar(&agt.versionFlag, "v", false, versionFlagInfo)
 	fs.StringVar(&agt.logLevel, "log", "debug", logLevelInfo)
 	fs.BoolVar(&agt.logJSON, "log-json", false, logJSONInfo)
+	fs.BoolVar(&agt.insecure, "insecure", false, insecureInfo)
+	fs.StringVar(&agt.tlsCertPath, "tls-cert", defaultTLSCertPath, tlsCertInfo)
+	fs.StringVar(&agt.tlsKeyPath, "tls-key", defaultTLSKeyPath, tlsKeyInfo)
 	//nolint:errcheck // flag.Parse always returns no error because of flag.ExitOnError
 	fs.Parse(args[1:])
 
@@ -79,10 +97,27 @@ type agent struct {
 	server      string
 	logLevel    string
 	logJSON     bool
+	insecure    bool
+	tlsCertPath string
+	tlsKeyPath  string
 
 	// state
 	config            config
 	modulesNeedDeinit bool
+	// cert is the key pair the RPC service serves with, resolved by loadTLSCert
+	// before module initialization. Unset under -insecure.
+	cert tls.Certificate
+}
+
+// security maps the -insecure flag to the transport the agent dials the
+// dutserver with. The serving side branches on agt.insecure directly, since it
+// needs the certificate too and not just the transport.
+func (agt *agent) security() rpc.Security {
+	if agt.insecure {
+		return rpc.Insecure
+	}
+
+	return rpc.TLS
 }
 
 // config holds the dutagent configuration that is parsed from YAML data.
@@ -167,10 +202,36 @@ func printInitErr(err error) {
 	slog.Error("module error", "err", err)
 }
 
+// loadTLSCert resolves the key pair the RPC service will serve with: it loads
+// -tls-cert/-tls-key, generating a self-signed pair if neither file exists yet.
+// It is a no-op under -insecure. See internal/tlsutil for what the generated
+// pair does and does not protect.
+func (agt *agent) loadTLSCert() error {
+	if agt.insecure {
+		return nil
+	}
+
+	cert, generated, err := tlsutil.LoadOrGenerateCert(agt.tlsCertPath, agt.tlsKeyPath)
+	if err != nil {
+		return fmt.Errorf("loading TLS certificate: %w", err)
+	}
+
+	if generated {
+		slog.Info("generated self-signed TLS certificate", "cert", agt.tlsCertPath, "key", agt.tlsKeyPath)
+	}
+
+	agt.cert = cert
+
+	return nil
+}
+
 // startRPCService starts the RPC service and serves until ctx is cancelled (a
 // signal), draining in-flight requests, or until the server stops on its own. It
 // returns the server error, if any; the caller classifies a graceful stop via
 // ctx.Err().
+//
+// The service is served over TLS unless -insecure was given, using the key pair
+// loadTLSCert already resolved.
 func (agt *agent) startRPCService(ctx context.Context) error {
 	service := &rpcService{
 		devices: agt.config.Devices,
@@ -187,15 +248,24 @@ func (agt *agent) startRPCService(ctx context.Context) error {
 	)
 	mux.Handle(path, handler)
 
-	slog.Info("rpc service listening", "addr", agt.address)
+	if agt.insecure {
+		slog.Warn("rpc service listening WITHOUT TLS", "addr", agt.address)
 
-	return rpc.ListenAndServe(ctx, agt.address, mux)
+		return rpc.ListenAndServe(ctx, agt.address, mux)
+	}
+
+	slog.Info("rpc service listening with TLS", "addr", agt.address, "cert", agt.tlsCertPath)
+
+	return rpc.ListenAndServeTLS(ctx, agt.address, mux, agt.cert)
 }
 
 func (agt *agent) registerWithServer() error {
 	slog.Info("registering with server", "server", agt.server)
 
-	client := rpc.NewRelayClient(agt.server)
+	// The registration RPC follows the agent's own transport setting. dutserver
+	// takes the same -insecure flag, so a deployment runs all three binaries on
+	// one setting; mixing them fails here at connect time.
+	client := rpc.NewRelayClient(agt.server, agt.security())
 	req := connect.NewRequest(&pb.RegisterRequest{
 		Devices: agt.config.Devices.Names(),
 		Address: agt.address,
@@ -258,6 +328,17 @@ func (agt *agent) start() {
 		agt.cleanup(exit0)
 	} else if err != nil {
 		slog.Error("loading config failed", "err", err)
+		agt.cleanup(exit1)
+	}
+
+	// Resolve the TLS key pair before touching any hardware. Doing it here rather
+	// than at listen time means an unwritable certificate directory fails startup
+	// cleanly, instead of after initModules has already driven the DUTs — and it
+	// puts the check inside the -dry-run path, which exists to catch exactly this
+	// kind of misconfiguration.
+	err = agt.loadTLSCert()
+	if err != nil {
+		slog.Error("loading TLS certificate failed", "err", err)
 		agt.cleanup(exit1)
 	}
 

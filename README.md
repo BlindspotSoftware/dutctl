@@ -52,16 +52,22 @@ go install github.com/BlindspotSoftware/dutctl/cmds/dutagent@v1.0.0-alpha.2
 
 1. **Start the DUT Agent**
    ```bash
-   dutagent -a localhost:1024 -c ./contrib/dutagent-cfg-example.yaml
+   dutagent -a localhost:1024 -c ./contrib/dutagent-cfg-example.yaml -insecure
    ```
    Run the DUT Agent locally with an example configuration in a separate terminal session.
    This test configuration does not require a connected DUT.
 
+   `-insecure` keeps this walkthrough to plain HTTP. Without it the agent serves TLS and
+   writes a self-signed key pair to `/var/lib/dutagent/tls/`, which a normal user account
+   cannot do — pass `-tls-cert ./cert.pem -tls-key ./key.pem` to put it somewhere writable
+   instead. See [Transport Security](./docs/README.md#transport-security).
+
 2. **Play around with the DUT Client**
    ```bash
-   # dutctl connect to localhost:1024 by default.
+   # dutctl connects to localhost:1024 by default.
+   # Match the agent's transport: -insecure here, because the agent above uses it.
    # Use 'list' to see the available devices that are managed be the agent:
-   dutctl list
+   dutctl list -insecure
 
    # You can discover the available commands per device and run them. 
    # Check out the usage information to learn how:
