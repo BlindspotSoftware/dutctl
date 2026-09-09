@@ -78,6 +78,17 @@ func newH2CServer(addr string, handler http.Handler) *http.Server {
 		Addr:              addr,
 		Handler:           handler,
 		ReadHeaderTimeout: readHeaderTimeout,
+		// Go 1.26 and 1.25.13 arm ReadHeaderTimeout as a socket read deadline
+		// before the h2c preface check and only clear it when ReadTimeout is
+		// set (golang/go#80876), so the deadline outlives the handoff and cuts
+		// every stream on the connection. Clear it once the connection carries
+		// a request: the timeout still bounds the header phase, streams run
+		// unbounded.
+		ConnState: func(c net.Conn, state http.ConnState) {
+			if state == http.StateActive {
+				_ = c.SetReadDeadline(time.Time{})
+			}
+		},
 	}
 
 	// Serve HTTP/2 without TLS (h2c), keeping HTTP/1 for upgrade.
