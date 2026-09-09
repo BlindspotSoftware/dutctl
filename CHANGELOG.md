@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.0.0-alpha.3](https://github.com/BlindspotSoftware/dutctl/compare/v1.0.0-alpha.2...v1.0.0-alpha.3) (2026-09-09)
+
+
+### Bug Fixes
+
+* agent can open serial ports and programmers ([40c9b94](https://github.com/BlindspotSoftware/dutctl/commit/40c9b945a7ce7bbd8f34c6a444c4d4269850f0bd))
+* broken permissions on /dev/mem and /dev/gpiomem ([2f3f119](https://github.com/BlindspotSoftware/dutctl/commit/2f3f1193683f28ae022078d633560417e5bea2bb))
+* logging level info by default ([b95f11c](https://github.com/BlindspotSoftware/dutctl/commit/b95f11c84954350cf9ce6dcbdd5c2c5937aafd58))
+* streams no longer die 10s after connecting ([eef3554](https://github.com/BlindspotSoftware/dutctl/commit/eef35542dc3fa4ded6b149af8bd07f9f583f015a))
+
+
+### Other Work
+
+* bump arduino/setup-task from 2 to 3 ([e611278](https://github.com/BlindspotSoftware/dutctl/commit/e61127801930930211d5ce9c2d58d80d3dc926c3))
+* bump github.com/go-playground/validator/v10 ([acbb0b3](https://github.com/BlindspotSoftware/dutctl/commit/acbb0b3e74261627fa44a5ff52bf7bcc16733eff))
+* cover every dutctl module in firmware CI ([0645253](https://github.com/BlindspotSoftware/dutctl/commit/06452538fc5b1796066b5dd202df54e62485ec16))
+* pdu test waits 1s between outlet commands ([ebac3f0](https://github.com/BlindspotSoftware/dutctl/commit/ebac3f0c4a616e4579d7b71c6e740e9cd6d07f27))
+
 ## [1.0.0-alpha.2](https://github.com/BlindspotSoftware/dutctl/compare/v1.0.0-alpha.1...v1.0.0-alpha.2) (2026-08-24)
 
 
