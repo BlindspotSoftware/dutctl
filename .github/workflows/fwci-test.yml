@@ -73,7 +73,7 @@ jobs:
           echo "dutctl_pkg_path: ${{ steps.filenames.outputs.dutctl_pkg_path }}"
 
       - name: Install task
-        uses: arduino/setup-task@v2
+        uses: arduino/setup-task@v3
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
