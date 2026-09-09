@@ -105,3 +105,29 @@ func TestServeReturnsOnCancel(t *testing.T) {
 		t.Fatal("serve did not return after cancellation")
 	}
 }
+
+// Go 1.26 leaves the ReadHeaderTimeout deadline armed on an h2c socket
+// (golang/go#80876). The guard must stay, and the server must lift it once the
+// connection is active, or every stream dies at the deadline.
+func TestH2CServerLiftsHeaderDeadlineOnceActive(t *testing.T) {
+	srv := newH2CServer("127.0.0.1:0", http.NewServeMux())
+	if srv.ReadHeaderTimeout == 0 {
+		t.Fatal("ReadHeaderTimeout unset: slowloris guard is gone")
+	}
+
+	client, server := net.Pipe()
+	defer client.Close()
+	defer server.Close()
+
+	if err := server.SetReadDeadline(time.Now().Add(-time.Second)); err != nil {
+		t.Fatalf("set deadline: %v", err)
+	}
+
+	srv.ConnState(server, http.StateActive)
+
+	go func() { _, _ = client.Write([]byte{0}) }()
+
+	if _, err := server.Read(make([]byte, 1)); err != nil {
+		t.Fatalf("read after StateActive still bounded: %v", err)
+	}
+}

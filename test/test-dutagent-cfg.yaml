@@ -40,6 +40,9 @@ devices:
               # 0-based; keep in sync with PduOutlet in
               # .firmwareci/duts/dut-rpi-dutctl-tester/dut.yaml
               outlet: 0
+          - module: time-wait
+            with:
+              duration: 1s
       system-info:
         desc: "Report information about the dutagent system"
         uses:
