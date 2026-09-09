@@ -270,7 +270,8 @@ func executeModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State
 // Errors: CodeCanceled/CodeDeadlineExceeded on context cancellation (via
 // cancelCode); CodeAborted on a module failure; and for a broker error,
 // CodeInvalidArgument for a client protocol violation (session.ErrBadFileTransfer),
-// an already-typed connect code preserved, else CodeInternal (via brokerError).
+// CodeDataLoss for a corrupted transfer (session.ErrFileCorrupt), an
+// already-typed connect code preserved, else CodeInternal (via brokerError).
 func waitModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State[runCmdArgs], error) {
 	brokerDone := false
 	moduleDone := false
@@ -349,7 +350,8 @@ func moduleError(err error) error {
 
 // brokerError maps a terminal broker error to the connect error that fails the
 // Run: a client protocol violation (session.ErrBadFileTransfer) is
-// CodeInvalidArgument, an already-typed connect error (e.g. CodeCanceled on
+// CodeInvalidArgument, a transfer the transport damaged (session.ErrFileCorrupt)
+// is CodeDataLoss, an already-typed connect error (e.g. CodeCanceled on
 // client disconnect) keeps its code, and anything else is an internal fault.
 func brokerError(err error) error {
 	var connectErr *connect.Error
@@ -357,6 +359,8 @@ func brokerError(err error) error {
 	switch {
 	case errors.Is(err, session.ErrBadFileTransfer):
 		return connect.NewError(connect.CodeInvalidArgument, err)
+	case errors.Is(err, session.ErrFileCorrupt):
+		return connect.NewError(connect.CodeDataLoss, err)
 	case errors.As(err, &connectErr):
 		return err
 	default:

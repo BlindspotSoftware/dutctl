@@ -48,11 +48,13 @@ type DeviceEntry struct {
 }
 
 // FileTransfer describes a file sent to or received from the agent for
-// TypeFileTransfer output. Direction is "sent" or "received".
+// TypeFileTransfer output. Direction is "sent" or "received". SHA256 is the
+// content digest as lowercase hex, so a job log identifies the bytes that moved.
 type FileTransfer struct {
-	Direction string `json:"direction" yaml:"direction"`
-	Path      string `json:"path"      yaml:"path"`
-	Bytes     int    `json:"bytes"     yaml:"bytes"`
+	Direction string `json:"direction"        yaml:"direction"`
+	Path      string `json:"path"             yaml:"path"`
+	Bytes     int    `json:"bytes"            yaml:"bytes"`
+	SHA256    string `json:"sha256,omitempty" yaml:"sha256,omitempty"`
 }
 
 // Content is a structured data unit to be formatted and displayed.

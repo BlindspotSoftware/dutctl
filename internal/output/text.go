@@ -249,7 +249,8 @@ func (f *TextFormatter) writeLockResultTo(content Content, writer io.Writer) {
 }
 
 // writeFileTransferTo formats and writes a file-transfer progress line, e.g.
-// `↑ sent "firmware.bin" (1.2 MiB)` / `↓ received "result.log" (4.0 KiB)`.
+// `↑ sent "firmware.bin" (1.2 MiB, sha256 4d6b5416b5c5…)`. The digest is
+// omitted when the peer sent none.
 func (f *TextFormatter) writeFileTransferTo(content Content, writer io.Writer) {
 	transfer, ok := content.Data.(FileTransfer)
 	if !ok {
@@ -265,8 +266,25 @@ func (f *TextFormatter) writeFileTransferTo(content Content, writer io.Writer) {
 		marker = style.MarkerReceived
 	}
 
-	line := fmt.Sprintf("%s %s %q (%s)", marker, transfer.Direction, transfer.Path, humanBytes(transfer.Bytes))
+	detail := humanBytes(transfer.Bytes)
+	if transfer.SHA256 != "" {
+		detail += ", sha256 " + shortDigest(transfer.SHA256)
+	}
+
+	line := fmt.Sprintf("%s %s %q (%s)", marker, transfer.Direction, transfer.Path, detail)
 	fmt.Fprintln(writer, style.Colorize(f.useColor, style.Cyan, line))
+}
+
+// shortDigestLen keeps the transfer line readable; the JSON and YAML formats
+// carry the full digest.
+const shortDigestLen = 12
+
+func shortDigest(hexDigest string) string {
+	if len(hexDigest) <= shortDigestLen {
+		return hexDigest
+	}
+
+	return hexDigest[:shortDigestLen] + "…"
 }
 
 // writeCommandListTo formats and writes a list of commands with bullet points.

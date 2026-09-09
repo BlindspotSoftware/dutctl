@@ -11,6 +11,7 @@ import (
 	"io"
 
 	"github.com/BlindspotSoftware/dutctl/internal/chanio"
+	"github.com/BlindspotSoftware/dutctl/internal/digest"
 	"github.com/BlindspotSoftware/dutctl/internal/log"
 
 	pb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1"
@@ -20,6 +21,11 @@ import (
 // violation) so the RPC layer can map it to CodeInvalidArgument rather than
 // treating it as an internal fault.
 var ErrBadFileTransfer = errors.New("bad file transfer")
+
+// ErrFileCorrupt marks content that does not match the digest the client sent
+// with it: the transport damaged it. Distinct from ErrBadFileTransfer, which is
+// the client misbehaving, so the RPC layer can map the two differently.
+var ErrFileCorrupt = errors.New("file corrupted in transit")
 
 // toClientWorker sends messages from the module session to the client.
 // It loops until ctx is cancelled (returning nil) or a stream send fails
@@ -97,6 +103,7 @@ func toClientWorker(ctx context.Context, stream Stream, s *backend) error {
 					File: &pb.File{
 						Path:    name,
 						Content: content,
+						Sha256:  digest.Sum(content),
 					},
 				},
 			}
@@ -233,7 +240,24 @@ func fromClientWorker(ctx context.Context, stream Stream, s *backend) error {
 					return fmt.Errorf("%w: received file-message %q but requested %q", ErrBadFileTransfer, path, want)
 				}
 
-				l.Debug("received file from client", "name", path, "bytes", len(content))
+				// Verified before the module sees the bytes.
+				wantSum := fileMsg.GetSha256()
+				sum := digest.Sum(content)
+
+				switch {
+				case digest.Missing(wantSum):
+					l.Warn("client sent no checksum, file not verified", "name", path)
+				case !digest.Match(sum, wantSum):
+					// Logged as well as returned: tearing down the stream can beat
+					// the status to the client, which then only sees a write error.
+					l.Error("file corrupted in transit", "name", path,
+						"want", digest.Hex(wantSum), "got", digest.Hex(sum), "bytes", len(content))
+
+					return fmt.Errorf("%w: %q: want %s, got %s (%d bytes)", ErrFileCorrupt,
+						path, digest.Hex(wantSum), digest.Hex(sum), len(content))
+				}
+
+				l.Debug("received file from client", "name", path, "bytes", len(content), "sha256", digest.Hex(sum))
 
 				file := make(chan []byte, 1)
 

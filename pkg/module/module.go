@@ -86,6 +86,9 @@ type Module interface {
 // opaquely (no sentinel to match) and typically means the client declined the file
 // or the transfer stream failed.
 //
+// Transfers are checksummed by the framework, so a module never sees content
+// that was damaged in transit; the run fails first.
+//
 // Console, Print, RequestFile and SendFile must be called only from the module's
 // Run goroutine.
 type Session interface {

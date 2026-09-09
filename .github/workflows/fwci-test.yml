@@ -87,7 +87,7 @@ jobs:
           TOKEN: "${{ secrets.FWCI_TOKEN }}"
           WORKFLOW_NAME: test-dutctl
           COMMIT_HASH: ${{ github.event.pull_request.head.sha || github.sha }}
-          BINARIES: DUTCTL=${{ steps.filenames.outputs.dutctl_path }};REMOTE_PKG=${{ steps.filenames.outputs.dutctl_pkg_path }};CONFIG=./test/test-dutagent-cfg.yaml;TASKFILE=./.firmwareci/Taskfile.yml;DUMMY_SPI_FLASH_ROM=./.firmwareci/dummy_binary.rom
+          BINARIES: DUTCTL=${{ steps.filenames.outputs.dutctl_path }};REMOTE_PKG=${{ steps.filenames.outputs.dutctl_pkg_path }};CONFIG=./test/test-dutagent-cfg.yaml;TASKFILE=./.firmwareci/Taskfile.yml;DUMMY_SPI_FLASH_ROM=./.firmwareci/dummy_binary.rom;CORRUPT_PROXY=./test/corrupt-proxy.py
           GITHUB_INSTALLATION_ID: 45795153
 
 
