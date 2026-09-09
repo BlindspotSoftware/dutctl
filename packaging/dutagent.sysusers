@@ -11,3 +11,8 @@ m dutagent dialout
 
 # Access to flasher
 m dutagent plugdev
+
+# Access to GPIO (Raspberry Pi /dev/gpiomem)
+# Ensure the gpio group exists, then add dutagent to it
+g gpio -
+m dutagent gpio

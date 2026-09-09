@@ -154,7 +154,7 @@ The handler and the `--log` flag (`debug|warn|none`, default `warn`) live in [`c
 
 ### Agent and server logging
 
-`dutagent` (and `dutserver`) are service daemons, so they log differently from the client: structured records via [`internal/log`](internal/log) (built on `log/slog`), to **stderr**, at the full set of levels. The base logger is installed in `start()` (`slog.SetDefault`); the `-log` flag sets the level (`debug|info|warn|error`, default `debug`) and `-log-json` switches the text handler for a JSON one. Human/TTY output is `2006/01/02 15:04:05 LEVEL [scope] message key=value` (color only on a terminal); JSON emits `scope` as an attribute. Never log to stdout.
+`dutagent` (and `dutserver`) are service daemons, so they log differently from the client: structured records via [`internal/log`](internal/log) (built on `log/slog`), to **stderr**, at the full set of levels. The base logger is installed in `start()` (`slog.SetDefault`); the `-log` flag sets the level (`debug|info|warn|error`, default `info`) and `-log-json` switches the text handler for a JSON one. Human/TTY output is `2006/01/02 15:04:05 LEVEL [scope] message key=value` (color only on a terminal); JSON emits `scope` as an attribute. Never log to stdout.
 
 **Obtain the logger from the context.** Code retrieves it with `log.FromContext(ctx)`. At a component boundary, the caller sets the scope and any shared attributes *before* handing control on, so each component logs only its own concern:
 
