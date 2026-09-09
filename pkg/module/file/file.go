@@ -207,7 +207,7 @@ func (f *File) uploadFile(ctx context.Context, sesh module.Session) error {
 	l.Debug(fmt.Sprintf("uploading %q from client to %q on dutagent", f.sourcePath, f.destPath))
 
 	// Request file from client
-	fileReader, err := sesh.RequestFile(f.sourcePath)
+	fileReader, err := sesh.RequestFile(ctx, f.sourcePath)
 	if err != nil {
 		return fmt.Errorf("failed to request file from client: %w", err)
 	}
@@ -269,16 +269,18 @@ func (f *File) downloadFile(ctx context.Context, sesh module.Session) error {
 		return fmt.Errorf("failed to open source file %q: %w", f.sourcePath, err)
 	}
 
-	// Open source file
 	srcFile, err := os.Open(f.sourcePath)
 	if err != nil {
 		return fmt.Errorf("failed to open source file %q: %w", f.sourcePath, err)
 	}
-	defer srcFile.Close()
 
-	// Send file to client
-	err = sesh.SendFile(f.destPath, srcFile)
+	// SendFile takes ownership of the file on success — the transfer is chunked
+	// and proceeds after this returns, so the session closes it and we must NOT
+	// defer Close. On error ownership stays here.
+	err = sesh.SendFile(ctx, f.destPath, fileInfo.Size(), srcFile)
 	if err != nil {
+		srcFile.Close()
+
 		return fmt.Errorf("failed to send file to client: %w", err)
 	}
 

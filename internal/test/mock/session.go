@@ -6,6 +6,7 @@
 package mock
 
 import (
+	"context"
 	"fmt"
 	"io"
 
@@ -79,7 +80,7 @@ func (m *Session) Console() (stdin io.Reader, stdout, stderr io.Writer) {
 // RequestFile records the call in RequestFileCalled and the argument in RequestedFileName.
 // It returns RequestFileErr if that field is set; otherwise it returns RequestedFileResponse,
 // panicking if that field is unset.
-func (m *Session) RequestFile(name string) (io.Reader, error) {
+func (m *Session) RequestFile(_ context.Context, name string) (io.Reader, error) {
 	m.RequestFileCalled = true
 	m.RequestedFileName = name
 
@@ -96,7 +97,7 @@ func (m *Session) RequestFile(name string) (io.Reader, error) {
 
 // SendFile records the call in SendFileCalled and the argument in SentFileName, then reads
 // all of r into SentFileContent. It returns any error from reading r without recording content.
-func (m *Session) SendFile(name string, r io.Reader) error {
+func (m *Session) SendFile(_ context.Context, name string, _ int64, r io.Reader) error {
 	m.SendFileCalled = true
 	m.SentFileName = name
 

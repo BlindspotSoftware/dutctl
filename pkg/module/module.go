@@ -102,11 +102,25 @@ type Session interface {
 	// It thus indicates to the client that the module may want to interact with the user
 	// via standard input and output streams.
 	Console() (stdin io.Reader, stdout, stderr io.Writer)
-	// RequestFile requests a file from the client.
-	// The file is identified by its name and is made available to the module via the returned io.Reader.
-	RequestFile(name string) (io.Reader, error)
-	// SendFile sends a file to the client.
-	SendFile(name string, r io.Reader) error
+	// RequestFile requests a file from the client. The file is identified by its
+	// name and is made available to the module via the returned io.Reader.
+	//
+	// ctx bounds the transfer: cancelling it aborts the transfer and fails the
+	// reader. Pass Run's context, or a deadline derived from it. The session
+	// imposes no limit of its own.
+	RequestFile(ctx context.Context, name string) (io.Reader, error)
+	// SendFile sends a file to the client. size is the total file size in bytes,
+	// used to drive chunked transfer and report progress.
+	//
+	// It returns as soon as the transfer is registered; the bytes are streamed
+	// afterwards, so r must stay readable beyond this call. If r implements
+	// io.Closer the session takes ownership and closes it when the transfer
+	// completes — but only on a nil return. On error the caller still owns r and
+	// must close it.
+	//
+	// ctx bounds the transfer, and still does after SendFile returns: cancelling
+	// it aborts the in-flight transfer and closes r.
+	SendFile(ctx context.Context, name string, size int64, r io.Reader) error
 }
 
 // Record holds the information required to register a module.

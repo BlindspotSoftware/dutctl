@@ -79,6 +79,50 @@ jobs:
         with:
           version: v2.6.1
 
+  # Protobuf checks run once per workflow execution, not per commit.
+  #
+  # buf breaking is deliberately not run: the wire format is still changing while
+  # the project is pre-1.0, and agent and client are released together. Add it
+  # once the protocol is stable.
+  protobuf:
+    name: Protobuf
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: 'go.mod'
+
+      - uses: bufbuild/buf-setup-action@v1
+        with:
+          version: 1.47.2
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Lint
+        working-directory: protobuf
+        run: buf lint
+
+      - name: Format
+        working-directory: protobuf
+        run: buf format --diff --exit-code
+
+      # The generated Go code is committed, so it has to match the .proto files.
+      # Plugin versions come from go.mod rather than being pinned again here, so
+      # a dependency bump cannot silently desynchronise the two.
+      - name: Install codegen plugins
+        run: |
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@"$(go list -m -f '{{.Version}}' google.golang.org/protobuf)"
+          go install connectrpc.com/connect/cmd/protoc-gen-connect-go@"$(go list -m -f '{{.Version}}' connectrpc.com/connect)"
+
+      - name: Generated code is up to date
+        working-directory: protobuf
+        run: |
+          buf generate
+          git diff --exit-code -- gen \
+            || { echo "::error::protobuf/gen is stale - run 'buf generate' in protobuf/ and commit the result"; exit 1; }
+
   # Build and test each commit for both architectures
   # Uses a matrix strategy to create separate job runs for each combination of commit and architecture
   per_commit_build_test:

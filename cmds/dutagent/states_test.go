@@ -700,3 +700,65 @@ func TestWaitModules(t *testing.T) {
 		})
 	}
 }
+
+// ctxCapturingModule records the context Run was handed.
+type ctxCapturingModule struct {
+	ctx context.Context //nolint:containedctx // captured for assertion, never used to call
+}
+
+func (m *ctxCapturingModule) Help() string                   { return "capture" }
+func (m *ctxCapturingModule) Init(_ context.Context) error   { return nil }
+func (m *ctxCapturingModule) Deinit(_ context.Context) error { return nil }
+
+func (m *ctxCapturingModule) Run(ctx context.Context, _ module.Session, _ ...string) error {
+	m.ctx = ctx
+
+	return nil
+}
+
+// TestModuleContextOutlivesBrokerCancel pins where the module's context comes
+// from. File transfers are bounded by it and outlive Run, so it must derive from
+// the RPC context, not the broker's. Deriving it from modCtx looks like a
+// tidy-up and passes every other test: downloads would be truncated at
+// modCtxCancel and the run would still report success.
+func TestModuleContextOutlivesBrokerCancel(t *testing.T) {
+	mod := &ctxCapturingModule{}
+
+	wrap := dut.Module{}
+	wrap.Config.Name = "captureMod"
+	wrap.Config.Passthrough = true
+	wrap.Module = mod
+
+	moduleErrCh := make(chan error, 1)
+
+	args := runCmdArgs{
+		stream:      &fakes.FakeStream{},
+		cmdMsg:      &pb.Command{Device: "devX", Command: "cmdY"},
+		cmd:         dut.Command{Modules: []dut.Module{wrap}},
+		moduleErrCh: moduleErrCh,
+	}
+
+	_, _, err := executeModules(context.Background(), args)
+	if err != nil {
+		t.Fatalf("executeModules: %v", err)
+	}
+
+	// Closed channel means the run goroutine finished, so modCtxCancel has run.
+	select {
+	case _, ok := <-moduleErrCh:
+		if ok {
+			t.Fatal("module reported an error")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("module execution did not finish")
+	}
+
+	if mod.ctx == nil {
+		t.Fatal("module was never run")
+	}
+
+	if err := mod.ctx.Err(); err != nil {
+		t.Errorf("module context cancelled by broker teardown: %v — "+
+			"a transfer still streaming after Run returned would be aborted", err)
+	}
+}

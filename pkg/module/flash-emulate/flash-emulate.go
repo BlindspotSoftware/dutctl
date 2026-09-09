@@ -144,7 +144,7 @@ func (e *FlashEmulate) Run(ctx context.Context, sesh module.Session, args ...str
 
 	e.localImagePath = tmpFile.Name()
 
-	err = uploadImage(sesh, e.clientImagePath, e.localImagePath)
+	err = uploadImage(ctx, sesh, e.clientImagePath, e.localImagePath)
 	if err != nil {
 		_ = os.RemoveAll(e.localImagePath)
 		e.localImagePath = ""
@@ -186,8 +186,8 @@ func (e *FlashEmulate) cmdline() []string {
 }
 
 // uploadImage receives the firmware image file from sesh and saves it locally.
-func uploadImage(sesh module.Session, remote, local string) error {
-	img, err := sesh.RequestFile(remote)
+func uploadImage(ctx context.Context, sesh module.Session, remote, local string) error {
+	img, err := sesh.RequestFile(ctx, remote)
 	if err != nil {
 		return fmt.Errorf("request image from client: %w", err)
 	}

@@ -249,6 +249,16 @@ func executeModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State
 		}
 
 		l.Info("all modules finished successfully")
+
+		// A module may start a file transfer that completes asynchronously (a
+		// download handed to SendFile is streamed by the broker workers after the
+		// module's Run returns). Signal graceful shutdown — which stops forwarding
+		// further module output but keeps the transfer flowing — and wait for every
+		// in-flight transfer to finish before cancelling the workers. abortTransfers
+		// is the backstop if the workers exit first (e.g. the client disconnects).
+		broker.Shutdown()
+		broker.WaitForTransfersToComplete()
+
 		modCtxCancel()
 		close(args.moduleErrCh)
 	}()
