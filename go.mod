@@ -1,16 +1,16 @@
 module github.com/BlindspotSoftware/dutctl
 
-go 1.25.0
+go 1.26.0
 
 require (
 	connectrpc.com/connect v1.20.0
 	github.com/bougou/go-ipmi v0.8.2
-	github.com/go-playground/validator/v10 v10.30.4
+	github.com/go-playground/validator/v10 v10.30.5
 	github.com/google/go-cmp v0.7.0
 	github.com/stianeikeland/go-rpio/v4 v4.6.0
 	go.bug.st/serial v1.8.0
-	golang.org/x/crypto v0.55.0
-	golang.org/x/mod v0.40.0
+	golang.org/x/crypto v0.57.0
+	golang.org/x/mod v0.41.0
 	google.golang.org/protobuf v1.36.12
 	gopkg.in/yaml.v3 v3.0.1
 )
@@ -32,8 +32,8 @@ require (
 	github.com/olekukonko/tablewriter v1.0.9 // indirect
 	github.com/rivo/uniseg v0.2.0 // indirect
 	github.com/rogpeppe/go-internal v1.6.1 // indirect
-	golang.org/x/net v0.57.0 // indirect
-	golang.org/x/sys v0.47.0 // indirect
-	golang.org/x/term v0.45.0 // indirect
-	golang.org/x/text v0.41.0 // indirect
+	golang.org/x/net v0.58.0 // indirect
+	golang.org/x/sys v0.48.0 // indirect
+	golang.org/x/term v0.46.0 // indirect
+	golang.org/x/text v0.42.0 // indirect
 )
