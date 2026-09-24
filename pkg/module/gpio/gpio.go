@@ -313,9 +313,9 @@ func (s *Switch) Run(ctx context.Context, sesh module.Session, args ...string) e
 		l.Info(fmt.Sprintf("switch on (pin %d)", s.Pin))
 
 		if s.state == on {
-			sesh.Print("Already on")
+			sesh.Println("Already on")
 		} else {
-			sesh.Print("Turned on")
+			sesh.Println("Turned on")
 		}
 
 		s.state = on
@@ -330,9 +330,9 @@ func (s *Switch) Run(ctx context.Context, sesh module.Session, args ...string) e
 		l.Info(fmt.Sprintf("switch off (pin %d)", s.Pin))
 
 		if s.state == off {
-			sesh.Print("Already off")
+			sesh.Println("Already off")
 		} else {
-			sesh.Print("Turned off")
+			sesh.Println("Turned off")
 		}
 
 		s.state = off
@@ -345,11 +345,11 @@ func (s *Switch) Run(ctx context.Context, sesh module.Session, args ...string) e
 		}
 
 		if s.state == on {
-			sesh.Print("Turned off")
+			sesh.Println("Turned off")
 
 			s.state = off
 		} else {
-			sesh.Print("Turned on")
+			sesh.Println("Turned on")
 
 			s.state = on
 		}
