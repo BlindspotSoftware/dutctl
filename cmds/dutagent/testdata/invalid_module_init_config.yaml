@@ -1,0 +1,12 @@
+---
+version: 1.0.0-alpha.1
+devices:
+  device1:
+    desc: "Device 1"
+    cmds:
+      wait:
+        desc: "Wait with an unparsable duration, so module Init fails"
+        uses:
+          - module: time-wait
+            with:
+              duration: not-a-duration

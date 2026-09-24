@@ -251,7 +251,7 @@ func (agt *agent) start() {
 	if agt.checkConfig {
 		if err != nil {
 			slog.Error("bad configuration", "err", err)
-			agt.cleanup(exit0)
+			agt.cleanup(exit1)
 		}
 
 		slog.Info("configuration is valid")
@@ -275,7 +275,7 @@ func (agt *agent) start() {
 		if err != nil {
 			printInitErr(err)
 			slog.Info("initialization failed - dry run finished")
-			agt.cleanup(exit0)
+			agt.cleanup(exit1)
 		}
 
 		slog.Info("initialization successful - dry run finished")
