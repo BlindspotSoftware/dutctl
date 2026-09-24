@@ -190,14 +190,14 @@ func (f *Flash) Run(ctx context.Context, sesh module.Session, args ...string) er
 	cmdStr := fmt.Sprintf("%s %s", f.Tool, strings.Join(f.cmdline(), " "))
 
 	l.Debug(fmt.Sprintf("executing %s", cmdStr))
-	sesh.Print(fmt.Sprintf("Executing: %s", cmdStr))
+	sesh.Printf("Executing: %s\n", cmdStr)
 
 	err := execute(ctx, sesh, f.Tool, f.cmdline()...)
 	if err != nil {
 		return fmt.Errorf("flash operation failed: %w", err)
 	}
 
-	sesh.Print("Flash operation completed successfully")
+	sesh.Println("Flash operation completed successfully")
 
 	time.Sleep(1 * time.Second)
 
