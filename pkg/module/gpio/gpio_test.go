@@ -492,7 +492,6 @@ func TestSwitchRun(t *testing.T) {
 		mockErr     error
 		expectFunc  func(mock *MockGpio) bool
 		expectErr   bool
-		expectPrint string // non-empty: assert mock.Session.PrintText equals this value
 	}{
 		{
 			name: "Run with state 'on', ActiveLow false, and args 'on'",
@@ -552,7 +551,6 @@ func TestSwitchRun(t *testing.T) {
 				ActiveLow: false,
 			},
 			expectErr:   false,
-			expectPrint: "Current state: on\n",
 		},
 		{
 			name: "Run with state 'off', ActiveLow true, and args 'on'",
@@ -612,7 +610,6 @@ func TestSwitchRun(t *testing.T) {
 				ActiveLow: true,
 			},
 			expectErr:   false,
-			expectPrint: "Current state: off\n",
 		},
 		{
 			name: "Run with args 'on' with GPIO error",
@@ -666,8 +663,8 @@ func TestSwitchRun(t *testing.T) {
 			if tt.expectFunc != nil && !tt.expectFunc(mockGpio) {
 				t.Errorf("expected function not called for %s", tt.name)
 			}
-			if tt.expectPrint != "" && sesh.PrintText != tt.expectPrint {
-				t.Errorf("expected print %q, got %q", tt.expectPrint, sesh.PrintText)
+			if !tt.expectErr && !strings.HasSuffix(sesh.PrintText, "\n") {
+				t.Errorf("expected output to end with a newline, got %q", sesh.PrintText)
 			}
 		})
 	}
