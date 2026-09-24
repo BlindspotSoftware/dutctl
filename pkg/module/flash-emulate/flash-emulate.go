@@ -156,7 +156,7 @@ func (e *FlashEmulate) Run(ctx context.Context, sesh module.Session, args ...str
 
 	l.Info(fmt.Sprintf("loading image into emulator with %s", e.Tool))
 	l.Debug(fmt.Sprintf("executing %s %s", e.Tool, strings.Join(cmdArgs, " ")))
-	sesh.Print(fmt.Sprintf("Executing: %s %s", e.Tool, strings.Join(cmdArgs, " ")))
+	sesh.Printf("Executing: %s %s\n", e.Tool, strings.Join(cmdArgs, " "))
 
 	err = execute(ctx, sesh, e.Tool, cmdArgs...)
 	if err != nil {
@@ -166,7 +166,7 @@ func (e *FlashEmulate) Run(ctx context.Context, sesh module.Session, args ...str
 		return fmt.Errorf("emulation failed: %w", err)
 	}
 
-	sesh.Print("Emulation started successfully")
+	sesh.Println("Emulation started successfully")
 
 	return nil
 }

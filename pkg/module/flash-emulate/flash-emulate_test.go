@@ -150,6 +150,10 @@ func TestRun(t *testing.T) {
 			t.Errorf("expected requested file name %q, got %q", "firmware.rom", sesh.RequestedFileName)
 		}
 
+		if !strings.HasSuffix(sesh.PrintText, "\n") {
+			t.Errorf("expected output to end with a newline, got %q", sesh.PrintText)
+		}
+
 		if err := e.Deinit(context.Background()); err != nil {
 			t.Errorf("unexpected Deinit error: %v", err)
 		}
