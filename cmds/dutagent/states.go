@@ -38,6 +38,7 @@ type runCmdArgs struct {
 	locker     *locker.Locker
 	user       string
 	autoLock   *autoLockHold
+	broker     *session.Broker // Lifetime owned by Run, waited on before returning (see Run), started by executeModules
 
 	// fields for the states used during execution
 	cmdMsg      *pb.Command
@@ -187,8 +188,6 @@ func executeModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State
 	ctx = log.With(log.WithScope(ctx, "agent"), "device", args.cmdMsg.GetDevice(), "command", args.cmdMsg.GetCommand())
 	l := log.FromContext(ctx)
 
-	broker := &session.Broker{}
-
 	// Deferred initialization of the moduleErr channel: only create if not already provided
 	// (tests may still pass a custom channel).
 	if args.moduleErrCh == nil {
@@ -198,7 +197,7 @@ func executeModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State
 	rpcCtx := ctx
 	modCtx, modCtxCancel := context.WithCancel(rpcCtx)
 
-	moduleSession, brokerErrCh := broker.Start(modCtx, args.stream)
+	moduleSession, brokerErrCh := args.broker.Start(modCtx, args.stream)
 	args.brokerErrCh = brokerErrCh
 	args.session = moduleSession
 
@@ -302,9 +301,9 @@ func waitModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State[ru
 		}
 	}
 
-	// Success: the auto-lock is released by the deferred cleanup in Run, which
-	// covers every exit path including a panic, so no explicit release state is
-	// needed here.
+	// Success: the broker's workers are awaited and the auto-lock is released by
+	// the deferred cleanup in Run, which covers every exit path including a
+	// panic, so no explicit teardown state is needed here.
 	return args, nil, nil
 }
 

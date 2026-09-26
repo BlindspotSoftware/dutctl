@@ -14,6 +14,7 @@ import (
 	"connectrpc.com/connect"
 	"github.com/BlindspotSoftware/dutctl/internal/auth"
 	"github.com/BlindspotSoftware/dutctl/internal/dutagent/locker"
+	"github.com/BlindspotSoftware/dutctl/internal/dutagent/session"
 	"github.com/BlindspotSoftware/dutctl/internal/fsm"
 	"github.com/BlindspotSoftware/dutctl/internal/keyword"
 	"github.com/BlindspotSoftware/dutctl/internal/log"
@@ -388,15 +389,30 @@ func (a *rpcService) Run(
 		}
 	}()
 
+	// The handler must not return while a broker worker is still inside a stream
+	// Send: connect invalidates the response writer once the handler is gone, and
+	// a write past that point panics in the worker goroutine.
+	// So Run owns the broker's lifetime: on every exit path, including a panic
+	// unwinding past the FSM, the deferred calls below first cancel runCtx, which
+	// the workers derive their context from, then wait for the workers to return.
+	// Both run before the auto-lock release above, so the device is handed on only
+	// once the stream is quiet.
+	runCtx, cancelRun := context.WithCancel(ctx)
+	broker := &session.Broker{}
+
+	defer broker.Wait()
+	defer cancelRun()
+
 	fsmArgs := runCmdArgs{
 		stream:     rpc.NewRunStream(stream),
 		deviceList: a.devices,
 		locker:     a.locker,
 		user:       user,
 		autoLock:   autoLock,
+		broker:     broker,
 	}
 
-	_, err = fsm.Run(ctx, fsmArgs, receiveCommandRPC)
+	_, err = fsm.Run(runCtx, fsmArgs, receiveCommandRPC)
 
 	var connectErr *connect.Error
 	if err != nil && !errors.As(err, &connectErr) {

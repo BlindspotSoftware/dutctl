@@ -92,6 +92,20 @@ func (b *Broker) Start(ctx context.Context, s Stream) (module.Session, <-chan er
 	return &b.session, b.errCh
 }
 
+// Wait blocks until both workers have returned, so that no stream Send is still
+// in progress. It does not stop the workers: the caller cancels the context
+// passed to Start first. It returns immediately if the Broker was never started,
+// and may be called more than once. Call it from the goroutine that called
+// Start, or after Start returned.
+//
+// The RPC handler relies on this: a stream Send running past the handler's return
+// panics inside net/http, in a worker goroutine no recover covers. The upstream
+// worker's receive goroutine is not awaited: it only reads the request body,
+// which the transport closes once the handler returns, so it ends then.
+func (b *Broker) Wait() {
+	b.wg.Wait()
+}
+
 func (b *Broker) toClient(ctx context.Context, cancel context.CancelFunc) {
 	// Scope the downstream (agent → client) flow; the worker and its chanio
 	// reader inherit it from ctx.
