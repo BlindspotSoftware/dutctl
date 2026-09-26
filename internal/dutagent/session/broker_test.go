@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -403,5 +404,83 @@ func TestBrokerReceiveLoopExitsOnCancel(t *testing.T) {
 				runtime.NumGoroutine(), base)
 		case <-time.After(10 * time.Millisecond):
 		}
+	}
+}
+
+// slowStream is a Stream whose Send takes measurable time, standing in for a
+// transport where a send outlives the call that triggered it. It records how many
+// sends are in flight.
+type slowStream struct {
+	sendFor  time.Duration
+	closed   chan struct{} // closed by the test to end the stream
+	inFlight atomic.Int32
+	sends    atomic.Int32
+}
+
+// Receive blocks until the test ends the stream, mimicking a client that keeps
+// it open for the duration of the run. An immediate io.EOF would tear the
+// broker down before there is anything to wait for.
+func (s *slowStream) Receive() (*pb.RunRequest, error) {
+	<-s.closed
+
+	return nil, io.EOF
+}
+
+func (s *slowStream) Send(_ *pb.RunResponse) error {
+	s.sends.Add(1)
+	s.inFlight.Add(1)
+
+	defer s.inFlight.Add(-1)
+
+	time.Sleep(s.sendFor)
+
+	return nil
+}
+
+// TestBrokerWaitWaitsForInFlightSend covers the guarantee the RPC handler relies
+// on: once the workers are cancelled and Wait returned, no Send is in flight.
+func TestBrokerWaitWaitsForInFlightSend(t *testing.T) {
+	stream := &slowStream{sendFor: 100 * time.Millisecond, closed: make(chan struct{})}
+	defer close(stream.closed)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	b := &Broker{}
+	sesh, _ := b.Start(ctx, stream)
+
+	// Print returns once a worker has taken the message, while its Send is
+	// still running.
+	sesh.Print("module output")
+
+	cancel()
+	b.Wait()
+
+	// The worker took the message, so it must have sent it by the time Wait
+	// returns: a send not yet started or still running both outlive Wait.
+	if sends, inFlight := stream.sends.Load(), stream.inFlight.Load(); sends != 1 || inFlight != 0 {
+		t.Errorf("a send outlived Wait (sends=%d, in flight=%d)", sends, inFlight)
+	}
+}
+
+func TestBrokerWaitWithoutStartAndTwice(t *testing.T) {
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+
+		b := &Broker{}
+		b.Wait() // never started
+
+		ctx, cancel := context.WithCancel(context.Background())
+		b.Start(ctx, &testStream{recvErrs: []error{io.EOF}})
+		cancel()
+
+		b.Wait()
+		b.Wait()
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Wait blocked on an unstarted or already stopped broker")
 	}
 }

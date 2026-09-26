@@ -7,11 +7,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"connectrpc.com/connect"
 	"github.com/BlindspotSoftware/dutctl/internal/dutagent/locker"
+	"github.com/BlindspotSoftware/dutctl/internal/dutagent/session"
 	"github.com/BlindspotSoftware/dutctl/internal/fsm"
 	"github.com/BlindspotSoftware/dutctl/internal/test/fakes"
 	"github.com/BlindspotSoftware/dutctl/pkg/dut"
@@ -484,6 +487,7 @@ func TestExecuteModules(t *testing.T) {
 
 			args := runCmdArgs{
 				stream:      &fakes.FakeStream{}, // no actual traffic needed for these tests
+				broker:      &session.Broker{},
 				cmdMsg:      tt.cmdMsg,
 				cmd:         dut.Command{Modules: tt.modules},
 				moduleErrCh: moduleErrCh,
@@ -559,6 +563,105 @@ func TestExecuteModules(t *testing.T) {
 	}
 }
 
+// blockingStream is a session.Stream whose Send takes measurable time, standing
+// in for the real transport where a send is an http2 write that outlives the
+// call that triggered it. It records how many sends are in flight.
+type blockingStream struct {
+	sendFor  time.Duration
+	closed   chan struct{} // closed by the test to end the stream
+	inFlight atomic.Int32
+	sends    atomic.Int32
+}
+
+// Receive blocks until the test ends the stream, mimicking a client that holds
+// the stream open for the duration of the run. Returning io.EOF right away would
+// tear the broker down before the module even runs.
+func (s *blockingStream) Receive() (*pb.RunRequest, error) {
+	<-s.closed
+
+	return nil, io.EOF
+}
+
+func (s *blockingStream) Send(_ *pb.RunResponse) error {
+	s.sends.Add(1)
+	s.inFlight.Add(1)
+
+	defer s.inFlight.Add(-1)
+
+	time.Sleep(s.sendFor)
+
+	return nil
+}
+
+// printThenFailModule reproduces the shape of a failing flash module: it forwards
+// output to the client and only then returns the error that aborts the run.
+type printThenFailModule struct {
+	err error
+}
+
+func (m *printThenFailModule) Help() string                   { return "print then fail" }
+func (m *printThenFailModule) Init(_ context.Context) error   { return nil }
+func (m *printThenFailModule) Deinit(_ context.Context) error { return nil }
+func (m *printThenFailModule) Run(_ context.Context, s module.Session, _ ...string) error {
+	s.Print("flash tool output")
+
+	return m.err
+}
+
+// TestModuleErrorBrokerWaitEndsInFlightSend exercises the seam that crashed the
+// agent, with the real broker and in the shape the bug had: a module prints and
+// then fails, so waitModules returns while a downstream send is still in flight.
+// The test then does what Run's deferred teardown does — cancel the run context,
+// wait for the broker — and checks that no send outlives it.
+func TestModuleErrorBrokerWaitEndsInFlightSend(t *testing.T) {
+	stream := &blockingStream{
+		sendFor: 100 * time.Millisecond,
+		closed:  make(chan struct{}),
+	}
+	defer close(stream.closed)
+
+	mod := dut.Module{Module: &printThenFailModule{err: errors.New("flash tool exited with code 1")}}
+	mod.Config.Name = "printThenFail"
+	mod.Config.Passthrough = true
+
+	runCtx, cancelRun := context.WithCancel(context.Background())
+	broker := &session.Broker{}
+
+	args := runCmdArgs{
+		stream: stream,
+		broker: broker,
+		cmdMsg: &pb.Command{Device: "devX", Command: "flash"},
+		cmd:    dut.Command{Modules: []dut.Module{mod}},
+	}
+
+	args, next, err := executeModules(runCtx, args)
+	if err != nil {
+		t.Fatalf("unexpected error from executeModules: %v", err)
+	}
+
+	if !stateEqual(next, waitModules) {
+		t.Fatalf("unexpected next state: want %p got %p", waitModules, next)
+	}
+
+	_, _, err = waitModules(runCtx, args)
+
+	var cErr *connect.Error
+	if !errors.As(err, &cErr) || cErr.Code() != connect.CodeAborted {
+		t.Fatalf("expected connect code %v, got %v", connect.CodeAborted, err)
+	}
+
+	// What Run's deferred teardown does before the handler returns.
+	cancelRun()
+	broker.Wait()
+
+	// The worker took the printed message, so it must have sent it by the time
+	// Wait returns: a send not yet started or still running both outlive the
+	// handler.
+	if sends, inFlight := stream.sends.Load(), stream.inFlight.Load(); sends != 1 || inFlight != 0 {
+		t.Errorf("a send outlived Wait (sends=%d, in flight=%d), the handler would finish underneath it", sends, inFlight)
+	}
+}
+
 func TestWaitModules(t *testing.T) {
 	// Design notes:
 	//  - We inject pre-buffered channels (size 1) for moduleErr and brokerErrCh directly into runCmdArgs.
@@ -595,6 +698,18 @@ func TestWaitModules(t *testing.T) {
 				return ctx, args
 			},
 			exp: expect{wantSuccess: true},
+		},
+		{
+			// A client that hangs up mid-run: neither channel ever reports, the
+			// RPC context is what ends the wait.
+			name: "rpc_context_cancelled",
+			setup: func() (context.Context, runCmdArgs) {
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel()
+				args := runCmdArgs{moduleErrCh: make(chan error, 1), brokerErrCh: make(chan error, 1)}
+				return ctx, args
+			},
+			exp: expect{wantErrCode: connect.CodeCanceled},
 		},
 		{
 			name: "success_broker_then_module",
