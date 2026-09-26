@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.0.0-alpha.4](https://github.com/BlindspotSoftware/dutctl/compare/v1.0.0-alpha.3...v1.0.0-alpha.4) (2026-09-26)
+
+
+### Bug Fixes
+
+* add missing newline to flash and flash-emulate status output ([2952bf2](https://github.com/BlindspotSoftware/dutctl/commit/2952bf2204b456c06c6c23b6cf352c41bffb616c))
+* add missing newline to gpio-switch on/off/toggle output ([c31818e](https://github.com/BlindspotSoftware/dutctl/commit/c31818e95963accc96440e40d13b7c7285332135))
+* exit non-zero when -check-config or -dry-run fails ([d005565](https://github.com/BlindspotSoftware/dutctl/commit/d005565147e5f29445dbe8ec1d41e1bc6cb44331))
+* wait for the broker workers before the Run handler returns ([84c0fe2](https://github.com/BlindspotSoftware/dutctl/commit/84c0fe25c24d80b936fed791503b8c91e927221d))
+
 ## [1.0.0-alpha.3](https://github.com/BlindspotSoftware/dutctl/compare/v1.0.0-alpha.2...v1.0.0-alpha.3) (2026-09-09)
 
 
