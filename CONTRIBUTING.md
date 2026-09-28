@@ -126,7 +126,7 @@ To automatically check for most of these styles and practices the CI runs [golan
 
 #### Run golangci-lint locally
 
-For a faster development cycle, you can integrate [golangci-lint](https://golangci-lint.run/welcome/integrations/) into your local setup. The current version and configuration is pinned in `.golangci.yml`.
+For a faster development cycle, you can integrate [golangci-lint](https://golangci-lint.run/welcome/integrations/) into your local setup. The version CI uses is pinned in [`.github/workflows/go.yml`](.github/workflows/go.yml), the configuration lives in `.golangci.yml`.
 
 We recommend setting up your editor to run golangci-lint automatically. Most popular Go IDEs support this:
 

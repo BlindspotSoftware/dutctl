@@ -56,7 +56,7 @@ linters:
     #- godox - allow "TODO" and "FIXME" comments until v1.0
     - goheader
     - gomoddirectives
-    - gomodguard
+    - gomodguard_v2
     - goprintffuncname
     - gosec
     - gosmopolitan
