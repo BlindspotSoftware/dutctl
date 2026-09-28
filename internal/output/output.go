@@ -39,6 +39,25 @@ const (
 	TypeFileTransfer ContentType = "file-transfer"
 )
 
+// Metadata keys the text formatter renders as one context sentence. Any other
+// key is printed on its own line.
+const (
+	// MetaServer is the address of the dutagent server.
+	MetaServer = "server"
+
+	// MetaMsg is a message or description of the remote procedure call.
+	MetaMsg = "msg"
+
+	// MetaDevice is the target device identifier.
+	MetaDevice = "device"
+
+	// MetaCommand is the command being executed.
+	MetaCommand = "command"
+
+	// MetaArgs holds the command arguments.
+	MetaArgs = "args"
+)
+
 // DeviceEntry describes a device and its lock state for TypeDeviceList output.
 type DeviceEntry struct {
 	Name      string
@@ -69,11 +88,11 @@ type Content struct {
 	// Metadata contains additional contextual information about the content.
 	// Common keys are:
 	//
-	//	server  - address of the dutagent server
-	//	msg     - message or description of the remote procedure call
-	//	device  - target device identifier
-	//	command - command being executed
-	//	args    - command arguments
+	//   - [MetaServer]
+	//   - [MetaMsg]
+	//   - [MetaDevice]
+	//   - [MetaCommand]
+	//   - [MetaArgs]
 	Metadata map[string]string
 }
 

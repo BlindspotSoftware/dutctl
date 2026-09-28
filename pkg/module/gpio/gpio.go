@@ -112,7 +112,7 @@ func (b *Button) Help() string {
 	help.WriteString(abstractButton)
 	help.WriteString(usageButton)
 	help.WriteString(description1Button)
-	help.WriteString(fmt.Sprintf("Default duration is %s.\n", DefaultButtonPressDuration))
+	fmt.Fprintf(&help, "Default duration is %s.\n", DefaultButtonPressDuration)
 	help.WriteString(description2Button)
 
 	if b.ActiveLow {
@@ -121,7 +121,7 @@ func (b *Button) Help() string {
 		help.WriteString("The button is active high. Thus 'Idle' mean 'Low', 'Pressed' means 'High'\n")
 	}
 
-	help.WriteString(fmt.Sprintf("The used GPIO pin is pin %d. (Raw BCM2835/BCM2711 pin number)\n", b.Pin))
+	fmt.Fprintf(&help, "The used GPIO pin is pin %d. (Raw BCM2835/BCM2711 pin number)\n", b.Pin)
 	help.WriteString(description3Button)
 
 	return help.String()
@@ -262,7 +262,7 @@ func (s *Switch) Help() string {
 		help.WriteString("The switch is active high. Thus 'On' mean 'High', 'Off' means 'Low'\n")
 	}
 
-	help.WriteString(fmt.Sprintf("The used GPIO pin is pin %d. (Raw BCM2835/BCM2711 pin number)\n", s.Pin))
+	fmt.Fprintf(&help, "The used GPIO pin is pin %d. (Raw BCM2835/BCM2711 pin number)\n", s.Pin)
 	help.WriteString(description2Switch)
 
 	return help.String()

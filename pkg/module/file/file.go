@@ -97,7 +97,7 @@ func (f *File) Help() string {
 
 	help.WriteString(usageAndDescription(f.Operation, f.Source, f.Destination))
 
-	help.WriteString(fmt.Sprintf("File permission will be set to %q.\n", f.Permission))
+	fmt.Fprintf(&help, "File permission will be set to %q.\n", f.Permission)
 
 	return help.String()
 }

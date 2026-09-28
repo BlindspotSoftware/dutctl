@@ -400,7 +400,7 @@ func (f *TextFormatter) updateMetadataCache(metadata map[string]string) {
 
 // splitMetadata separates known metadata keys from the rest.
 func splitMetadata(metadata map[string]string) (map[string]string, map[string]string) {
-	knownKeys := []string{"server", "msg", "device", "command", "args"}
+	knownKeys := []string{MetaServer, MetaMsg, MetaDevice, MetaCommand, MetaArgs}
 	known := make(map[string]string)
 	other := make(map[string]string)
 
@@ -429,20 +429,20 @@ func splitMetadata(metadata map[string]string) (map[string]string, map[string]st
 func metadataText(known map[string]string) string {
 	var parts []string
 
-	if server, ok := known["server"]; ok {
+	if server, ok := known[MetaServer]; ok {
 		parts = append(parts, fmt.Sprintf("connected to %s", server))
 	}
 
-	if msg, ok := known["msg"]; ok {
+	if msg, ok := known[MetaMsg]; ok {
 		parts = append(parts, fmt.Sprintf("(%s)", msg))
 	}
 
-	if dev, ok := known["device"]; ok {
+	if dev, ok := known[MetaDevice]; ok {
 		parts = append(parts, fmt.Sprintf("device %q", dev))
 	}
 
-	if cmd, ok := known["command"]; ok {
-		if args, ok := known["args"]; ok && args != "" {
+	if cmd, ok := known[MetaCommand]; ok {
+		if args, ok := known[MetaArgs]; ok && args != "" {
 			parts = append(parts, fmt.Sprintf("executing '%s %s'", cmd, args))
 		} else {
 			parts = append(parts, fmt.Sprintf("executing '%s'", cmd))
