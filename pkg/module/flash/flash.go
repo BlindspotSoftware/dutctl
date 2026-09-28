@@ -29,12 +29,18 @@ import (
 // to exit cleanly first and only killed hard if it overruns this window.
 const flashCancelGrace = 10 * time.Second
 
+const (
+	flashromTool  = "flashrom"
+	flashprogTool = "flashprog"
+	dpcmdTool     = "dpcmd"
+)
+
 func init() {
 	module.Register(module.Record{
 		ID: "flash",
 		New: func() module.Module {
 			return &Flash{
-				supportedTools: []string{"flashrom", "flashprog", "dpcmd"},
+				supportedTools: []string{flashromTool, flashprogTool, dpcmdTool},
 			}
 		},
 	})
@@ -99,7 +105,7 @@ func (f *Flash) Help() string {
 	help.WriteString(abstract)
 	help.WriteString(usage)
 	help.WriteString(description)
-	help.WriteString(fmt.Sprintf("Using %q as flash tool with programmer %q.\n", f.Tool, f.Programmer))
+	fmt.Fprintf(&help, "Using %q as flash tool with programmer %q.\n", f.Tool, f.Programmer)
 
 	return help.String()
 }
@@ -126,7 +132,7 @@ func (f *Flash) Init(ctx context.Context) error {
 	// dpcmd auto-detects hardware, so programmer is optional
 	// flashrom/flashprog require a programmer to be specified
 	base := filepath.Base(f.Tool)
-	if base != "dpcmd" && f.Programmer == "" {
+	if base != dpcmdTool && f.Programmer == "" {
 		return fmt.Errorf("programmer must be configured for %q", base)
 	}
 
@@ -249,7 +255,7 @@ func (f *Flash) cmdline() []string {
 	var args []string
 
 	// dpcmd has different CLI syntax than flashrom/flashprog
-	if base == "dpcmd" {
+	if base == dpcmdTool {
 		// dpcmd auto-detects hardware, but can optionally specify device number
 		if f.Programmer != "" {
 			args = append(args, "--device", f.Programmer)

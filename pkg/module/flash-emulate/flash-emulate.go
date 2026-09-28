@@ -80,10 +80,10 @@ func (e *FlashEmulate) Help() string {
 	help.WriteString(abstract)
 	help.WriteString(usage)
 	help.WriteString(description)
-	help.WriteString(fmt.Sprintf("Using %q as emulation tool with chip %q.\n", e.Tool, e.Chip))
+	fmt.Fprintf(&help, "Using %q as emulation tool with chip %q.\n", e.Tool, e.Chip)
 
 	if e.Device != "" {
-		help.WriteString(fmt.Sprintf("Using USB device %q.\n", e.Device))
+		fmt.Fprintf(&help, "Using USB device %q.\n", e.Device)
 	}
 
 	return help.String()

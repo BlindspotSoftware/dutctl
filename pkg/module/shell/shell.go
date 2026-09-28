@@ -55,7 +55,7 @@ func (s *Shell) Help() string {
 	help := strings.Builder{}
 	help.WriteString(abstract)
 	help.WriteString(usage)
-	help.WriteString(fmt.Sprintf("The used shell is %q.\n", s.Path))
+	fmt.Fprintf(&help, "The used shell is %q.\n", s.Path)
 	help.WriteString(description)
 
 	if s.Quiet {

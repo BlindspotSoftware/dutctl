@@ -486,12 +486,12 @@ func TestSwitchDeinit(t *testing.T) {
 
 func TestSwitchRun(t *testing.T) {
 	tests := []struct {
-		name        string
-		swtch       Switch
-		args        []string
-		mockErr     error
-		expectFunc  func(mock *MockGpio) bool
-		expectErr   bool
+		name       string
+		swtch      Switch
+		args       []string
+		mockErr    error
+		expectFunc func(mock *MockGpio) bool
+		expectErr  bool
 	}{
 		{
 			name: "Run with state 'on', ActiveLow false, and args 'on'",
@@ -550,7 +550,7 @@ func TestSwitchRun(t *testing.T) {
 				state:     on,
 				ActiveLow: false,
 			},
-			expectErr:   false,
+			expectErr: false,
 		},
 		{
 			name: "Run with state 'off', ActiveLow true, and args 'on'",
@@ -609,7 +609,7 @@ func TestSwitchRun(t *testing.T) {
 				state:     off,
 				ActiveLow: true,
 			},
-			expectErr:   false,
+			expectErr: false,
 		},
 		{
 			name: "Run with args 'on' with GPIO error",

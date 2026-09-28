@@ -64,8 +64,8 @@ func (app *application) listRPC(ctx context.Context) error {
 		Type: output.TypeDeviceList,
 		Data: devices,
 		Metadata: map[string]string{
-			"server": app.serverAddr,
-			"msg":    "List Response",
+			output.MetaServer: app.serverAddr,
+			output.MetaMsg:    "List Response",
 		},
 	})
 
@@ -132,8 +132,8 @@ func (app *application) lockRPC(ctx context.Context, device string, cmdArgs []st
 			ExpiresAt: res.Msg.GetLock().GetExpiresAt(),
 		},
 		Metadata: map[string]string{
-			"server": app.serverAddr,
-			"msg":    "Lock Response",
+			output.MetaServer: app.serverAddr,
+			output.MetaMsg:    "Lock Response",
 		},
 	})
 
@@ -156,8 +156,8 @@ func (app *application) unlockRPC(ctx context.Context, device string, force bool
 		Type: output.TypeLockResult,
 		Data: output.DeviceEntry{Name: device},
 		Metadata: map[string]string{
-			"server": app.serverAddr,
-			"msg":    "Unlock Response",
+			output.MetaServer: app.serverAddr,
+			output.MetaMsg:    "Unlock Response",
 		},
 	})
 
@@ -179,9 +179,9 @@ func (app *application) commandsRPC(ctx context.Context, device string) error {
 		Type: output.TypeCommandList,
 		Data: res.Msg.GetCommands(),
 		Metadata: map[string]string{
-			"server": app.serverAddr,
-			"msg":    "Commands Response",
-			"device": device,
+			output.MetaServer: app.serverAddr,
+			output.MetaMsg:    "Commands Response",
+			output.MetaDevice: device,
 		},
 	})
 
@@ -207,11 +207,11 @@ func (app *application) detailsRPC(ctx context.Context, device, command, keyword
 		Type: output.TypeCommandDetail,
 		Data: res.Msg.GetDetails(),
 		Metadata: map[string]string{
-			"server":  app.serverAddr,
-			"rpc":     "Details Response",
-			"device":  device,
-			"command": command,
-			"keyword": keyword,
+			output.MetaServer:  app.serverAddr,
+			output.MetaMsg:     "Details Response",
+			output.MetaDevice:  device,
+			output.MetaCommand: command,
+			"keyword":          keyword,
 		},
 	})
 
@@ -256,11 +256,11 @@ func (app *application) runRPC(ctx context.Context, device, command string, cmdA
 	}
 
 	metadata := map[string]string{
-		"server":  app.serverAddr,
-		"msg":     "Run Response",
-		"device":  device,
-		"command": command,
-		"args":    strings.Join(cmdArgs, " "),
+		output.MetaServer:  app.serverAddr,
+		output.MetaMsg:     "Run Response",
+		output.MetaDevice:  device,
+		output.MetaCommand: command,
+		output.MetaArgs:    strings.Join(cmdArgs, " "),
 	}
 
 	// Receive routine

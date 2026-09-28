@@ -61,8 +61,8 @@ func (s *SSH) Help() string {
 	help := strings.Builder{}
 	help.WriteString(abstract)
 	help.WriteString(usage)
-	help.WriteString(fmt.Sprintf("Host: %s, Port: %d\n", s.Host, s.Port))
-	help.WriteString(fmt.Sprintf("User: %s\n", s.User))
+	fmt.Fprintf(&help, "Host: %s, Port: %d\n", s.Host, s.Port)
+	fmt.Fprintf(&help, "User: %s\n", s.User)
 	help.WriteString(description)
 
 	return help.String()

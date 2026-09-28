@@ -55,7 +55,7 @@ func (w *Wait) Help() string {
 	help.WriteString(abstract)
 	help.WriteString(usage)
 	help.WriteString(description1)
-	help.WriteString(fmt.Sprintf("Configured duration is %s\n", DefaultDuration))
+	fmt.Fprintf(&help, "Configured duration is %s\n", DefaultDuration)
 	help.WriteString(description2)
 
 	return help.String()
