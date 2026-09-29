@@ -5,7 +5,7 @@ go 1.26.0
 require (
 	connectrpc.com/connect v1.21.0
 	github.com/bougou/go-ipmi v0.8.2
-	github.com/go-playground/validator/v10 v10.30.4
+	github.com/go-playground/validator/v10 v10.30.5
 	github.com/google/go-cmp v0.7.0
 	github.com/stianeikeland/go-rpio/v4 v4.6.0
 	go.bug.st/serial v1.8.0
