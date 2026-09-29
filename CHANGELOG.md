@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.0.0-alpha.4](https://github.com/BlindspotSoftware/dutctl/compare/v1.0.0-alpha.3...v1.0.0-alpha.4) (2026-09-29)
+
+
+### Bug Fixes
+
+* add missing newline to flash and flash-emulate status output ([2952bf2](https://github.com/BlindspotSoftware/dutctl/commit/2952bf2204b456c06c6c23b6cf352c41bffb616c))
+* add missing newline to gpio-switch on/off/toggle output ([c31818e](https://github.com/BlindspotSoftware/dutctl/commit/c31818e95963accc96440e40d13b7c7285332135))
+* exit non-zero when -check-config or -dry-run fails ([d005565](https://github.com/BlindspotSoftware/dutctl/commit/d005565147e5f29445dbe8ec1d41e1bc6cb44331))
+* wait for the broker workers before the Run handler returns ([84c0fe2](https://github.com/BlindspotSoftware/dutctl/commit/84c0fe25c24d80b936fed791503b8c91e927221d))
+
+
+### Other Work
+
+* bump connectrpc.com/connect from 1.20.0 to 1.21.0 ([aebb60a](https://github.com/BlindspotSoftware/dutctl/commit/aebb60a756aea3f56c2052999fdd37ff19915268))
+* bump github.com/go-playground/validator/v10 ([1dbc32f](https://github.com/BlindspotSoftware/dutctl/commit/1dbc32f8e863394955558f1c75c5bf4f90673e4f))
+* bump golang.org/x/crypto from 0.55.0 to 0.56.0 ([6a3856d](https://github.com/BlindspotSoftware/dutctl/commit/6a3856d9cf25d4f4ef9f9b69019bf37060563954))
+* bump golang.org/x/crypto from 0.56.0 to 0.57.0 ([d6238df](https://github.com/BlindspotSoftware/dutctl/commit/d6238df098b8218542414e23b7ae12bfedb31b0d))
+* resolve golangci-lint v2.14.0 findings ([9a3e7e5](https://github.com/BlindspotSoftware/dutctl/commit/9a3e7e5759bc72de26b0b2cdac47b76b61fa6b3d))
+
 ## [1.0.0-alpha.3](https://github.com/BlindspotSoftware/dutctl/compare/v1.0.0-alpha.2...v1.0.0-alpha.3) (2026-09-09)
 
 
