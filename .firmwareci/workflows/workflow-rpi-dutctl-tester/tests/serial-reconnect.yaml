@@ -1,0 +1,279 @@
+---
+name: serial reconnect
+description: >-
+  Unplug and replug the fake serial device during a session. The serial module
+  reports the loss, reconnects when the device returns and carries on; an idle
+  console is not mistaken for a lost device.
+
+# The scenarios run the installed dutctl on the tester itself, so each can wait
+# for what the client prints (connected, disconnected, reconnected) before it
+# unplugs or replugs the device, instead of guessing with sleeps.
+#
+# A step fails if its command exits non-zero, even when the regex matches, so
+# a step whose expected answer is a zero count (grep -c) ends in "|| true" and
+# lets the regex decide.
+
+defaults:
+  transport_oscar: &transport_oscar
+    proto: ssh
+    options:
+      host: "[[attributes.Host]]"
+      user: oscar
+      identity_file: "/root/.ssh/fwci"
+      # TODO: The ssh keys (identity_file) are hard-coded in the FWCI docker at the moment
+
+  transport_root: &transport_root
+    proto: ssh
+    options:
+      host: "[[attributes.Host]]"
+      user: root
+      identity_file: "/root/.ssh/fwci"
+
+stages:
+  - name: Test serial reconnect
+    steps:
+      - cmd: shell
+        name: Install the fake serial helpers
+        transport: *transport_oscar
+        parameters:
+          command: |
+            cat >/tmp/fwci-serial-lib.sh <<'EOF'
+            in=[[attributes.FakeSerialInput]]
+            out=[[attributes.FakeSerialOutput]]
+
+            # wait_for PATTERN FILE: poll FILE until it contains PATTERN, 30s at most.
+            wait_for() {
+              n=0
+              until grep -q -- "$1" "$2" 2>/dev/null; do
+                n=$((n + 1))
+                if [ "$n" -gt 300 ]; then echo "gave up waiting for '$1' in $2"; return 1; fi
+                sleep 0.1
+              done
+            }
+
+            # unplug: stop the fake serial, as pulling the USB adapter would.
+            # socat removes its pty links when it exits.
+            unplug() {
+              pkill -x socat
+              n=0
+              while [ -e "$out" ] && [ "$n" -lt 50 ]; do n=$((n + 1)); sleep 0.1; done
+              rm -f "$in" "$out"
+            }
+
+            # plug: start the fake serial the way the DUT pre-stage does.
+            plug() {
+              setsid socat pty,rawer,icanon=0,nonblock,link="$in" pty,rawer,icanon=0,nonblock,link="$out" </dev/null >/dev/null 2>&1 &
+              n=0
+              until [ -e "$in" ] && [ -e "$out" ]; do
+                n=$((n + 1))
+                if [ "$n" -gt 50 ]; then echo "fake serial did not come up"; return 1; fi
+                sleep 0.1
+              done
+            }
+
+            # Address the agent on this tester. The scenarios call dutctl
+            # directly, not through a function, so $! is dutctl's own PID.
+            agent=localhost:[[attributes.DutagentPort]]
+            device=[[attributes.DeviceName]]
+
+            pgrep -x socat >/dev/null || plug
+            EOF
+
+      # ===================================
+      #  A quiet port is not a lost device
+      # ===================================
+      - cmd: shell
+        name: Idle console is not reported as lost
+        transport: *transport_oscar
+        parameters:
+          # Longer than the 2s quiet period after which the module checks
+          # whether the device node still exists.
+          command: ". /tmp/fwci-serial-lib.sh; dutctl -s \"$agent\" \"$device\" serial -t 6s 2>&1 | grep -c 'Serial device disconnected' || true"
+          expect:
+            - regex: "(?m)^0$"
+        options:
+          timeout: 30s
+          on-error: continue
+
+      # =========================================
+      #  Expect survives the device disappearing
+      # =========================================
+      - cmd: shell
+        name: Expect matches a prompt sent after a reconnect
+        transport: *transport_oscar
+        parameters:
+          command: |
+            . /tmp/fwci-serial-lib.sh
+            log=/tmp/fwci-serial-reconnect-expect.log
+            rm -f "$log"
+            dutctl -s "$agent" "$device" serial -t 30s -- expect 'dut login:' >"$log" 2>&1 &
+            client=$!
+            wait_for 'Connected to' "$log" && unplug &&
+              wait_for 'Serial device disconnected' "$log" && plug &&
+              wait_for 'Serial device reconnected' "$log" &&
+              echo 'dut login: ' >"$in"
+            wait "$client"
+            echo "dutctl exit status $?" >>"$log"
+            cat "$log"
+          expect:
+            - regex: "matched \"dut login:\""
+        options:
+          timeout: 60s
+          on-error: continue
+
+      - cmd: shell
+        name: Expect run reports the loss once
+        transport: *transport_oscar
+        parameters:
+          command: "grep -c 'Serial device disconnected' /tmp/fwci-serial-reconnect-expect.log"
+          expect:
+            - regex: "(?m)^1$"
+        options:
+          on-error: continue
+
+      - cmd: shell
+        name: Expect run reports the reconnect once
+        transport: *transport_oscar
+        parameters:
+          command: "grep -c 'Serial device reconnected' /tmp/fwci-serial-reconnect-expect.log"
+          expect:
+            - regex: "(?m)^1$"
+        options:
+          on-error: continue
+
+      - cmd: shell
+        name: Expect run exits with status 0 after a reconnect
+        transport: *transport_oscar
+        parameters:
+          command: "grep -o 'dutctl exit status [0-9]*' /tmp/fwci-serial-reconnect-expect.log"
+          expect:
+            - regex: "(?m)^dutctl exit status 0$"
+        options:
+          on-error: continue
+
+      # ========================================================
+      #  The -t deadline still applies while the device is gone
+      # ========================================================
+      - cmd: shell
+        name: Expect times out while the device stays away
+        transport: *transport_oscar
+        parameters:
+          command: |
+            . /tmp/fwci-serial-lib.sh
+            log=/tmp/fwci-serial-reconnect-gone.log
+            rm -f "$log"
+            dutctl -s "$agent" "$device" serial -t 6s -- expect 'never-printed' >"$log" 2>&1 &
+            client=$!
+            wait_for 'Connected to' "$log" && unplug
+            wait "$client"
+            echo "dutctl exit status $?" >>"$log"
+            plug
+            cat "$log"
+          expect:
+            - regex: "timeout of 6s reached without match"
+        options:
+          timeout: 60s
+          on-error: continue
+
+      - cmd: shell
+        name: Run with the device gone exits non-zero
+        transport: *transport_oscar
+        parameters:
+          command: "grep -o 'dutctl exit status [0-9]*' /tmp/fwci-serial-reconnect-gone.log"
+          expect:
+            - regex: "(?m)^dutctl exit status [1-9][0-9]*$"
+        options:
+          on-error: continue
+
+      # =======================================================
+      #  Interactive session survives the device disappearing
+      # =======================================================
+      - cmd: shell
+        name: Interactive session shows output after a reconnect
+        transport: *transport_oscar
+        parameters:
+          # stdin comes from a FIFO, so keys can be typed at chosen moments:
+          # once while the device is unplugged, once after it is back. The
+          # capture starts as soon as the device returns, so keys replayed on
+          # reconnect would show up. The session is ended with SIGINT, as
+          # Ctrl-C would.
+          command: |
+            . /tmp/fwci-serial-lib.sh
+            log=/tmp/fwci-serial-reconnect-i.log
+            rx=/tmp/fwci-serial-reconnect-i-rx.bin
+            keys=/tmp/fwci-serial-reconnect-i.keys
+            rm -f "$log" "$rx" "$keys"
+            mkfifo "$keys"
+            dutctl -s "$agent" "$device" serial -t 30s -i <"$keys" >"$log" 2>&1 &
+            client=$!
+            exec 3>"$keys"
+            wait_for 'Connected to' "$log" && unplug &&
+              wait_for 'Serial device disconnected' "$log" && {
+                printf 'typed-while-unplugged\r' >&3
+                wait_for 'Input discarded' "$log"
+              } && plug && {
+                timeout 20 cat "$in" >"$rx" 2>/dev/null </dev/null &
+                capture=$!
+                wait_for 'Serial device reconnected' "$log" && {
+                  printf 'typed-after-reconnect\r' >&3
+                  echo 'output after reconnect' >"$in"
+                  wait_for 'typed-after-reconnect' "$rx"
+                  wait_for 'output after reconnect' "$log"
+                }
+                kill "$capture"
+              }
+            exec 3>&-
+            kill -INT "$client"
+            wait "$client"
+            cat "$log"
+          expect:
+            - regex: "output after reconnect"
+        options:
+          timeout: 60s
+          on-error: continue
+
+      - cmd: shell
+        name: Only keys typed after the reconnect reach the port
+        transport: *transport_oscar
+        parameters:
+          # Exactly these bytes: keys typed while unplugged must not be
+          # replayed into the returning device.
+          command: "cat -v /tmp/fwci-serial-reconnect-i-rx.bin"
+          expect:
+            - regex: "^typed-after-reconnect\\^M$"
+        options:
+          on-error: continue
+
+      - cmd: shell
+        name: Keys typed while unplugged are reported as discarded
+        transport: *transport_oscar
+        parameters:
+          command: "grep -c 'Input discarded: serial device not connected' /tmp/fwci-serial-reconnect-i.log"
+          expect:
+            - regex: "(?m)^1$"
+        options:
+          on-error: continue
+
+      - cmd: shell
+        name: Interactive session reports the loss once
+        transport: *transport_oscar
+        parameters:
+          command: "grep -c 'Serial device disconnected' /tmp/fwci-serial-reconnect-i.log"
+          expect:
+            - regex: "(?m)^1$"
+        options:
+          on-error: continue
+
+      # ===========================================
+      #  The agent's own log records device loss
+      # ===========================================
+      - cmd: shell
+        name: Agent journal records the device loss
+        transport: *transport_root
+        parameters:
+          # Only this job's agent: the invocation started by the pre-stage.
+          command: "journalctl -u [[attributes.DutagentService]] _SYSTEMD_INVOCATION_ID=$(systemctl show -p InvocationID --value [[attributes.DutagentService]]) --no-pager | grep -c 'serial device disconnected'"
+          expect:
+            - regex: "(?m)^[1-9][0-9]*$"
+        options:
+          on-error: continue

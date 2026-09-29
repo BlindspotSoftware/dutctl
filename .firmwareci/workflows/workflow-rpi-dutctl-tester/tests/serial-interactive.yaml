@@ -1,0 +1,330 @@
+---
+name: serial interactive
+description: >-
+  Drive the serial console with -i. Keystrokes reach the port and port output
+  reaches the client; on a real terminal the client switches to raw mode,
+  forwards control keys to the DUT and quits on Ctrl-A x.
+
+defaults:
+  transport_oscar: &transport_oscar
+    proto: ssh
+    options:
+      host: "[[attributes.Host]]"
+      user: oscar
+      identity_file: "/root/.ssh/fwci"
+      # TODO: The ssh keys (identity_file) are hard-coded in the FWCI docker at the moment
+
+# A step fails if its command exits non-zero, even when the regex matches, so
+# a step whose expected answer is a zero count (grep -c) or a failing dutctl
+# ends in "|| true" and lets the regex decide.
+
+stages:
+  - name: Test interactive serial
+    steps:
+      # ==========================================================
+      #  Piped session: the client under test, stdin not a terminal
+      # ==========================================================
+      - cmd: shell
+        name: Capture the bytes written to the port
+        transport: *transport_oscar
+        parameters:
+          command: "rm -f /tmp/fwci-serial-i-rx.bin; timeout 30 cat [[attributes.FakeSerialInput]] >/tmp/fwci-serial-i-rx.bin 2>/dev/null </dev/null & echo $! >/tmp/fwci-serial-i-rx.pid"
+
+      - cmd: shell
+        name: Feed output from the DUT side
+        transport: *transport_oscar
+        parameters:
+          command: "( for i in $(seq 1 16); do echo 'output from the DUT' > [[attributes.FakeSerialInput]]; sleep 0.5; done ) >/dev/null 2>&1 &"
+
+      - cmd: shell
+        name: Feed screen drawing and a title change from the DUT side
+        transport: *transport_oscar
+        parameters:
+          # Clear screen, cursor home and colour, as full-screen programs draw,
+          # then an OSC window title, which the console must not pass on.
+          command: "( for i in $(seq 1 8); do printf '\\033[2J\\033[H\\033[31mred\\033[0m\\033]0;dut-title\\007\\n' > [[attributes.FakeSerialInput]]; sleep 0.5; done ) >/dev/null 2>&1 &"
+
+      - cmd: shell
+        name: Piped session shows the port output
+        transport:
+          proto: local
+        parameters:
+          command: "printf 'typed-by-client\\r' | [[input.DUTCTL]] -s [[attributes.DutagentEndpoint]] [[attributes.DeviceName]] serial -t 4s -i >serial-i-piped.log 2>&1; echo $? >serial-i-piped.exit; cat serial-i-piped.log"
+          expect:
+            - regex: "output from the DUT"
+        options:
+          timeout: 30s
+          on-error: continue
+
+      - cmd: cmd
+        name: Piped session ends when -t elapses
+        transport:
+          proto: local
+        parameters:
+          executable: cat
+          args: ["serial-i-piped.log"]
+          expect:
+            - regex: "--- Connection closed ---"
+        options:
+          on-error: continue
+
+      - cmd: cmd
+        name: Piped session exits with status 0
+        transport:
+          proto: local
+        parameters:
+          executable: cat
+          args: ["serial-i-piped.exit"]
+          expect:
+            - regex: "(?m)^0$"
+        options:
+          on-error: continue
+
+      - cmd: shell
+        name: Piped stdin does not switch to raw mode
+        transport:
+          proto: local
+        parameters:
+          command: "grep -c 'press Ctrl-A then x to quit' serial-i-piped.log || true"
+          expect:
+            - regex: "(?m)^0$"
+        options:
+          on-error: continue
+
+      - cmd: shell
+        name: Interactive session keeps cursor and colour sequences
+        transport:
+          proto: local
+        parameters:
+          command: "cat -v serial-i-piped.log"
+          expect:
+            - regex: "\\^\\[\\[2J\\^\\[\\[H\\^\\[\\[31mred\\^\\[\\[0m"
+        options:
+          on-error: continue
+
+      - cmd: shell
+        name: Interactive session drops title sequences
+        transport:
+          proto: local
+        parameters:
+          command: "grep -c 'dut-title' serial-i-piped.log || true"
+          expect:
+            - regex: "(?m)^0$"
+        options:
+          on-error: continue
+
+      - cmd: shell
+        name: Piped keystrokes reach the port
+        transport: *transport_oscar
+        parameters:
+          command: "kill $(cat /tmp/fwci-serial-i-rx.pid) 2>/dev/null; cat -v /tmp/fwci-serial-i-rx.bin"
+          expect:
+            - regex: "typed-by-client\\^M"
+        options:
+          on-error: continue
+
+      - cmd: shell
+        name: Interactive mode rejects a step sequence
+        transport:
+          proto: local
+        parameters:
+          command: "[[input.DUTCTL]] -s [[attributes.DutagentEndpoint]] [[attributes.DeviceName]] serial -i -- expect never 2>&1 || true"
+          expect:
+            - regex: "interactive mode \\(-i\\) takes no steps"
+        options:
+          timeout: 15s
+          on-error: continue
+
+      # ==============================================================
+      #  Terminal session: the installed client, run on the tester
+      #  under script(1) so its stdin is a real pseudo-terminal
+      # ==============================================================
+      - cmd: shell
+        name: Terminal session shows the quit hint
+        transport: *transport_oscar
+        parameters:
+          # Typing starts once the hint is printed, which is after raw mode is
+          # on: "hello", Enter, Ctrl-C, Ctrl-D, Ctrl-Z, Ctrl-S, Ctrl-Q, a
+          # 50-line paste, then Ctrl-A x to quit. stty -a runs in the same
+          # terminal after dutctl exits, to show whether it was restored.
+          command: |
+            rx=/tmp/fwci-serial-tty-rx.bin
+            log=/tmp/fwci-serial-tty.log
+            rm -f "$rx" "$log"
+            timeout 60 cat [[attributes.FakeSerialInput]] >"$rx" 2>/dev/null </dev/null &
+            capture=$!
+            {
+              n=0
+              until grep -q 'press Ctrl-A then x to quit' "$log" 2>/dev/null || [ "$n" -gt 150 ]; do
+                n=$((n + 1)); sleep 0.1
+              done
+              printf 'hello\r'; sleep 0.5
+              printf '\003'; sleep 0.5
+              printf '\004\032\023\021'; sleep 0.5
+              i=1
+              while [ "$i" -le 50 ]; do
+                printf 'paste-line-%02d-abcdefghijklmnopqrstuvwxyz0123456789\r' "$i"
+                i=$((i + 1))
+              done
+              sleep 1
+              printf '\001x'; sleep 2
+            } | script -qefc 'dutctl -s localhost:[[attributes.DutagentPort]] [[attributes.DeviceName]] serial -i; echo "dutctl exit status $?"; stty -a' /dev/null >"$log" 2>&1
+            kill "$capture" 2>/dev/null
+            cat -v "$log"
+          expect:
+            - regex: "press Ctrl-A then x to quit"
+        options:
+          timeout: 60s
+          on-error: continue
+
+      - cmd: shell
+        name: Ctrl-A x ends the terminal session cleanly
+        transport: *transport_oscar
+        parameters:
+          command: "grep -a -o 'dutctl exit status [0-9]*' /tmp/fwci-serial-tty.log"
+          expect:
+            - regex: "(?m)^dutctl exit status 0$"
+        options:
+          on-error: continue
+
+      - cmd: shell
+        name: Terminal session forwards Enter as CR
+        transport: *transport_oscar
+        parameters:
+          command: "cat -v /tmp/fwci-serial-tty-rx.bin"
+          expect:
+            - regex: "hello\\^M"
+        options:
+          on-error: continue
+
+      - cmd: shell
+        name: Terminal session forwards Ctrl-C to the DUT
+        transport: *transport_oscar
+        parameters:
+          command: "cat -v /tmp/fwci-serial-tty-rx.bin"
+          expect:
+            - regex: "\\^C"
+        options:
+          on-error: continue
+
+      - cmd: shell
+        name: Terminal session forwards Ctrl-D, Ctrl-Z, Ctrl-S and Ctrl-Q
+        transport: *transport_oscar
+        parameters:
+          command: "cat -v /tmp/fwci-serial-tty-rx.bin"
+          expect:
+            - regex: "\\^D\\^Z\\^S\\^Q"
+        options:
+          on-error: continue
+
+      - cmd: shell
+        name: A 50-line paste reaches the DUT complete
+        transport: *transport_oscar
+        parameters:
+          command: "tr '\\r' '\\n' </tmp/fwci-serial-tty-rx.bin | grep -c 'paste-line-[0-9][0-9]-abcdefghijklmnopqrstuvwxyz0123456789$'"
+          expect:
+            - regex: "(?m)^50$"
+        options:
+          on-error: continue
+
+      - cmd: shell
+        name: Quit sequence is not forwarded to the DUT
+        transport: *transport_oscar
+        parameters:
+          # The last bytes the port received must be the last pasted line:
+          # nothing after it (no Ctrl-A, no x), and not nothing at all.
+          command: "tail -c 60 /tmp/fwci-serial-tty-rx.bin | cat -v"
+          expect:
+            - regex: "paste-line-50-abcdefghijklmnopqrstuvwxyz0123456789\\^M$"
+        options:
+          on-error: continue
+
+      - cmd: shell
+        name: Terminal is restored after the session
+        transport: *transport_oscar
+        parameters:
+          command: "grep -a -o -E -- '-?isig -?icanon -?iexten -?echo ' /tmp/fwci-serial-tty.log"
+          expect:
+            - regex: "(?m)^isig icanon iexten echo $"
+        options:
+          on-error: continue
+
+      - cmd: shell
+        name: Session ended by -t on a terminal
+        transport: *transport_oscar
+        parameters:
+          # The agent ends this one; sleep keeps script's input open meanwhile.
+          command: |
+            log=/tmp/fwci-serial-tty-timeout.log
+            sleep 8 | script -qefc 'dutctl -s localhost:[[attributes.DutagentPort]] [[attributes.DeviceName]] serial -t 3s -i; echo "dutctl exit status $?"; stty -a' /dev/null >"$log" 2>&1
+            cat -v "$log"
+          expect:
+            - regex: "--- Connection closed ---"
+        options:
+          timeout: 30s
+          on-error: continue
+
+      - cmd: shell
+        name: Session ended by -t exits with status 0
+        transport: *transport_oscar
+        parameters:
+          command: "grep -a -o 'dutctl exit status [0-9]*' /tmp/fwci-serial-tty-timeout.log"
+          expect:
+            - regex: "(?m)^dutctl exit status 0$"
+        options:
+          on-error: continue
+
+      - cmd: shell
+        name: Session ended by -t restores the terminal
+        transport: *transport_oscar
+        parameters:
+          command: "grep -a -o -E -- '-?isig -?icanon -?iexten -?echo ' /tmp/fwci-serial-tty-timeout.log"
+          expect:
+            - regex: "(?m)^isig icanon iexten echo $"
+        options:
+          on-error: continue
+
+      - cmd: shell
+        name: A command configured with -i opens a terminal session
+        transport: *transport_oscar
+        parameters:
+          # "console" is serial with args: ["-i"] in the test config, so it is
+          # called without arguments. Quit with Ctrl-A x once the hint shows.
+          command: |
+            log=/tmp/fwci-serial-console.log
+            rm -f "$log"
+            {
+              n=0
+              until grep -q 'press Ctrl-A then x to quit' "$log" 2>/dev/null || [ "$n" -gt 150 ]; do
+                n=$((n + 1)); sleep 0.1
+              done
+              printf '\001x'; sleep 2
+            } | script -qefc 'dutctl -s localhost:[[attributes.DutagentPort]] [[attributes.DeviceName]] console; echo "dutctl exit status $?"' /dev/null >"$log" 2>&1
+            cat -v "$log"
+          expect:
+            - regex: "press Ctrl-A then x to quit"
+        options:
+          timeout: 30s
+          on-error: continue
+
+      - cmd: shell
+        name: The configured console quits cleanly with Ctrl-A x
+        transport: *transport_oscar
+        parameters:
+          command: "grep -a -o 'dutctl exit status [0-9]*' /tmp/fwci-serial-console.log"
+          expect:
+            - regex: "(?m)^dutctl exit status 0$"
+        options:
+          on-error: continue
+
+      - cmd: shell
+        name: Agent serves a new session after a quit
+        transport:
+          proto: local
+        parameters:
+          command: "[[input.DUTCTL]] -s [[attributes.DutagentEndpoint]] [[attributes.DeviceName]] serial -t 2s -i </dev/null 2>&1"
+          expect:
+            - regex: "--- Connection closed ---"
+        options:
+          timeout: 15s
+          on-error: continue
