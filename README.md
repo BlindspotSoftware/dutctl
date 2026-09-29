@@ -44,8 +44,8 @@ Download the [latest release](https://github.com/BlindspotSoftware/dutctl/releas
 
 <!-- x-release-please-start-version -->
 ```bash
-go install github.com/BlindspotSoftware/dutctl/cmds/dutctl@v1.0.0-alpha.3
-go install github.com/BlindspotSoftware/dutctl/cmds/dutagent@v1.0.0-alpha.3
+go install github.com/BlindspotSoftware/dutctl/cmds/dutctl@v1.0.0-alpha.4
+go install github.com/BlindspotSoftware/dutctl/cmds/dutagent@v1.0.0-alpha.4
 ```
 <!-- x-release-please-end -->
 
