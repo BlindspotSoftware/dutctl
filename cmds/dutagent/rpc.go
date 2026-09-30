@@ -219,7 +219,8 @@ const defaultLockDuration = 30 * time.Minute
 // Errors: CodeUnauthenticated for an anonymous caller; CodeNotFound for an unknown
 // device (dut.ErrDeviceNotFound); CodeInvalidArgument for a negative duration
 // (locker.ErrInvalidDuration); CodeFailedPrecondition when another owner holds the
-// device (locker.ErrWrongOwner); CodeInternal otherwise.
+// device (locker.ErrWrongOwner) or the agent is shutting down (locker.ErrDraining),
+// which FirmwareCI reads as "busy, try later"; CodeInternal otherwise.
 func (a *rpcService) Lock(
 	ctx context.Context,
 	req *connect.Request[pb.LockRequest],
@@ -262,7 +263,7 @@ func (a *rpcService) Lock(
 		// ErrWrongOwner is CodeFailedPrecondition on acquire (the device is busy) —
 		// deliberately different from release in Unlock, which is CodePermissionDenied
 		// (you may not unlock another user's lock).
-		case errors.Is(lockErr, locker.ErrWrongOwner):
+		case errors.Is(lockErr, locker.ErrWrongOwner), errors.Is(lockErr, locker.ErrDraining):
 			return nil, connect.NewError(connect.CodeFailedPrecondition, lockErr)
 		case errors.Is(lockErr, locker.ErrInvalidDuration):
 			return nil, connect.NewError(connect.CodeInvalidArgument, lockErr)

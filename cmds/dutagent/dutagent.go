@@ -42,6 +42,7 @@ const (
 	versionFlagInfo = `Print version information and exit`
 	logLevelInfo    = `Log level: debug, info, warn, or error`
 	logJSONInfo     = `Emit logs as JSON instead of human-readable text`
+	drainInfo       = `On SIGTERM, how long to wait for running jobs (device reservations) to end; 0 means no limit`
 )
 
 func newAgent(stdout io.Writer, exitFunc func(int), args []string) *agent {
@@ -59,6 +60,7 @@ func newAgent(stdout io.Writer, exitFunc func(int), args []string) *agent {
 	fs.BoolVar(&agt.versionFlag, "v", false, versionFlagInfo)
 	fs.StringVar(&agt.logLevel, "log", "info", logLevelInfo)
 	fs.BoolVar(&agt.logJSON, "log-json", false, logJSONInfo)
+	fs.DurationVar(&agt.drainTimeout, "drain-timeout", defaultDrainTimeout, drainInfo)
 	//nolint:errcheck // flag.Parse always returns no error because of flag.ExitOnError
 	fs.Parse(args[1:])
 
@@ -71,14 +73,15 @@ type agent struct {
 	exit   func(int)
 
 	// flags
-	versionFlag bool
-	address     string
-	configPath  string
-	checkConfig bool
-	dryRun      bool
-	server      string
-	logLevel    string
-	logJSON     bool
+	versionFlag  bool
+	address      string
+	configPath   string
+	checkConfig  bool
+	dryRun       bool
+	server       string
+	logLevel     string
+	logJSON      bool
+	drainTimeout time.Duration
 
 	// state
 	config            config
@@ -133,6 +136,8 @@ func (agt *agent) cleanup(code exitCode) {
 	agt.exit(int(code))
 }
 
+// loadConfig reads the configuration file. It runs once, at startup: a changed
+// file takes effect only with the next start, never under a running job.
 func (agt *agent) loadConfig() error {
 	slog.Info("loading configuration", "path", agt.configPath)
 
@@ -167,14 +172,14 @@ func printInitErr(err error) {
 	slog.Error("module error", "err", err)
 }
 
-// startRPCService starts the RPC service and serves until ctx is cancelled (a
-// signal), draining in-flight requests, or until the server stops on its own. It
-// returns the server error, if any; the caller classifies a graceful stop via
-// ctx.Err().
-func (agt *agent) startRPCService(ctx context.Context) error {
+// startRPCService starts the RPC service and serves until ctx is cancelled,
+// draining in-flight requests, or until the server stops on its own. It returns
+// the server error, if any. lk is the device locker, shared with the graceful
+// shutdown (see drain).
+func (agt *agent) startRPCService(ctx context.Context, lk *locker.Locker) error {
 	service := &rpcService{
 		devices: agt.config.Devices,
-		locker:  locker.New(),
+		locker:  lk,
 	}
 
 	mux := http.NewServeMux()
@@ -240,12 +245,25 @@ func (agt *agent) start() {
 		}
 	}()
 
-	// A signal (Ctrl-C / SIGTERM / SIGQUIT) cancels ctx, which drives a graceful
-	// shutdown: the RPC service drains in-flight requests, then modules are
-	// de-initialised. This replaces an out-of-band signal handler, so shutdown runs
-	// on this goroutine rather than racing the running service.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
-	defer stop()
+	// The first signal (SIGTERM from systemd, Ctrl-C, SIGQUIT) cancels ctx: it
+	// aborts a slow startup, or, once serving, starts a graceful shutdown that
+	// lets running jobs finish (see drain). A second signal stops at once.
+	// Shutdown runs on this goroutine rather than racing the running service.
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT)
+
+	defer signal.Stop(signals)
+
+	ctx, requestStop := context.WithCancel(context.Background())
+	defer requestStop()
+
+	go func() {
+		select {
+		case <-signals:
+			requestStop()
+		case <-ctx.Done():
+		}
+	}()
 
 	err := agt.loadConfig()
 	if agt.checkConfig {
@@ -294,22 +312,40 @@ func (agt *agent) start() {
 		}
 	}
 
-	err = agt.startRPCService(ctx)
-	if ctx.Err() != nil {
-		// A signal cancelled ctx: graceful shutdown. ListenAndServe has drained; a
-		// non-nil err means the drain did not fully complete within the grace
-		// period, which we accept — the process exit closes what remains.
-		if err != nil {
-			slog.Warn("graceful shutdown did not fully drain in time", "err", err)
-		}
+	// The server runs on its own context: it keeps serving while running jobs
+	// finish, and stops only once drain returns.
+	locks := locker.New()
+	serveCtx, stopServing := context.WithCancel(context.Background())
 
-		slog.Info("shutting down")
-		agt.cleanup(exit0)
+	defer stopServing()
+
+	served := make(chan error, 1)
+
+	go func() { served <- agt.startRPCService(serveCtx, locks) }()
+
+	select {
+	case err = <-served:
+		// The server stopped on its own (e.g. failed to bind).
+		slog.Error("rpc service stopped", "err", err)
+		agt.cleanup(exit1)
+
+		return
+	case <-ctx.Done():
 	}
 
-	// Reached only if the server stopped on its own (e.g. failed to bind).
-	slog.Error("rpc service stopped", "err", err)
-	agt.cleanup(exit1)
+	drain(ctx, locks, agt.drainTimeout, signals)
+	stopServing()
+
+	// ListenAndServe has stopped accepting and drained in-flight requests; a
+	// non-nil err means a command without a reservation outlived the grace
+	// period, which we accept: the process exit closes what remains.
+	err = <-served
+	if err != nil {
+		slog.Warn("graceful shutdown did not fully drain in time", "err", err)
+	}
+
+	slog.Info("shutting down")
+	agt.cleanup(exit0)
 }
 
 func (agt *agent) printVersion() {
