@@ -15,6 +15,7 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/BlindspotSoftware/dutctl/internal/dutagent/locker"
+	"github.com/BlindspotSoftware/dutctl/internal/dutagent/session"
 	"github.com/BlindspotSoftware/dutctl/pkg/dut"
 	"github.com/BlindspotSoftware/dutctl/pkg/module"
 
@@ -310,6 +311,32 @@ func TestRunArgsWithoutReceiver(t *testing.T) {
 	}
 }
 
+// The arguments are resolved before the auto-lock is taken, so a request that
+// cannot run reports its own fault even on a device someone else holds, and
+// never touches the lock.
+func TestRunArgsResolvedBeforeLocking(t *testing.T) {
+	svc := newRunService(func(context.Context, module.Session, ...string) error { return nil })
+
+	cmd := svc.devices[testDevice].Cmds[testCommand]
+	cmd.Modules[0].Config.Passthrough = false
+	svc.devices[testDevice].Cmds[testCommand] = cmd
+
+	if _, err := svc.locker.Lock(testDevice, "bob", time.Hour); err != nil {
+		t.Fatalf("setup Lock: %v", err)
+	}
+
+	stream := newClientStream(t, commandReq(testDevice, testCommand, "stray"))
+
+	err := svc.run(context.Background(), stream, "alice")
+	if connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("code = %v (err = %v), want InvalidArgument", connect.CodeOf(err), err)
+	}
+
+	if hold, ok := deviceHold(svc); !ok || hold.Owner != "bob" || hold.Kind != locker.Reserved {
+		t.Errorf("hold = %+v (ok=%v), want bob's reservation untouched", hold, ok)
+	}
+}
+
 func TestRunModuleFailureReleasesDevice(t *testing.T) {
 	tests := []struct {
 		name string
@@ -522,5 +549,226 @@ func TestRunNoSendOutlivesRun(t *testing.T) {
 
 	if got := stream.prints(); len(got) != 1 {
 		t.Errorf("client received %q, want the module's one message", got)
+	}
+}
+
+func TestFindCommand(t *testing.T) {
+	// makeDevlist builds a device offering one command of n modules, of which
+	// the first passthrough are marked passthrough (more than one makes the
+	// command invalid).
+	makeDevlist := func(n, passthrough int) dut.Devlist {
+		modules := make([]dut.Module, 0, n)
+
+		for i := range n {
+			mod := dut.Module{}
+			mod.Config.Name = fmt.Sprintf("mod%d", i)
+			mod.Config.Passthrough = i < passthrough
+			modules = append(modules, mod)
+		}
+
+		return dut.Devlist{testDevice: dut.Device{Cmds: map[string]dut.Command{testCommand: {Modules: modules}}}}
+	}
+
+	tests := []struct {
+		name     string
+		devs     dut.Devlist
+		device   string
+		command  string
+		wantCode connect.Code // 0 means success
+	}{
+		{name: "found", devs: makeDevlist(1, 1), device: testDevice, command: testCommand},
+		{name: "unknown device", devs: makeDevlist(1, 1), device: "ghost", command: testCommand, wantCode: connect.CodeNotFound},
+		{name: "unknown command", devs: makeDevlist(1, 1), device: testDevice, command: "ghost", wantCode: connect.CodeNotFound},
+		{name: "command without modules", devs: makeDevlist(0, 0), device: testDevice, command: testCommand, wantCode: connect.CodeInternal},
+		{name: "two passthrough modules", devs: makeDevlist(2, 2), device: testDevice, command: testCommand, wantCode: connect.CodeInternal},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd, err := findCommand(tt.devs, tt.device, tt.command)
+
+			if tt.wantCode != 0 {
+				if connect.CodeOf(err) != tt.wantCode {
+					t.Fatalf("code = %v (err = %v), want %v", connect.CodeOf(err), err, tt.wantCode)
+				}
+
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if len(cmd.Modules) != 1 {
+				t.Errorf("found command with %d modules, want 1", len(cmd.Modules))
+			}
+		})
+	}
+}
+
+func TestClearAutoLock(t *testing.T) {
+	t.Run("clears_auto_slot_only", func(t *testing.T) {
+		l := locker.New()
+		if _, err := l.Lock(testDevice, "alice", time.Hour); err != nil {
+			t.Fatalf("setup Lock: %v", err)
+		}
+
+		if _, err := l.AutoLock(testDevice, "alice"); err != nil {
+			t.Fatalf("setup AutoLock: %v", err)
+		}
+
+		clearAutoLock(context.Background(), l, testDevice, "alice")
+
+		got, ok := l.StatusAll()[testDevice]
+		if !ok || got.Kind != locker.Reserved {
+			t.Errorf("StatusAll[%s] = %+v (ok=%v), want the reservation intact", testDevice, got, ok)
+		}
+
+		// Releasing the reservation must leave the device free, proving the Busy
+		// hold really was cleared rather than merely shadowed by the reservation.
+		if err := l.ClearLock(testDevice, "alice"); err != nil {
+			t.Fatalf("ClearLock: %v", err)
+		}
+
+		if _, ok := l.StatusAll()[testDevice]; ok {
+			t.Error("Busy hold still present after clearAutoLock")
+		}
+	})
+
+	t.Run("missing_auto_lock_is_tolerated", func(t *testing.T) {
+		l := locker.New()
+
+		// Nothing held: ClearAutoLock returns ErrNotLocked, which clearAutoLock
+		// swallows. The test asserts it neither panics nor fails.
+		clearAutoLock(context.Background(), l, testDevice, "alice")
+	})
+}
+
+func TestRunModules(t *testing.T) {
+	// recorder returns a module that records the args it ran with and returns err.
+	recorder := func(got *[]string, runs *int, err error) dut.Module {
+		mod := dut.Module{Module: funcModule(func(_ context.Context, _ module.Session, args ...string) error {
+			*runs++
+			*got = append([]string{}, args...)
+
+			return err
+		})}
+		mod.Config.Name = "recorder"
+
+		return mod
+	}
+
+	t.Run("each module gets its own args", func(t *testing.T) {
+		var firstArgs, secondArgs []string
+
+		var firstRuns, secondRuns int
+
+		mods := []dut.Module{recorder(&firstArgs, &firstRuns, nil), recorder(&secondArgs, &secondRuns, nil)}
+
+		err := runModules(context.Background(), nil, mods, [][]string{{"x", "y"}, {"conf1"}})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if firstRuns != 1 || fmt.Sprint(firstArgs) != "[x y]" {
+			t.Errorf("first module: runs=%d args=%v, want 1 run with [x y]", firstRuns, firstArgs)
+		}
+
+		if secondRuns != 1 || fmt.Sprint(secondArgs) != "[conf1]" {
+			t.Errorf("second module: runs=%d args=%v, want 1 run with [conf1]", secondRuns, secondArgs)
+		}
+	})
+
+	t.Run("stops at the first failure", func(t *testing.T) {
+		var firstArgs, secondArgs []string
+
+		var firstRuns, secondRuns int
+
+		failure := errors.New("helper failed")
+		mods := []dut.Module{recorder(&firstArgs, &firstRuns, failure), recorder(&secondArgs, &secondRuns, nil)}
+
+		err := runModules(context.Background(), nil, mods, [][]string{nil, nil})
+		if !errors.Is(err, failure) {
+			t.Fatalf("err = %v, want %v", err, failure)
+		}
+
+		if firstRuns != 1 || secondRuns != 0 {
+			t.Errorf("runs = %d, %d, want 1, 0", firstRuns, secondRuns)
+		}
+	})
+
+	t.Run("runs nothing once cancelled", func(t *testing.T) {
+		var args []string
+
+		var runs int
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		err := runModules(ctx, nil, []dut.Module{recorder(&args, &runs, nil)}, [][]string{nil})
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("err = %v, want context.Canceled", err)
+		}
+
+		if runs != 0 {
+			t.Errorf("module ran %d time(s) on a cancelled context", runs)
+		}
+	})
+}
+
+func TestWaitModules(t *testing.T) {
+	boom := errors.New("boom")
+
+	tests := []struct {
+		name      string
+		cancelled bool
+		moduleErr []error // values sent on the module channel, in order
+		brokerErr []error // values sent on the broker channel, which is then closed
+		wantCode  connect.Code
+	}{
+		{name: "modules and broker succeed", moduleErr: []error{nil}},
+		{name: "context cancelled", cancelled: true, wantCode: connect.CodeCanceled},
+		{name: "module fails", moduleErr: []error{boom}, wantCode: connect.CodeAborted},
+		{name: "broker fails", brokerErr: []error{boom}, wantCode: connect.CodeInternal},
+		{name: "broker rejects a file transfer", brokerErr: []error{session.ErrBadFileTransfer}, wantCode: connect.CodeInvalidArgument},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			if tt.cancelled {
+				cancel()
+			}
+
+			moduleErrCh := make(chan error, 1)
+			for _, err := range tt.moduleErr {
+				moduleErrCh <- err
+			}
+
+			brokerErrCh := make(chan error, 2)
+			for _, err := range tt.brokerErr {
+				brokerErrCh <- err
+			}
+
+			close(brokerErrCh)
+
+			// A case that never reports on the module channel must still
+			// end: its outcome comes from the broker channel or the context.
+			err := waitModules(ctx, moduleErrCh, brokerErrCh)
+
+			if tt.wantCode == 0 {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+
+				return
+			}
+
+			if connect.CodeOf(err) != tt.wantCode {
+				t.Fatalf("code = %v (err = %v), want %v", connect.CodeOf(err), err, tt.wantCode)
+			}
+		})
 	}
 }

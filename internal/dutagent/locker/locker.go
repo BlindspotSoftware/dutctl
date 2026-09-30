@@ -309,21 +309,6 @@ func (l *Locker) ClearAutoLock(device, owner string) error {
 	return nil
 }
 
-// CheckAccess reports whether owner may operate on device. It returns nil if
-// neither hold is held or if every held hold is owned by owner; otherwise it
-// returns a *Error carrying the blocking holder.
-func (l *Locker) CheckAccess(device, owner string) error {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	blocker := l.checkLocked(device, owner)
-	if blocker != nil {
-		return blocker
-	}
-
-	return nil
-}
-
 // StatusAll returns the effective hold for every device that currently has one.
 // A device with a live reservation reports that Reserved hold (it carries the
 // meaningful expiry); a device that is only busy reports its Busy hold. Expired
