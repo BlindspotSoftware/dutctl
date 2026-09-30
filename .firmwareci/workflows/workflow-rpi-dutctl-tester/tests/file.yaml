@@ -29,6 +29,12 @@ stages:
         parameters:
           command: "echo 'uploaded-by-file-module' > upload-source.txt"
 
+      - cmd: shell
+        name: Clear a stale upload from an earlier run
+        transport: *transport_root
+        parameters:
+          command: "rm -f /tmp/dutctl-fwci-upload.txt"
+
       - cmd: cmd
         name: Upload the file to the dutagent
         transport:
@@ -42,6 +48,8 @@ stages:
               "upload",
               "upload-source.txt",
             ]
+          expect:
+            - regex: "sent \"upload-source.txt\" \\(.*sha256 8c33bbe7f8bc"
         options:
           timeout: 15s
 
@@ -72,6 +80,8 @@ stages:
               "download",
               "download-target.txt",
             ]
+          expect:
+            - regex: "received \"download-target.txt\" \\(.*sha256 62d71bcc7f71"
         options:
           timeout: 15s
 
@@ -85,8 +95,41 @@ stages:
           expect:
             - regex: "downloaded-by-file-module"
 
+      - cmd: copy
+        name: Copy the corrupting proxy to the dutagent
+        transport: *transport_oscar
+        parameters:
+          source: "[[input.CORRUPT_PROXY]]"
+          destination: "/tmp/corrupt-proxy.py"
+
+      - cmd: shell
+        name: Start the corrupting proxy
+        transport: *transport_oscar
+        parameters:
+          command: "kill \"$(cat /tmp/corrupt-proxy.pid 2>/dev/null)\" 2>/dev/null || true; setsid nohup python3 /tmp/corrupt-proxy.py --listen 0.0.0.0:2025 --target 127.0.0.1:[[attributes.DutagentPort]] --marker uploaded-by-file-module > /tmp/corrupt-proxy.log 2>&1 < /dev/null & echo $! > /tmp/corrupt-proxy.pid; sleep 1; cat /tmp/corrupt-proxy.log"
+          expect:
+            - regex: "marker 'uploaded-by-file-module'"
+
+      - cmd: shell
+        name: A corrupted upload is rejected
+        transport:
+          proto: local
+        parameters:
+          command: "[[input.DUTCTL]] -s [[attributes.Host]]:2025 [[attributes.DeviceName]] upload upload-source.txt 2>&1 || true"
+          expect:
+            - regex: "file corrupted in transit"
+            - regex: "want 8c33bbe7f8bcb95148b49fe1aeccb0f6b6cb755f3bbc3b4a07832617d4688f7e"
+        options:
+          timeout: 30s
+
+      - cmd: shell
+        name: Stop the corrupting proxy
+        transport: *transport_oscar
+        parameters:
+          command: "kill \"$(cat /tmp/corrupt-proxy.pid 2>/dev/null)\" 2>/dev/null || true; rm -f /tmp/corrupt-proxy.py /tmp/corrupt-proxy.pid /tmp/corrupt-proxy.log"
+
       - cmd: shell
         name: Remove the transferred files from the dutagent
-        transport: *transport_oscar
+        transport: *transport_root
         parameters:
           command: "rm -f /tmp/dutctl-fwci-upload.txt /tmp/dutctl-fwci-download.txt || true"

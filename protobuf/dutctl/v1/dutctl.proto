@@ -114,6 +114,7 @@ message FileRequest {
 message File {
   string path = 1;
   bytes content = 2;
+  bytes sha256 = 3; // Raw 32-byte SHA-256 of content. Empty only from peers predating this field.
 }
 
 // LockRequest is sent by the client to acquire or extend a lock on a device.
