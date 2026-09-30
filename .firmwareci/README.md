@@ -19,6 +19,13 @@ For detailed information on FirmwareCI, please refer to the [official documentat
 Each dutctl module gets its own test file, so a failure names the module that
 broke instead of one combined run.
 
+The serial module is still one module, but its tests are split across three
+test files (see [workflows](#workflows)). The reconnect test stops and restarts
+the fake serial, so it runs as its own job. The terminal and reconnect scenarios
+run the installed `dutctl` on the tester itself: raw mode needs a real
+pseudo-terminal (`script`), and the reconnect steps must react to what the
+client prints.
+
 The setup and tear-down around every test is the same and rather involved:
 
 - copy over the compiled binaries
@@ -55,7 +62,10 @@ Another huge advantage is, that with this approach, that run-time dependencies a
 │   └── post.yaml           tear-down applied to every test on this DUT
 └── workflows/workflow-rpi-dutctl-tester/
     ├── workflow.yaml
-    └── tests/              one file per dutctl module
+    └── tests/              one test file per dutctl module, three for serial:
+        ├── serial.yaml               monitor mode
+        ├── serial-interactive.yaml   interactive console (-i)
+        └── serial-reconnect.yaml     device unplugged and replugged mid-session
 ```
 
 ### Taskfile
@@ -72,7 +82,14 @@ tests reference (`[[attributes.DeviceName]]`, `[[attributes.DutagentEndpoint]]`,
 hostname or port.
 
 ### workflows
-The `workflows` directory is where the tests live.
+The `workflows` directory is where the tests live. Every module has one test
+file, except the serial module, whose tests are split across three test files:
+
+- `serial.yaml` streams the console in monitor mode.
+- `serial-interactive.yaml` drives `-i`, both piped and on a real terminal
+  (raw mode, Ctrl-C forwarding, the Ctrl-A x quit).
+- `serial-reconnect.yaml` unplugs and replugs the fake serial during expect
+  and interactive sessions.
 
 
 ## Adding a new test

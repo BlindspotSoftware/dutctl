@@ -5,10 +5,14 @@
 package serial
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"regexp"
+	"sync"
 	"time"
+
+	"github.com/BlindspotSoftware/dutctl/internal/log"
 )
 
 // port is the minimal serial-port surface the serial module needs. It is a
@@ -31,6 +35,18 @@ const matchWindow = 64 * 1024
 // readChunk is the size of a single read from the serial port.
 const readChunk = 4096
 
+// reconnectInterval is the delay between attempts to reopen the serial device
+// after it has disappeared (e.g. an FTDI chip that powers down with the DUT).
+const reconnectInterval = 500 * time.Millisecond
+
+// deviceLossGraceDefault is how long a quiet port is tolerated before the module
+// checks whether the device node still exists. A read timeout and a removed
+// device look identical (both yield a data-less read), so the module waits this
+// long, then confirms via the node check before treating quiet as loss. Kept
+// short so a real disconnect is noticed quickly, but long enough not to stat the
+// node on every idle read.
+const deviceLossGraceDefault = 2 * time.Second
+
 // engine drives a serial port for the scripted send/expect mode. It owns a
 // rolling match buffer (never reset on newline) and tees every byte read from
 // the port to an output sink (the client console in scripted mode).
@@ -42,14 +58,255 @@ type engine struct {
 	sink io.Writer
 	buf  []byte
 
-	// filter strips terminal escape sequences from output when true (disabled
-	// by -keep-escapes); remainder carries a partial sequence split across reads.
-	filter    bool
+	// escapes selects which terminal escape sequences are removed from the
+	// output; remainder carries a partial sequence split across reads.
+	escapes   escapePolicy
 	remainder []byte
+
+	// mu guards p, which is swapped when the device disappears and is reopened
+	// (see reconnect). It is only ever held briefly, never across port I/O, so
+	// the read loop can always fetch the handle.
+	//
+	// wmu serialises writes against closing the port: portWrite holds it across
+	// the (possibly blocking) Write, and closeCurrent takes it before closing, so
+	// a port is never closed under an in-flight write. A stuck write thus delays
+	// only a reconnect, never a read. Lock order is wmu before mu.
+	mu  sync.Mutex
+	wmu sync.Mutex
+
+	// dropped records, under mu, that input arrived while the device was gone
+	// and was discarded; reconnect reports it once per outage.
+	dropped bool
+
+	// reopen reopens the device after loss; a nil reopen disables auto-reconnect
+	// (used by the direct engine unit tests and the post-send drain). present
+	// reports whether the device node still exists; grace is the quiet period
+	// tolerated before the node is checked. All three are set together via
+	// withReconnect.
+	reopen  func() (port, error)
+	present func() bool
+	grace   time.Duration
 }
 
-func newEngine(p port, sink io.Writer, filter bool) *engine {
-	return &engine{p: p, sink: sink, buf: make([]byte, 0, readChunk), filter: filter}
+// escapePolicy selects which terminal escape sequences the engine removes from
+// serial output before it reaches the client.
+type escapePolicy int
+
+const (
+	// escStripAll removes every sequence, so the client sees and expect
+	// matches the plain text. Monitor and step modes use it by default.
+	escStripAll escapePolicy = iota
+	// escKeepDisplay keeps the sequences that draw the screen (cursor movement,
+	// colour, erase, scrolling, modes), which full-screen programs such as vi
+	// need, and the CSI queries answered with plain numbers (cursor position,
+	// device attributes), whose answer reaches the DUT as input. It removes those
+	// that act on the terminal itself or make it answer with text the DUT chose:
+	// string sequences (titles, clipboard, string queries) and window operations.
+	// Interactive mode uses it by default.
+	escKeepDisplay
+	// escKeepAll forwards every sequence unchanged (-keep-escapes).
+	escKeepAll
+)
+
+func newEngine(p port, sink io.Writer, escapes escapePolicy) *engine {
+	return &engine{p: p, sink: sink, buf: make([]byte, 0, readChunk), escapes: escapes}
+}
+
+// withReconnect enables auto-reconnect on device loss for this engine. reopen
+// re-opens the device, present reports whether its node still exists, and grace
+// is how long a quiet port is tolerated before the node is checked. Run wires
+// this up for the streaming and expect modes; it is left unset for the direct
+// engine unit tests and for the post-send drain, which stay non-reconnecting.
+func (e *engine) withReconnect(reopen func() (port, error), present func() bool, grace time.Duration) {
+	e.reopen = reopen
+	e.present = present
+	e.grace = grace
+}
+
+// currentPort returns the live port handle under the lock, so a caller can read
+// or write it without racing a reconnect that swaps it.
+func (e *engine) currentPort() port {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	return e.p
+}
+
+// takeDropped reports whether input was discarded since the last call, and
+// clears the record.
+func (e *engine) takeDropped() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	dropped := e.dropped
+	e.dropped = false
+
+	return dropped
+}
+
+// setPort installs a freshly opened port after a reconnect.
+func (e *engine) setPort(p port) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	e.p = p
+}
+
+// closeCurrent closes the live port (best-effort) and clears the handle, so a
+// dropped session is fully discarded and the stdin pump stops writing to it.
+func (e *engine) closeCurrent() {
+	e.wmu.Lock()
+	defer e.wmu.Unlock()
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if e.p != nil {
+		_ = e.p.Close()
+		e.p = nil
+	}
+}
+
+// portWrite writes data to the live port under wmu, so the port cannot be closed
+// mid-write. It drops the data when the device is gone (handle nil during a
+// reconnect) rather than blocking.
+func (e *engine) portWrite(data []byte) error {
+	e.wmu.Lock()
+	defer e.wmu.Unlock()
+
+	e.mu.Lock()
+	live := e.p
+
+	if live == nil {
+		// Device gone. Input typed blind is discarded rather than replayed
+		// into whatever state the DUT comes back in; reconnect tells the user.
+		e.dropped = true
+	}
+	e.mu.Unlock()
+
+	if live == nil {
+		return nil
+	}
+
+	for len(data) > 0 {
+		n, err := live.Write(data)
+		if err != nil {
+			return err
+		}
+
+		data = data[n:]
+	}
+
+	return nil
+}
+
+// marker writes a status line straight to the output sink (used for the
+// disconnect/reconnect banners, which must appear even mid-stream).
+func (e *engine) marker(msg string) {
+	_, _ = e.sink.Write([]byte(msg))
+}
+
+// read reads one chunk from the live port. The handle is copied under the lock
+// so a concurrent reconnect is safe, while the blocking read runs without the
+// lock so it never stalls an interactive stdin write.
+func (e *engine) read(buf []byte) (int, error) {
+	p := e.currentPort()
+	if p == nil {
+		return 0, nil
+	}
+
+	return p.Read(buf)
+}
+
+// handleReadLoss decides whether a data-less read reflects a vanished device
+// and, if reconnect is enabled, waits for the device to return. It reports
+// whether a reconnect happened (the caller should retry the read) and returns
+// ctx.Err() if the wait was cancelled. With reconnect disabled it is a no-op
+// returning (false, nil), so non-reconnecting callers keep their old behaviour.
+func (e *engine) handleReadLoss(ctx context.Context, readErr error, lastData *time.Time) (bool, error) {
+	if e.reopen == nil {
+		return false, nil
+	}
+
+	// A hard read error is an outright device error → reconnect. A quiet read
+	// (0, nil) only counts as loss once the port has been quiet for the grace
+	// period and the device node is gone: an idle read and a removed device look
+	// identical, so the node check disambiguates a merely quiet console from a
+	// vanished one. The grace check comes first so the node is not stat'ed on
+	// every idle read, and a node found present counts as a sign of life, so a
+	// long-quiet console is re-checked at most once per grace period.
+	if readErr == nil {
+		if e.present == nil || time.Since(*lastData) <= e.grace {
+			return false, nil
+		}
+
+		if e.present() {
+			*lastData = time.Now()
+
+			return false, nil
+		}
+	}
+
+	err := e.reconnect(ctx)
+	if err != nil {
+		return false, err
+	}
+
+	*lastData = time.Now()
+
+	return true, nil
+}
+
+// reconnect closes the vanished port and retries opening it until the device
+// reappears, the deadline fires, or the session is cancelled. It mirrors tio's
+// auto-reconnect so a DUT power-cycle that drops the FTDI device does not end
+// the session. On return either a fresh port is installed (nil error) or ctx is
+// done (its error).
+//
+// Every attempt, including the first, waits reconnectInterval. Otherwise a
+// device whose node survives but keeps failing reads (a wedged adapter) would
+// cycle open, fail, reconnect in a tight loop, flooding the client with
+// disconnect/reconnect markers.
+func (e *engine) reconnect(ctx context.Context) error {
+	l := log.FromContext(ctx)
+
+	e.closeCurrent()
+
+	// Logged as well as shown, so a lost device is visible in the agent's
+	// journal even when nobody is watching the session.
+	l.Warn("serial device disconnected, waiting to reconnect")
+	e.marker("\n--- Serial device disconnected, waiting to reconnect ---\n")
+
+	noted := false
+	noteDropped := func() {
+		if e.takeDropped() && !noted {
+			noted = true
+
+			e.marker("\n--- Input discarded: serial device not connected ---\n")
+		}
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(reconnectInterval):
+		}
+
+		noteDropped()
+
+		p, err := e.reopen()
+		if err == nil {
+			_ = p.ResetInputBuffer()
+			e.setPort(p)
+			noteDropped() // input that raced the reopen
+
+			l.Info("serial device reconnected")
+			e.marker("\n--- Serial device reconnected ---\n")
+
+			return nil
+		}
+	}
 }
 
 // readUntil reads from the port, forwarding every byte to the sink, until
@@ -57,8 +314,11 @@ func newEngine(p port, sink io.Writer, filter bool) *engine {
 // cancel).
 // On a match, the matched span and everything before it is consumed from the
 // buffer, so a later expect only sees subsequent output.
+//
+//nolint:cyclop // match-check, resilient read, and device-loss handling share one loop; splitting hurts clarity
 func (e *engine) readUntil(ctx context.Context, pattern *regexp.Regexp) error {
 	readBuf := make([]byte, readChunk)
+	lastData := time.Now()
 
 	for {
 		// Check the whole buffer for a match FIRST, so output a prior step left
@@ -80,8 +340,10 @@ func (e *engine) readUntil(ctx context.Context, pattern *regexp.Regexp) error {
 		default:
 		}
 
-		n, err := e.p.Read(readBuf)
+		n, err := e.read(readBuf)
 		if n > 0 {
+			lastData = time.Now()
+
 			out := e.clean(readBuf[:n])
 			if len(out) > 0 {
 				// Tee: forward to the client, then feed the matcher (re-checked
@@ -97,9 +359,20 @@ func (e *engine) readUntil(ctx context.Context, pattern *regexp.Regexp) error {
 			continue
 		}
 
-		// go.bug.st returns (0, nil) on a read timeout — keep waiting and let
-		// the ctx check above enforce the overall deadline. Any real error
-		// (port closed / device gone) ends the step.
+		// No data. go.bug.st returns (0, nil) on a read timeout; a real error
+		// means the device is gone. With reconnect enabled, wait for the device
+		// to return and keep matching against the preserved buffer. Otherwise a
+		// hard error ends the step, while a timeout just keeps waiting for the
+		// deadline (checked at the top of the loop).
+		lost, rerr := e.handleReadLoss(ctx, err, &lastData)
+		if rerr != nil {
+			return rerr
+		}
+
+		if lost {
+			continue
+		}
+
 		if err != nil {
 			return err
 		}
@@ -109,13 +382,9 @@ func (e *engine) readUntil(ctx context.Context, pattern *regexp.Regexp) error {
 // write sends payload to the port, looping over short writes, then resets the
 // match buffer so the next expect starts from output produced after the send.
 func (e *engine) write(payload []byte) error {
-	for len(payload) > 0 {
-		n, err := e.p.Write(payload)
-		if err != nil {
-			return err
-		}
-
-		payload = payload[n:]
+	err := e.portWrite(payload)
+	if err != nil {
+		return err
 	}
 
 	e.buf = e.buf[:0]
@@ -135,12 +404,18 @@ func (e *engine) capBuffer() {
 }
 
 // pump reads from the port and forwards every byte to the sink until ctx is
-// done (a normal end for a watch/drain, so it returns nil). On a real read
-// error it returns the error, unless swallowReadErr is set — used by the
-// post-send drain, where the device may have rebooted from the final send and
-// the sequence has already completed successfully.
-func (e *engine) pump(ctx context.Context, swallowReadErr bool) error {
+// done (a normal end for a watch/drain, so it returns nil).
+//
+// With reconnectOnLoss set, a vanished device is handled transparently: the pump
+// waits for it to reappear and keeps streaming (used by monitor and interactive
+// mode). With it clear, a read error ends the pump — returning the error, or nil
+// when swallowReadErr is set, as the post-send drain does since the device may
+// have rebooted from that final send.
+//
+//nolint:cyclop // read/emit/reconnect/idle dispatch in one streaming loop; the branch count is inherent
+func (e *engine) pump(ctx context.Context, reconnectOnLoss, swallowReadErr bool) error {
 	readBuf := make([]byte, readChunk)
+	lastData := time.Now()
 
 	for {
 		select {
@@ -149,8 +424,10 @@ func (e *engine) pump(ctx context.Context, swallowReadErr bool) error {
 		default:
 		}
 
-		n, err := e.p.Read(readBuf)
+		n, err := e.read(readBuf)
 		if n > 0 {
+			lastData = time.Now()
+
 			out := e.clean(readBuf[:n])
 			if len(out) > 0 {
 				_, werr := e.sink.Write(out)
@@ -158,6 +435,18 @@ func (e *engine) pump(ctx context.Context, swallowReadErr bool) error {
 					return werr
 				}
 			}
+		}
+
+		if reconnectOnLoss && e.reopen != nil {
+			// handleReadLoss reconnects on a hard error or a vanished node; on
+			// ctx cancellation it returns an error, which for a pump is a normal
+			// end. A benign idle read falls through and the loop continues.
+			_, rerr := e.handleReadLoss(ctx, err, &lastData)
+			if rerr != nil {
+				return nil //nolint:nilerr // ctx cancelled mid-reconnect is a normal end for a pump
+			}
+
+			continue
 		}
 
 		if err != nil {
@@ -172,19 +461,64 @@ func (e *engine) pump(ctx context.Context, swallowReadErr bool) error {
 
 // monitor streams serial output to the sink until ctx is done. It does no
 // matching; the deadline or a client cancel is a normal end, so it returns nil
-// in those cases and only fails on a real read error.
+// in those cases. With reconnect wired up (see Run) it survives device loss.
 func (e *engine) monitor(ctx context.Context) error {
-	return e.pump(ctx, false)
+	return e.pump(ctx, true, false)
 }
 
 // drain forwards serial output for up to d, so the DUT's reply to a final send
 // is visible before the run closes. It is best-effort: a read error (e.g. the
-// device rebooted from that send) ends it without failing the run.
+// device rebooted from that send) ends it without failing the run, and it does
+// not reconnect — the sequence has already completed.
 func (e *engine) drain(ctx context.Context, d time.Duration) error {
 	drainCtx, cancel := context.WithTimeout(ctx, d)
 	defer cancel()
 
-	return e.pump(drainCtx, true)
+	return e.pump(drainCtx, false, true)
+}
+
+// stdinChunk is the read size for the interactive stdin pump.
+const stdinChunk = 256
+
+// interactive bridges the client console and the serial port: it forwards
+// client keystrokes (stdin) to the port and streams port output to the sink,
+// until ctx is done. Device loss is handled by the pump's reconnect path (wired
+// via withReconnect). It returns nil on ctx cancellation, a normal end that the
+// caller maps to the right result.
+func (e *engine) interactive(ctx context.Context, stdin io.Reader) error {
+	// done stops the stdin pump from writing to the port once interactive
+	// returns and the port is about to be closed.
+	done := make(chan struct{})
+	defer close(done)
+
+	go e.stdinPump(stdin, done)
+
+	return e.pump(ctx, true, false)
+}
+
+// stdinPump forwards client keystrokes to the serial port until stdin reaches
+// EOF (the agent closes stdin on session teardown). It is the only goroutine
+// that may briefly outlive interactive(); it touches no match state and drops
+// writes once done is closed, so it can neither race the read loop nor write to
+// a closed port.
+func (e *engine) stdinPump(stdin io.Reader, done <-chan struct{}) {
+	buf := make([]byte, stdinChunk)
+
+	for {
+		n, err := stdin.Read(buf)
+		if n > 0 {
+			select {
+			case <-done:
+				return // interactive exited — do not write to the closing port.
+			default:
+				_ = e.portWrite(buf[:n])
+			}
+		}
+
+		if err != nil {
+			return // stdin EOF on teardown, or a read error.
+		}
+	}
 }
 
 // escByte is the ASCII escape that begins ANSI/VT escape sequences.
@@ -214,10 +548,15 @@ const (
 	csiFinalHi = 0x7e
 )
 
-// clean strips terminal escape sequences from a read chunk (unless filtering is
-// disabled), reassembling sequences split across reads via remainder.
+// csiWindowOps is the final byte of the xterm window operations (move, resize,
+// iconify, report the window or its title).
+const csiWindowOps = 't'
+
+// clean removes terminal escape sequences from a read chunk according to the
+// engine's escape policy, reassembling sequences split across reads via
+// remainder.
 func (e *engine) clean(chunk []byte) []byte {
-	if !e.filter {
+	if e.escapes == escKeepAll {
 		return chunk
 	}
 
@@ -226,7 +565,7 @@ func (e *engine) clean(chunk []byte) []byte {
 		e.remainder = nil
 	}
 
-	out := stripEscapes(chunk, &e.remainder)
+	out := stripEscapes(chunk, &e.remainder, e.escapes == escKeepDisplay)
 
 	if len(e.remainder) > maxRemainder {
 		// An unterminated sequence this long is almost certainly junk; stop
@@ -241,11 +580,21 @@ func (e *engine) clean(chunk []byte) []byte {
 
 // stripEscapes removes ANSI/VT escape sequences from data, including SGR colour
 // — the matched bytes then equal the visible text, so a prompt split by a colour
-// change still matches. An incomplete sequence at the end of data is stored in
-// remainder to be prepended to the next read.
-func stripEscapes(data []byte, remainder *[]byte) []byte {
-	result := make([]byte, 0, len(data))
+// change still matches. With keepDisplay, sequences that only draw the screen
+// are kept (see isDisplaySeq). An incomplete sequence at the end of data is
+// stored in remainder to be prepended to the next read.
+func stripEscapes(data []byte, remainder *[]byte, keepDisplay bool) []byte {
 	*remainder = nil
+
+	// Most serial output carries no escape sequence; when there is none, return
+	// the input untouched. The result is consumed synchronously by the caller
+	// (written to the sink or copied into the match buffer) before the next read,
+	// so aliasing data is safe.
+	if bytes.IndexByte(data, escByte) < 0 {
+		return data
+	}
+
+	result := make([]byte, 0, len(data))
 
 	for idx := 0; idx < len(data); idx++ {
 		if data[idx] != escByte {
@@ -262,10 +611,35 @@ func stripEscapes(data []byte, remainder *[]byte) []byte {
 			return result
 		}
 
-		idx = end // skip the whole sequence; the loop's idx++ moves past it
+		if keepDisplay && isDisplaySeq(data[idx:end+1]) {
+			result = append(result, data[idx:end+1]...)
+		}
+
+		idx = end // past the whole sequence; the loop's idx++ moves beyond it
 	}
 
 	return result
+}
+
+// isDisplaySeq reports whether the complete escape sequence seq is safe to pass
+// to an interactive terminal: it draws the screen (cursor movement, colour,
+// erase, scrolling, mode changes) or asks a question answered with plain
+// numbers, such as the cursor position that resize(1) relies on. It is false for
+// string sequences (DCS, OSC, SOS, PM, APC), which set titles, write the
+// clipboard or query the terminal for text; for CSI window operations, whose
+// title report would type back text the DUT set; and for a CSI cut short by
+// another ESC.
+func isDisplaySeq(seq []byte) bool {
+	switch {
+	case isStringSeqIntroducer(seq[1]):
+		return false
+	case seq[1] == '[':
+		final := seq[len(seq)-1]
+
+		return len(seq) > csiPrefixLen && final >= csiFinalLo && final <= csiFinalHi && final != csiWindowOps
+	default:
+		return true
+	}
 }
 
 // seqEnd returns the index of the last byte of the escape sequence starting at
@@ -281,8 +655,26 @@ func seqEnd(data []byte, escIdx int) int {
 	case data[escIdx+1] == '[':
 		return csiEnd(data, escIdx)
 	default:
-		return escIdx + 1 // two-byte escape, e.g. "ESC c"
+		return escEnd(data, escIdx)
 	}
+}
+
+// escEnd returns the index of the final byte of the plain escape sequence
+// starting at data[escIdx]: ESC, any intermediate bytes (0x20–0x2f), then one
+// final byte, e.g. "ESC c" or the charset selection "ESC ( B" that terminfo
+// emits with every colour reset. It returns -1 if the final byte is not yet
+// read.
+func escEnd(data []byte, escIdx int) int {
+	pos := escIdx + 1
+	for pos < len(data) && data[pos] >= csiInterLo && data[pos] <= csiInterHi {
+		pos++ // intermediate bytes
+	}
+
+	if pos >= len(data) {
+		return -1 // final byte not yet read
+	}
+
+	return pos
 }
 
 // isStringSeqIntroducer reports whether b (the byte after ESC) begins an ANSI

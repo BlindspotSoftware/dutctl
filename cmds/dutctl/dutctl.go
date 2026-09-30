@@ -331,10 +331,15 @@ func (app *application) exit(err error) {
 
 // userFacingError renders err for display. For a connect RPC error it drops the
 // gRPC status-code prefix that err.Error() carries (e.g. "unavailable: ...") and
-// gives the common "agent unreachable" case a friendlier line; other errors —
+// gives the common "agent unreachable" and "connection lost mid-run" cases a
+// friendlier line; other errors —
 // including client-side ones like a bad command line or a missing local file —
 // render unchanged.
 func userFacingError(err error, serverAddr string) string {
+	if errors.Is(err, errConnectionLost) {
+		return fmt.Sprintf("lost connection to dutagent at %s", serverAddr)
+	}
+
 	var connErr *connect.Error
 	if !errors.As(err, &connErr) {
 		return err.Error()

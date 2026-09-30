@@ -44,7 +44,7 @@ func ListenAndServe(ctx context.Context, addr string, handler http.Handler) erro
 // so a test can drive a real in-flight request against a listener whose address it
 // controls.
 func serve(ctx context.Context, ln net.Listener, handler http.Handler) error {
-	srv := newH2CServer(ln.Addr().String(), handler)
+	srv := newH2CServer(ln.Addr().String(), handler, defaultKeepalive())
 
 	errCh := make(chan error, 1)
 
@@ -71,9 +71,10 @@ func serve(ctx context.Context, ln net.Listener, handler http.Handler) error {
 	}
 }
 
-// newH2CServer builds the h2c *http.Server. It is unexported: ListenAndServe is
-// the only intended entry point and drives the server's graceful Shutdown itself.
-func newH2CServer(addr string, handler http.Handler) *http.Server {
+// newH2CServer builds the h2c *http.Server with the keepalive health check. It
+// is unexported: ListenAndServe is the only intended entry point and drives the
+// server's graceful Shutdown itself.
+func newH2CServer(addr string, handler http.Handler, health keepalive) *http.Server {
 	srv := &http.Server{
 		Addr:              addr,
 		Handler:           handler,
@@ -95,6 +96,9 @@ func newH2CServer(addr string, handler http.Handler) *http.Server {
 	srv.Protocols = new(http.Protocols)
 	srv.Protocols.SetHTTP1(true)
 	srv.Protocols.SetUnencryptedHTTP2(true)
+	// End sessions whose client vanished silently, so they do not hold the
+	// device and its lock (see keepalive).
+	srv.HTTP2 = health.http2Config()
 
 	return srv
 }

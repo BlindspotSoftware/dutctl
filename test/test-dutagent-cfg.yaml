@@ -21,7 +21,15 @@ devices:
             passthrough: true
             with:
               port: "/home/oscar/ttyS2"
-              baudrate: 115200
+              baud: 115200
+      console:
+        desc: "Host serial as an interactive console"
+        uses:
+          - module: serial
+            args: ["-i"]
+            with:
+              port: "/home/oscar/ttyS2"
+              baud: 115200
       flash:
         desc: "Host SPI flash chip"
         uses:

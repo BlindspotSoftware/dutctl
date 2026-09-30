@@ -427,11 +427,24 @@ func (a *rpcService) Run(
 		}
 	}
 
-	if err != nil {
-		l.Error("request finished with error", "err", err)
-	} else {
-		l.Info("request finished successfully")
-	}
+	logRunEnd(l, ctx.Err() != nil, err)
 
 	return err
+}
+
+// logRunEnd records how a Run request ended. clientGone reports that the client
+// went away: it quit (Ctrl-A x, Ctrl-C) or its connection was lost. Both only
+// cancel the request, so they cannot be told apart here; for a dead link the
+// HTTP/2 server logs the missed keepalive ping next to this line. Either is the
+// normal end of an open-ended session such as a serial console, so it is logged
+// as information rather than as an error.
+func logRunEnd(l *slog.Logger, clientGone bool, err error) {
+	switch {
+	case err == nil:
+		l.Info("request finished successfully")
+	case clientGone:
+		l.Info("request ended: client disconnected", "reason", err)
+	default:
+		l.Error("request finished with error", "err", err)
+	}
 }

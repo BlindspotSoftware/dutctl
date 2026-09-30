@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"connectrpc.com/connect"
 	"github.com/BlindspotSoftware/dutctl/internal/dutagent/locker"
@@ -46,6 +47,8 @@ type runCmdArgs struct {
 	cmd         dut.Command
 	session     module.Session
 	moduleErrCh chan error
+	moduleDone  chan struct{} // closed when the module goroutine returns, on every path
+	stopGrace   time.Duration // how long a canceled run waits for moduleDone; 0 means defaultModuleStopGrace
 	brokerErrCh <-chan error
 }
 
@@ -186,7 +189,6 @@ func executeModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State
 	// Module execution is the agent's core orchestration: scope it "agent" and
 	// tag the device and command, which then descend to every record on this path.
 	ctx = log.With(log.WithScope(ctx, "agent"), "device", args.cmdMsg.GetDevice(), "command", args.cmdMsg.GetCommand())
-	l := log.FromContext(ctx)
 
 	// Deferred initialization of the moduleErr channel: only create if not already provided
 	// (tests may still pass a custom channel).
@@ -194,8 +196,7 @@ func executeModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State
 		args.moduleErrCh = make(chan error, 1)
 	}
 
-	rpcCtx := ctx
-	modCtx, modCtxCancel := context.WithCancel(rpcCtx)
+	modCtx, modCtxCancel := context.WithCancel(ctx)
 
 	moduleSession, brokerErrCh := args.broker.Start(modCtx, args.stream)
 	args.brokerErrCh = brokerErrCh
@@ -211,48 +212,66 @@ func executeModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State
 
 	// Run the modules in a goroutine.
 	// Termination of the module execution is signaled by closing the moduleErrCh channel.
-	go func() {
-		cnt := len(args.cmd.Modules)
+	args.moduleDone = make(chan struct{})
 
-		for idx, mod := range args.cmd.Modules {
-			if ctx.Err() != nil {
-				l.Warn("execution aborted", "modules-done", idx, "modules-total", cnt, "err", ctx.Err())
-				modCtxCancel()
-
-				return
-			}
-
-			// Announce the hand-off in the agent scope (this line is the
-			// framework's, not the module's).
-			mlog := l.With("module", mod.Config.Name, "module-index", idx+1, "modules-total", cnt)
-			mlog.Info("running module")
-
-			// Set the "module" scope on the context handed to the module, so
-			// only the module's own records are scoped to it.
-			runCtx := log.With(log.WithScope(rpcCtx, "module"), "module", mod.Config.Name, "module-index", idx+1)
-
-			err := runModule(runCtx, mod, moduleSession, moduleArgs[idx]...)
-			if err != nil {
-				args.moduleErrCh <- err
-
-				// Deliberate detail+summary logging (not log-and-return spam): this
-				// agent-scope line records which module failed (name/index/total) —
-				// metadata lost once waitModules flattens the error with %v and Run
-				// logs the rpc-scope summary. The error is still returned via
-				// moduleErrCh, not swallowed.
-				mlog.Error("module failed", "err", err)
-				modCtxCancel()
-
-				return
-			}
-		}
-
-		l.Info("all modules finished successfully")
-		modCtxCancel()
-		close(args.moduleErrCh)
-	}()
+	go runModules(ctx, args, moduleSession, moduleArgs, modCtxCancel)
 
 	return args, waitModules, nil
+}
+
+// runModules runs the command's modules in order for executeModules. It reports
+// the outcome on args.moduleErrCh (an error, or the channel closed on success)
+// and closes args.moduleDone when it returns, however it ends. cancel stops the
+// broker's module context once the modules are done.
+func runModules(ctx context.Context, args runCmdArgs, sess module.Session, moduleArgs [][]string, cancel context.CancelFunc) {
+	defer close(args.moduleDone)
+
+	l := log.FromContext(ctx)
+	cnt := len(args.cmd.Modules)
+
+	for idx, mod := range args.cmd.Modules {
+		if ctx.Err() != nil {
+			l.Warn("execution aborted", "modules-done", idx, "modules-total", cnt, "err", ctx.Err())
+			cancel()
+
+			return
+		}
+
+		// Announce the hand-off in the agent scope (this line is the
+		// framework's, not the module's).
+		mlog := l.With("module", mod.Config.Name, "module-index", idx+1, "modules-total", cnt)
+		mlog.Info("running module")
+
+		// Set the "module" scope on the context handed to the module, so
+		// only the module's own records are scoped to it.
+		runCtx := log.With(log.WithScope(ctx, "module"), "module", mod.Config.Name, "module-index", idx+1)
+
+		err := runModule(runCtx, mod, sess, moduleArgs[idx]...)
+		if err != nil {
+			args.moduleErrCh <- err
+
+			// Deliberate detail+summary logging (not log-and-return spam): this
+			// agent-scope line records which module failed (name/index/total) —
+			// metadata lost once waitModules flattens the error with %v and Run
+			// logs the rpc-scope summary. The error is still returned via
+			// moduleErrCh, not swallowed.
+			mlog.Error("module failed", "err", err)
+			cancel()
+
+			return
+		}
+	}
+
+	if ctx.Err() != nil {
+		// A module that ends on cancellation, like a serial console after the
+		// client quit, returns nil; that is a stop, not a success.
+		l.Info("modules stopped: run canceled")
+	} else {
+		l.Info("all modules finished successfully")
+	}
+
+	cancel()
+	close(args.moduleErrCh)
 }
 
 // waitModules is a state of the Run RPC.
@@ -278,6 +297,8 @@ func waitModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State[ru
 		select {
 		case <-ctx.Done():
 			e := connect.NewError(cancelCode(ctx.Err()), fmt.Errorf("module execution aborted: %v", ctx.Err()))
+
+			awaitModuleStop(ctx, args.moduleDone, args.stopGrace)
 
 			return args, nil, e
 
@@ -305,6 +326,32 @@ func waitModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State[ru
 	// the deferred cleanup in Run, which covers every exit path including a
 	// panic, so no explicit teardown state is needed here.
 	return args, nil, nil
+}
+
+// defaultModuleStopGrace bounds how long a canceled run waits for its module to
+// return. A module that honours cancellation returns within its I/O timeout (the
+// serial module's is 100ms); one that does not is left behind after this.
+const defaultModuleStopGrace = 5 * time.Second
+
+// awaitModuleStop blocks until the run's module goroutine has returned, or until
+// grace (defaultModuleStopGrace if zero) elapses. Run releases the device once
+// waitModules returns, so without this a client that quits and reconnects at once
+// could find the serial port still open ("Serial port busy"). A nil done means
+// no module was started.
+func awaitModuleStop(ctx context.Context, done <-chan struct{}, grace time.Duration) {
+	if done == nil {
+		return
+	}
+
+	if grace == 0 {
+		grace = defaultModuleStopGrace
+	}
+
+	select {
+	case <-done:
+	case <-time.After(grace):
+		log.FromContext(ctx).Warn("module did not stop after the run was canceled", "grace", grace)
+	}
 }
 
 // cancelCode maps a context cancellation error to its connect status code,
