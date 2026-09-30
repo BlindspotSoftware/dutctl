@@ -33,6 +33,11 @@ func TestUserFacingError(t *testing.T) {
 			want: "bad args",
 		},
 		{
+			name: "lost connection gets friendly line",
+			err:  errConnectionLost,
+			want: "lost connection to dutagent at host:1234",
+		},
+		{
 			name: "unavailable gets friendly line",
 			err:  connect.NewError(connect.CodeUnavailable, errors.New("connection refused")),
 			want: "cannot reach dutagent at host:1234 (connection refused)",

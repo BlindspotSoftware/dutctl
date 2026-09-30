@@ -29,6 +29,11 @@ import (
 // "interrupted" status with exit code 130, not as a failure.
 var errInterrupted = errors.New("interrupted")
 
+// errConnectionLost is returned by runRPC when the connection to the agent
+// breaks during a run (agent restart, network loss), as opposed to an error the
+// agent reported. The transport detail is logged at debug level.
+var errConnectionLost = errors.New("lost connection to dutagent")
+
 // unaryTimeout bounds each non-streaming RPC. List/Lock/Unlock/Commands/Details
 // are quick request/response round-trips, so a modest per-call deadline catches
 // an unresponsive agent without cutting legitimate work. Connect encodes it as a
@@ -391,6 +396,15 @@ func (app *application) runRPC(ctx context.Context, device, command string, cmdA
 
 	err := stream.Send(req)
 	if err != nil {
+		if errors.Is(err, io.EOF) {
+			// The stream is gone before it started, e.g. the agent is not
+			// reachable; connect reports why on Receive, not on Send.
+			_, recvErr := stream.Receive()
+			if recvErr != nil {
+				err = recvErr
+			}
+		}
+
 		return err
 	}
 
@@ -418,6 +432,7 @@ func (app *application) runRPC(ctx context.Context, device, command string, cmdA
 			res, err := stream.Receive()
 
 			switch {
+			case err == nil:
 			case errors.Is(err, io.EOF):
 				slog.Debug("receive routine terminating", "reason", "stream closed by agent")
 
@@ -426,7 +441,16 @@ func (app *application) runRPC(ctx context.Context, device, command string, cmdA
 				slog.Debug("receive routine terminating", "reason", "context cancelled")
 
 				return
-			case err != nil:
+			case !connect.IsWireError(err) && len(stream.ResponseHeader()) > 0:
+				// The agent had started answering (its response headers arrived)
+				// and did not send this error: the connection itself broke, even
+				// if mid-message. Without headers the agent was never reached,
+				// which the default case reports.
+				slog.Debug("receive routine terminating", "reason", "connection lost", "err", err)
+				errChan <- errConnectionLost
+
+				return
+			default:
 				errChan <- fmt.Errorf("receiving RPC message: %w", err)
 
 				return
@@ -582,6 +606,13 @@ func (app *application) runRPC(ctx context.Context, device, command string, cmdA
 						},
 					},
 				})
+				if errors.Is(sendErr, io.EOF) {
+					// The stream is gone; Receive reports why (connect's contract).
+					slog.Debug("send routine terminating", "reason", "stream closed")
+
+					return
+				}
+
 				if sendErr != nil {
 					errChan <- fmt.Errorf("sending RPC message: %w", sendErr)
 
