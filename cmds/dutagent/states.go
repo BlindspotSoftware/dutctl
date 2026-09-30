@@ -247,7 +247,14 @@ func executeModules(ctx context.Context, args runCmdArgs) (runCmdArgs, fsm.State
 			}
 		}
 
-		l.Info("all modules finished successfully")
+		if ctx.Err() != nil {
+			// A module that ends on cancellation, like a serial console after the
+			// client quit, returns nil; that is a stop, not a success.
+			l.Info("modules stopped: run canceled")
+		} else {
+			l.Info("all modules finished successfully")
+		}
+
 		modCtxCancel()
 		close(args.moduleErrCh)
 	}()
