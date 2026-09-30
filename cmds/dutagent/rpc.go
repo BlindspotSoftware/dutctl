@@ -14,8 +14,6 @@ import (
 	"connectrpc.com/connect"
 	"github.com/BlindspotSoftware/dutctl/internal/auth"
 	"github.com/BlindspotSoftware/dutctl/internal/dutagent/locker"
-	"github.com/BlindspotSoftware/dutctl/internal/dutagent/session"
-	"github.com/BlindspotSoftware/dutctl/internal/fsm"
 	"github.com/BlindspotSoftware/dutctl/internal/keyword"
 	"github.com/BlindspotSoftware/dutctl/internal/log"
 	"github.com/BlindspotSoftware/dutctl/internal/rpc"
@@ -177,21 +175,9 @@ func (a *rpcService) Details(
 		return nil, e
 	}
 
-	_, cmd, err := a.devices.FindCmd(wantDev, wantCmd)
+	cmd, err := findCommand(a.devices, wantDev, wantCmd)
 	if err != nil {
-		var code connect.Code
-		if errors.Is(err, dut.ErrDeviceNotFound) || errors.Is(err, dut.ErrCommandNotFound) {
-			code = connect.CodeNotFound
-		} else {
-			code = connect.CodeInternal
-		}
-
-		e := connect.NewError(
-			code,
-			fmt.Errorf("device %q, command %q: %w", wantDev, wantCmd, err),
-		)
-
-		return nil, e
+		return nil, err
 	}
 
 	helpStr := cmd.HelpText()
@@ -338,26 +324,17 @@ func (a *rpcService) Unlock(
 	return connect.NewResponse(&pb.UnlockResponse{}), nil
 }
 
-// clearAutoLock releases the command-scoped auto-lock for device held by user.
-// It never touches the explicit lock slot, so an explicit Lock the same owner
-// holds for the device survives the run. ErrNotLocked is tolerated because a
-// forced unlock by an admin may have wiped the slot concurrently; any other
-// failure is logged rather than returned, as this runs during Run teardown
-// (including panic unwinding), where no caller is left to handle it.
-func clearAutoLock(ctx context.Context, lk *locker.Locker, device, user string) {
-	err := lk.ClearAutoLock(device, user)
-	if err != nil && !errors.Is(err, locker.ErrNotLocked) {
-		log.FromContext(ctx).Warn("failed to release auto-lock", "device", device, "err", err)
-	}
-}
-
-// Run is the handler for the Run RPC.
+// Run is the handler for the Run RPC. It receives the command, resolves it,
+// takes the device's auto-lock and runs the command's modules while a
+// session.Broker carries their I/O over the stream (see run).
 //
-// It drives the finite state machine (see states.go); each state maps its failure
-// to a connect.Code. Run passes an already-typed *connect.Error through unchanged,
-// maps a raw context cancellation to CodeCanceled/CodeDeadlineExceeded (via
-// cancelCode), and wraps anything else as CodeInternal, so every failure reaches
-// the client with a code.
+// Errors: CodeInvalidArgument if the first message is not a command, the
+// arguments cannot be resolved (Command.ModuleArgs) or the client breaks the file
+// transfer protocol (session.ErrBadFileTransfer); CodeNotFound for an unknown
+// device or command; CodeFailedPrecondition when another owner holds the device;
+// CodeAborted if the initial receive or a module fails;
+// CodeCanceled/CodeDeadlineExceeded on cancellation; a failed stream keeps the
+// transport's connect code; CodeInternal otherwise.
 func (a *rpcService) Run(
 	ctx context.Context,
 	stream *connect.BidiStream[pb.RunRequest, pb.RunResponse],
@@ -369,8 +346,8 @@ func (a *rpcService) Run(
 
 	user := identity.User()
 
-	// Set the RPC scope once; it flows through the FSM, the session backend and
-	// the modules on ctx, so each only logs its own concern.
+	// Set the RPC scope once; it flows through run, the session backend and the
+	// modules on ctx, so each only logs its own concern.
 	ctx = log.With(log.WithScope(ctx, "rpc"), "rpc", "Run", "user", user)
 	l := log.FromContext(ctx)
 	l.Info("request received")
@@ -380,65 +357,6 @@ func (a *rpcService) Run(
 		l.Error("request finished with error", "err", err)
 	} else {
 		l.Info("request finished successfully")
-	}
-
-	return err
-}
-
-// run carries out a Run request for user over stream. It is Run minus the
-// connect transport and the caller lookup, so tests can drive the whole request
-// with a fake stream. Every error it returns is a *connect.Error.
-func (a *rpcService) run(ctx context.Context, stream session.Stream, user string) error {
-	autoLock := &autoLockHold{}
-
-	// Release the command-scoped auto-lock on every exit path. Deferred so it
-	// runs even while a panic in a state function unwinds past the FSM (fsm.Run
-	// does not recover), which would otherwise leave the device auto-locked with
-	// no expiry until an agent restart. It fires only once the lock was acquired
-	// (acquireAutoLock sets held); ClearAutoLock tolerates a concurrent forced
-	// unlock.
-	defer func() {
-		if autoLock.held {
-			clearAutoLock(ctx, a.locker, autoLock.device, user)
-		}
-	}()
-
-	// The handler must not return while a broker worker is still inside a stream
-	// Send: connect invalidates the response writer once the handler is gone, and
-	// a write past that point panics in the worker goroutine.
-	// So Run owns the broker's lifetime: on every exit path, including a panic
-	// unwinding past the FSM, the deferred calls below first cancel runCtx, which
-	// the workers derive their context from, then wait for the workers to return.
-	// Both run before the auto-lock release above, so the device is handed on only
-	// once the stream is quiet.
-	runCtx, cancelRun := context.WithCancel(ctx)
-	broker := &session.Broker{}
-
-	defer broker.Wait()
-	defer cancelRun()
-
-	fsmArgs := runCmdArgs{
-		stream:     stream,
-		deviceList: a.devices,
-		locker:     a.locker,
-		user:       user,
-		autoLock:   autoLock,
-		broker:     broker,
-	}
-
-	_, err := fsm.Run(runCtx, fsmArgs, receiveCommandRPC)
-
-	var connectErr *connect.Error
-	if err != nil && !errors.As(err, &connectErr) {
-		// Wrap the error in a connect.Error if not done yet. A raw context error
-		// from the FSM boundary becomes the matching cancellation code (kept in
-		// sync with waitModules via cancelCode); anything else is internal.
-		switch {
-		case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
-			err = connect.NewError(cancelCode(err), err)
-		default:
-			err = connect.NewError(connect.CodeInternal, err)
-		}
 	}
 
 	return err

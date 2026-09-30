@@ -12,9 +12,11 @@ import (
 	"github.com/BlindspotSoftware/dutctl/pkg/dut"
 )
 
-// catchPanic calls fn and recovers from any panic, returning it as an error.
-// This intentionally does NOT re-panic. A module panic is recorded as an error
-// so the init/deinit loop can continue with the remaining modules.
+// catchPanic calls fn, a call into a module's Init, Deinit or Run, and recovers
+// a panic into an error, so a module bug, or a session invariant that panics in
+// Console, fails only that call. It intentionally does not re-panic:
+// initModules and deinitModules go on with the remaining modules, and a Run
+// fails its command.
 func catchPanic(fn func() error) error {
 	var err error
 

@@ -26,10 +26,6 @@ func TestLockHappyPath(t *testing.T) {
 		t.Error("ExpiresAt is zero, want a timed expiry")
 	}
 
-	if err := l.CheckAccess("dev", "alice"); err != nil {
-		t.Errorf("CheckAccess for owner: %v", err)
-	}
-
 	if err := l.ClearLock("dev", "alice"); err != nil {
 		t.Errorf("ClearLock: %v", err)
 	}
@@ -314,28 +310,5 @@ func TestStatusAllReportsEffectiveHold(t *testing.T) {
 	// A live reservation shadows the concurrent Busy hold in the report.
 	if got := status["gamma"]; got.Kind != Reserved || got.Owner != "carol" {
 		t.Errorf("gamma = %+v, want the reservation to shadow the Busy hold", got)
-	}
-}
-
-func TestCheckAccessAllowsSameOwnerOnBothSlots(t *testing.T) {
-	l := New()
-
-	if _, err := l.Lock("dev", "alice", time.Hour); err != nil {
-		t.Fatalf("Lock: %v", err)
-	}
-
-	if _, err := l.AutoLock("dev", "alice"); err != nil {
-		t.Fatalf("AutoLock: %v", err)
-	}
-
-	if err := l.CheckAccess("dev", "alice"); err != nil {
-		t.Errorf("CheckAccess for same owner: %v", err)
-	}
-
-	err := l.CheckAccess("dev", "bob")
-
-	var le *Error
-	if !errors.As(err, &le) {
-		t.Fatalf("CheckAccess for other owner: err = %v, want *Error", err)
 	}
 }

@@ -106,9 +106,10 @@ func (s *backend) Println(a ...any) {
 // Console returns the module's stdin/stdout/stderr streams (see module.Session).
 // It must be called only from the module's Run goroutine, and it has no error
 // return: the backing channels are always allocated by Broker.init before a module
-// runs, so a nil channel here is a broken invariant and Console panics. runModule
-// recovers that panic into a clean run error — do not add a top-level recover
-// expecting to catch it, as a panic on another goroutine would be uncatchable.
+// runs, so a nil channel here is a broken invariant and Console panics. The agent
+// recovers that panic into a clean run error where it calls Module.Run — do not
+// add a top-level recover expecting to catch it, as a panic on another goroutine
+// would be uncatchable.
 //
 //nolint:nonamedreturns
 func (s *backend) Console() (stdin io.Reader, stdout, stderr io.Writer) {
@@ -121,7 +122,7 @@ func (s *backend) Console() (stdin io.Reader, stdout, stderr io.Writer) {
 	// The channels are always initialized by Broker.init before a module runs,
 	// so a failure here is a broken invariant (a nil channel), not a runtime
 	// condition. Console has no error return, so panic; the module-execution
-	// goroutine recovers it into a clean run error (see runModule).
+	// goroutine recovers it into a clean run error where it calls Module.Run.
 	stdinReader, err = chanio.NewChanReader(s.stdinCh, s.done, log.Scope(s.logger(), scopeSessionUpstream))
 	if err != nil {
 		panic(fmt.Sprintf("session.Console: stdin reader: %v", err))
