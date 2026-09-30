@@ -110,7 +110,7 @@ func TestServeReturnsOnCancel(t *testing.T) {
 // (golang/go#80876). The guard must stay, and the server must lift it once the
 // connection is active, or every stream dies at the deadline.
 func TestH2CServerLiftsHeaderDeadlineOnceActive(t *testing.T) {
-	srv := newH2CServer("127.0.0.1:0", http.NewServeMux())
+	srv := newH2CServer("127.0.0.1:0", http.NewServeMux(), defaultKeepalive())
 	if srv.ReadHeaderTimeout == 0 {
 		t.Fatal("ReadHeaderTimeout unset: slowloris guard is gone")
 	}

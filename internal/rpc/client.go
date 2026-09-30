@@ -19,7 +19,7 @@ import (
 // connect.WithInterceptors(NewVersionAdvisor(...)) — are appended after the
 // mandatory WithGRPC.
 func NewDeviceClient(addr string, opts ...connect.ClientOption) dutctlv1connect.DeviceServiceClient {
-	return dutctlv1connect.NewDeviceServiceClient(newH2CClient(), url(addr), clientOptions(opts)...)
+	return dutctlv1connect.NewDeviceServiceClient(newH2CClient(defaultKeepalive()), url(addr), clientOptions(opts)...)
 }
 
 // NewRelayClient returns a RelayService client for the server at addr, speaking
@@ -27,7 +27,7 @@ func NewDeviceClient(addr string, opts ...connect.ClientOption) dutctlv1connect.
 //
 //nolint:ireturn // returns the connect-generated RelayServiceClient interface by design
 func NewRelayClient(addr string, opts ...connect.ClientOption) dutctlv1connect.RelayServiceClient {
-	return dutctlv1connect.NewRelayServiceClient(newH2CClient(), url(addr), clientOptions(opts)...)
+	return dutctlv1connect.NewRelayServiceClient(newH2CClient(defaultKeepalive()), url(addr), clientOptions(opts)...)
 }
 
 func url(addr string) string { return fmt.Sprintf("http://%s", addr) }
@@ -51,9 +51,10 @@ const dialTimeout = 10 * time.Second
 const idleConnTimeout = 90 * time.Second
 
 // newH2CClient builds the shared HTTP/2-cleartext client used for every RPC
-// connection. It is unexported: callers obtain a typed client via NewDeviceClient
-// or NewRelayClient rather than the raw transport.
-func newH2CClient() *http.Client {
+// connection, with the keepalive health check. It is unexported: callers
+// obtain a typed client via NewDeviceClient or NewRelayClient rather than the raw
+// transport.
+func newH2CClient(health keepalive) *http.Client {
 	// Use the HTTP/2 protocol without TLS (h2c).
 	transport := &http.Transport{
 		// Bound connection establishment only; safe for the streaming Run.
@@ -63,6 +64,9 @@ func newH2CClient() *http.Client {
 	}
 	transport.Protocols = new(http.Protocols)
 	transport.Protocols.SetUnencryptedHTTP2(true)
+	// Detect a connection that died silently, which would otherwise hang a
+	// streaming Run for good (see keepalive).
+	transport.HTTP2 = health.http2Config()
 
 	return &http.Client{
 		Transport: transport,
