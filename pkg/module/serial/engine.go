@@ -655,8 +655,26 @@ func seqEnd(data []byte, escIdx int) int {
 	case data[escIdx+1] == '[':
 		return csiEnd(data, escIdx)
 	default:
-		return escIdx + 1 // two-byte escape, e.g. "ESC c"
+		return escEnd(data, escIdx)
 	}
+}
+
+// escEnd returns the index of the final byte of the plain escape sequence
+// starting at data[escIdx]: ESC, any intermediate bytes (0x20–0x2f), then one
+// final byte, e.g. "ESC c" or the charset selection "ESC ( B" that terminfo
+// emits with every colour reset. It returns -1 if the final byte is not yet
+// read.
+func escEnd(data []byte, escIdx int) int {
+	pos := escIdx + 1
+	for pos < len(data) && data[pos] >= csiInterLo && data[pos] <= csiInterHi {
+		pos++ // intermediate bytes
+	}
+
+	if pos >= len(data) {
+		return -1 // final byte not yet read
+	}
+
+	return pos
 }
 
 // isStringSeqIntroducer reports whether b (the byte after ESC) begins an ANSI
