@@ -169,7 +169,7 @@ Module logging is for the **admin/operator** (the person who wrote the config an
 
 - **Client** (`cmds/dutctl` and its output rendering): `slog.Debug`/`slog.Warn` only — its two-channel output model. `slog.Info`/`Error`/… are rejected.
 - **Agent/server setup** (process bootstrap, module `Init`/`Deinit` lifecycle summaries, the frozen-logger objects): no request context, so log through the `slog` package directly (`slog.Info`, `slog.Error`, …).
-- **Agent/server request path** (RPC handlers, FSM, broker/workers, relay, modules): obtain the logger from the request context — `log.FromContext(ctx).X` — never bare `slog`.
+- **Agent/server request path** (RPC handlers, broker/workers, relay, modules): obtain the logger from the request context — `log.FromContext(ctx).X` — never bare `slog`.
 
 The default (any file not explicitly listed as a client or setup file in the exclusions) is the strictest request-path rule, so new code is nudged toward `log.FromContext(ctx)` automatically.
 

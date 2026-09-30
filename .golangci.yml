@@ -240,7 +240,7 @@ linters:
       # region; these rules grant the per-region EXCEPTIONS. Any file NOT matched
       # below gets the default (strictest) "request path" rule: no direct slog —
       # obtain the logger from the request context with log.FromContext(ctx).
-      # This is how the RPC handlers, FSM, broker/workers, relay and modules log.
+      # This is how the RPC handlers, broker/workers, relay and modules log.
       #
       # CLIENT — dutctl and its output rendering. Its two-channel output model
       # allows slog.Debug/slog.Warn only, so lift P2 (Debug/Warn/Default) here;
