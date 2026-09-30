@@ -375,6 +375,20 @@ func (a *rpcService) Run(
 	l := log.FromContext(ctx)
 	l.Info("request received")
 
+	err = a.run(ctx, rpc.NewRunStream(stream), user)
+	if err != nil {
+		l.Error("request finished with error", "err", err)
+	} else {
+		l.Info("request finished successfully")
+	}
+
+	return err
+}
+
+// run carries out a Run request for user over stream. It is Run minus the
+// connect transport and the caller lookup, so tests can drive the whole request
+// with a fake stream. Every error it returns is a *connect.Error.
+func (a *rpcService) run(ctx context.Context, stream session.Stream, user string) error {
 	autoLock := &autoLockHold{}
 
 	// Release the command-scoped auto-lock on every exit path. Deferred so it
@@ -404,7 +418,7 @@ func (a *rpcService) Run(
 	defer cancelRun()
 
 	fsmArgs := runCmdArgs{
-		stream:     rpc.NewRunStream(stream),
+		stream:     stream,
 		deviceList: a.devices,
 		locker:     a.locker,
 		user:       user,
@@ -412,7 +426,7 @@ func (a *rpcService) Run(
 		broker:     broker,
 	}
 
-	_, err = fsm.Run(runCtx, fsmArgs, receiveCommandRPC)
+	_, err := fsm.Run(runCtx, fsmArgs, receiveCommandRPC)
 
 	var connectErr *connect.Error
 	if err != nil && !errors.As(err, &connectErr) {
@@ -425,12 +439,6 @@ func (a *rpcService) Run(
 		default:
 			err = connect.NewError(connect.CodeInternal, err)
 		}
-	}
-
-	if err != nil {
-		l.Error("request finished with error", "err", err)
-	} else {
-		l.Info("request finished successfully")
 	}
 
 	return err
