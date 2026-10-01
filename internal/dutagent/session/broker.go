@@ -29,13 +29,18 @@ const (
 )
 
 // Broker mediates between a module and its environment while the module is executed.
-// This concerns communication and data exchange.
+// This concerns communication and data exchange. A Broker is single-use: call
+// Start once, and Stop when the modules are done.
 type Broker struct {
-	once    sync.Once
 	stream  Stream
 	session backend
-	errCh   chan error // closed after all workers complete
 	wg      sync.WaitGroup
+
+	stop   context.CancelFunc      // stops the workers; nil until Start
+	cancel context.CancelCauseFunc // cancels the context Start returned
+
+	errOnce sync.Once
+	err     error // the first worker failure; read only after wg.Wait
 }
 
 func (b *Broker) init() {
@@ -45,68 +50,80 @@ func (b *Broker) init() {
 	b.session.stderrCh = make(chan []byte)
 	b.session.fileReqCh = make(chan string)
 	b.session.fileCh = make(chan chan []byte)
-
-	// Buffer equals number of workers so error sends never block.
-	b.errCh = make(chan error, numWorkers)
 }
 
-// Start initializes the broker and launches its workers. It returns the module session
-// for module execution and a channel signaling worker termination or errors.
-// Multiple calls are idempotent; subsequent calls return the already initialized session and channel.
+// Start launches the broker's workers, which carry the returned module
+// session's I/O over s until Stop is called or ctx is done.
 //
-// The returned channel is error-only and carries at most one error per worker; a
-// nil error is never sent. It is closed once both workers have finished, so a
-// receiver can drain any errors and then observe closure to know the session has
-// fully stopped.
-func (b *Broker) Start(ctx context.Context, s Stream) (module.Session, <-chan error) {
-	ctx = log.WithScope(ctx, scopeSession)
+// The returned context, derived from ctx, is the one to run the modules under.
+// Like the one errgroup.WithContext returns, it is cancelled when the first
+// worker fails, with the failure as its cause: a worker fails only when the
+// stream is broken or the client breaks the protocol, and either way the modules
+// must stop. Otherwise it is cancelled when Stop returns. A worker that ends
+// cleanly, because the client closed its side, does not cancel it.
+func (b *Broker) Start(ctx context.Context, s Stream) (module.Session, context.Context) {
+	runCtx, cancel := context.WithCancelCause(ctx)
+	b.cancel = cancel
 
-	b.once.Do(func() {
-		b.init()
-		b.stream = s
-		// Freeze the session-scoped logger onto the session: its module-facing
-		// methods carry no context to derive a logger from.
-		b.session.log = log.FromContext(ctx)
+	b.init()
+	b.stream = s
 
-		log.FromContext(ctx).Debug("broker initializing")
+	ctx = log.WithScope(runCtx, scopeSession)
+	// Freeze the session-scoped logger onto the session: its module-facing
+	// methods carry no context to derive a logger from.
+	b.session.log = log.FromContext(ctx)
 
-		workerCtx, workerCancel := context.WithCancel(ctx)
-		// Freeze the workers' done signal onto the session so the module-facing
-		// methods (which carry no context) can abort a channel op whose worker
-		// peer has exited. Set here, before the workers start and before Start
-		// returns to the caller that later spawns the module goroutine, so there
-		// is no race on the read.
-		b.session.done = workerCtx.Done()
+	log.FromContext(ctx).Debug("broker initializing")
 
-		b.wg.Add(numWorkers)
-		b.toClient(workerCtx, workerCancel)
-		b.fromClient(workerCtx, workerCancel)
+	workerCtx, stopWorkers := context.WithCancel(ctx)
+	b.stop = stopWorkers
+	// Freeze the workers' done signal onto the session so the module-facing
+	// methods (which carry no context) can abort a channel op whose worker
+	// peer has exited. Set here, before the workers start and before Start
+	// returns to the caller that later runs the modules, so there is no race
+	// on the read.
+	b.session.done = workerCtx.Done()
 
-		go func() {
-			b.wg.Wait()
-			close(b.errCh)
-		}()
-	})
+	b.wg.Add(numWorkers)
+	b.toClient(workerCtx)
+	b.fromClient(workerCtx)
 
-	// Rebinding the stream after first start is ignored by design; a Broker is single-use per Run.
-	return &b.session, b.errCh
+	return &b.session, runCtx
 }
 
-// Wait blocks until both workers have returned, so that no stream Send is still
-// in progress. It does not stop the workers: the caller cancels the context
-// passed to Start first. It returns immediately if the Broker was never started,
-// and may be called more than once. Call it from the goroutine that called
-// Start, or after Start returned.
+// Stop stops the workers and waits for them to return, so that no stream Send
+// is still in progress once it returns. It returns the first worker failure, or
+// nil. It returns nil at once if the Broker was never started, and may be called
+// more than once. Call it from the goroutine that called Start, or after Start
+// returned.
 //
 // The RPC handler relies on this: a stream Send running past the handler's return
 // panics inside net/http, in a worker goroutine no recover covers. The upstream
 // worker's receive goroutine is not awaited: it only reads the request body,
 // which the transport closes once the handler returns, so it ends then.
-func (b *Broker) Wait() {
+func (b *Broker) Stop() error {
+	if b.stop == nil {
+		return nil
+	}
+
+	b.stop()
 	b.wg.Wait()
+	b.cancel(nil)
+
+	return b.err
 }
 
-func (b *Broker) toClient(ctx context.Context, cancel context.CancelFunc) {
+// fail records the first worker failure and cancels the modules' context with
+// it, in one step, so the error Stop returns and the cancellation cause are the
+// same failure.
+func (b *Broker) fail(err error) {
+	b.errOnce.Do(func() {
+		b.err = err
+		b.cancel(err)
+	})
+}
+
+func (b *Broker) toClient(ctx context.Context) {
 	// Scope the downstream (agent → client) flow; the worker and its chanio
 	// reader inherit it from ctx.
 	ctx = log.WithScope(ctx, scopeSessionDownstream)
@@ -120,20 +137,20 @@ func (b *Broker) toClient(ctx context.Context, cancel context.CancelFunc) {
 		err := toClientWorker(ctx, b.stream, &b.session)
 		if err != nil {
 			// Log the worker's terminal failure at session scope, and surface it to
-			// the RPC layer via errCh for request classification. This is the
-			// sanctioned detail+summary double-log: the RPC handler (Run) also logs
-			// the rpc-scope summary of the returned error.
+			// the RPC layer via fail and Stop for request classification. This is
+			// the sanctioned detail+summary double-log: the RPC handler (Run) also
+			// logs the rpc-scope summary of the returned error.
 			l.Warn("worker terminated", "err", err)
-			b.errCh <- err
+			b.fail(err)
 		} else {
 			l.Debug("worker stopped")
 		}
-		// Cancel companion regardless of outcome; fromClientWorker drains one pending receive to catch concurrent error.
-		cancel()
+		// Stop the companion regardless of outcome; fromClientWorker drains one pending receive to catch concurrent error.
+		b.stop()
 	}()
 }
 
-func (b *Broker) fromClient(ctx context.Context, cancel context.CancelFunc) {
+func (b *Broker) fromClient(ctx context.Context) {
 	// Scope the upstream (client → agent) flow; the worker inherits it from ctx.
 	ctx = log.WithScope(ctx, scopeSessionUpstream)
 
@@ -146,15 +163,15 @@ func (b *Broker) fromClient(ctx context.Context, cancel context.CancelFunc) {
 		err := fromClientWorker(ctx, b.stream, &b.session)
 		if err != nil {
 			// Log the worker's terminal failure at session scope, and surface it to
-			// the RPC layer via errCh for request classification. This is the
-			// sanctioned detail+summary double-log: the RPC handler (Run) also logs
-			// the rpc-scope summary of the returned error.
+			// the RPC layer via fail and Stop for request classification. This is
+			// the sanctioned detail+summary double-log: the RPC handler (Run) also
+			// logs the rpc-scope summary of the returned error.
 			l.Warn("worker terminated", "err", err)
-			b.errCh <- err
+			b.fail(err)
 		} else {
 			l.Debug("worker stopped")
 		}
-		// Cancel companion regardless of outcome; toClientWorker will exit promptly.
-		cancel()
+		// Stop the companion regardless of outcome; toClientWorker will exit promptly.
+		b.stop()
 	}()
 }

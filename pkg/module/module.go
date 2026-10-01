@@ -72,7 +72,10 @@ type Module interface {
 	// prefer returning errors over panicking.
 	//
 	// The context carries a logger scoped to this module (log.FromContext) and is
-	// cancelled when the command is aborted or the client disconnects.
+	// cancelled when the command is aborted or the client disconnects. Run must
+	// then return promptly: until it does, its Run request stays open and the
+	// command's device stays busy for every other command, the same user's
+	// included. A forced unlock does not free it.
 	Run(ctx context.Context, s Session, args ...string) error
 }
 

@@ -154,7 +154,8 @@ type runningError struct {
 }
 
 func (e *runningError) Error() string {
-	return fmt.Sprintf("device %q is still running a command for %q", e.device, e.owner)
+	return fmt.Sprintf("device %q is still running a command for %q; a cancelled command keeps the device until it has stopped",
+		e.device, e.owner)
 }
 
 func (e *runningError) Unwrap() error {
