@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -250,4 +251,31 @@ func TestListRPCExplicitShadowsAuto(t *testing.T) {
 	if got.GetExpiresAt() == 0 {
 		t.Error("expected explicit-slot expires_at to win, got 0")
 	}
+}
+
+
+// TestLockRPCWhileDraining pins the code a shutting-down agent answers a new
+// reservation with: FirmwareCI maps FailedPrecondition to "device busy" and
+// tries again later, while any other code would fail the job.
+func TestLockRPCWhileDraining(t *testing.T) {
+	svc := newTestService()
+
+	if _, err := svc.Lock(userCtx("fwci-job"), lockReq("devA", 60)); err != nil {
+		t.Fatalf("Lock before draining: %v", err)
+	}
+
+	svc.locker.Drain()
+
+	t.Run("new_reservation_is_busy", func(t *testing.T) {
+		_, err := svc.Lock(userCtx("next-job"), lockReq("otherDev", 60))
+		if connect.CodeOf(err) != connect.CodeFailedPrecondition || !errors.Is(err, locker.ErrDraining) {
+			t.Errorf("err = %v, want FailedPrecondition wrapping ErrDraining", err)
+		}
+	})
+
+	t.Run("running_job_may_extend", func(t *testing.T) {
+		if _, err := svc.Lock(userCtx("fwci-job"), lockReq("devA", 120)); err != nil {
+			t.Errorf("owner extending its reservation while draining: %v", err)
+		}
+	})
 }

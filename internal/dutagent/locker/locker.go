@@ -24,6 +24,10 @@ var (
 	// duration. A reservation always requires a positive expiry; the no-expiry
 	// semantic belongs to a Busy hold.
 	ErrInvalidDuration = errors.New("lock duration must be positive")
+	// ErrDraining is returned while the agent shuts down gracefully (see Drain)
+	// for work that would start something new: a new reservation, or a command
+	// on a device the caller has not reserved.
+	ErrDraining = errors.New("dutagent is shutting down and takes no new work; try again after its restart")
 )
 
 // Kind is the sort of hold a device carries.
@@ -129,6 +133,10 @@ type Locker struct {
 	reserved map[string]Hold
 	busy     map[string]Hold
 	log      *slog.Logger
+
+	// draining is set by Drain: from then on only work of existing
+	// reservations is accepted.
+	draining bool
 }
 
 // New returns a ready-to-use Locker.
@@ -190,6 +198,10 @@ func (l *Locker) Lock(device, owner string, dur time.Duration) (Hold, error) {
 	blocker := l.checkLocked(device, owner)
 	if blocker != nil {
 		return Hold{}, blocker
+	}
+
+	if _, held := l.liveReservation(device); l.draining && !held {
+		return Hold{}, ErrDraining
 	}
 
 	now := time.Now()
@@ -265,7 +277,8 @@ func (l *Locker) ForceClearLock(device string) error {
 
 // AutoLock acquires the Busy hold on device for owner. Busy holds carry no
 // expiry. Re-acquiring by the same owner is a no-op. If either hold is held by
-// a different owner, a *Error is returned.
+// a different owner, a *Error is returned. While draining, only the owner of
+// the device's reservation may start a command; anyone else gets ErrDraining.
 func (l *Locker) AutoLock(device, owner string) (Hold, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -273,6 +286,10 @@ func (l *Locker) AutoLock(device, owner string) (Hold, error) {
 	blocker := l.checkLocked(device, owner)
 	if blocker != nil {
 		return Hold{}, blocker
+	}
+
+	if _, held := l.liveReservation(device); l.draining && !held {
+		return Hold{}, ErrDraining
 	}
 
 	if existing, held := l.busy[device]; held {
@@ -340,6 +357,34 @@ func (l *Locker) StatusAll() map[string]Hold {
 	for device, hold := range l.busy {
 		out[device] = hold
 	}
+
+	for device := range l.reserved {
+		if hold, ok := l.liveReservation(device); ok {
+			out[device] = hold
+		}
+	}
+
+	return out
+}
+
+// Drain puts the locker into the graceful-shutdown mode: no new reservation is
+// granted and a command may only start on a device its caller has reserved.
+// Existing reservations keep working until they are released or expire, and
+// their owners may still extend them, so a running job can finish.
+func (l *Locker) Drain() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	l.draining = true
+}
+
+// Reservations returns the live Reserved hold of every reserved device.
+// Expired reservations are pruned and omitted.
+func (l *Locker) Reservations() map[string]Hold {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	out := make(map[string]Hold)
 
 	for device := range l.reserved {
 		if hold, ok := l.liveReservation(device); ok {

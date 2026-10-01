@@ -339,3 +339,86 @@ func TestCheckAccessAllowsSameOwnerOnBothSlots(t *testing.T) {
 		t.Fatalf("CheckAccess for other owner: err = %v, want *Error", err)
 	}
 }
+
+func TestDrainRefusesNewReservation(t *testing.T) {
+	l := New()
+	l.Drain()
+
+	if _, err := l.Lock("dev", "alice", time.Minute); !errors.Is(err, ErrDraining) {
+		t.Errorf("Lock while draining: err = %v, want ErrDraining", err)
+	}
+}
+
+func TestDrainKeepsExistingReservationWorking(t *testing.T) {
+	l := New()
+
+	if _, err := l.Lock("dev", "job", time.Minute); err != nil {
+		t.Fatalf("Lock: %v", err)
+	}
+
+	l.Drain()
+
+	if _, err := l.Lock("dev", "job", time.Hour); err != nil {
+		t.Errorf("owner extending its reservation while draining: %v", err)
+	}
+
+	if _, err := l.AutoLock("dev", "job"); err != nil {
+		t.Errorf("owner running a command while draining: %v", err)
+	}
+
+	if err := l.ClearAutoLock("dev", "job"); err != nil {
+		t.Errorf("ClearAutoLock: %v", err)
+	}
+
+	if err := l.ClearLock("dev", "job"); err != nil {
+		t.Errorf("owner releasing its reservation while draining: %v", err)
+	}
+}
+
+func TestDrainRefusesCommandWithoutReservation(t *testing.T) {
+	l := New()
+	l.Drain()
+
+	if _, err := l.AutoLock("dev", "alice"); !errors.Is(err, ErrDraining) {
+		t.Errorf("command on an unreserved device while draining: err = %v, want ErrDraining", err)
+	}
+}
+
+func TestDrainStillReportsOtherOwner(t *testing.T) {
+	l := New()
+
+	if _, err := l.Lock("dev", "job", time.Minute); err != nil {
+		t.Fatalf("Lock: %v", err)
+	}
+
+	l.Drain()
+
+	// Someone else is told the device is taken, as before draining; that is
+	// the more useful answer than "shutting down".
+	if _, err := l.AutoLock("dev", "bob"); !errors.Is(err, ErrWrongOwner) {
+		t.Errorf("command by another owner while draining: err = %v, want ErrWrongOwner", err)
+	}
+}
+
+func TestReservationsListsLiveOnesOnly(t *testing.T) {
+	l := New()
+
+	if _, err := l.Lock("short", "alice", time.Millisecond); err != nil {
+		t.Fatalf("Lock: %v", err)
+	}
+
+	if _, err := l.Lock("long", "job", time.Minute); err != nil {
+		t.Fatalf("Lock: %v", err)
+	}
+
+	if _, err := l.AutoLock("busy", "bob"); err != nil {
+		t.Fatalf("AutoLock: %v", err)
+	}
+
+	time.Sleep(10 * time.Millisecond)
+
+	got := l.Reservations()
+	if len(got) != 1 || got["long"].Owner != "job" {
+		t.Errorf("Reservations() = %v, want only the live reservation of long", got)
+	}
+}

@@ -14,6 +14,15 @@ User=dutagent
 Group=dutagent
 Restart=always
 RestartSec=3s
+
+# Graceful shutdown: on stop or restart, dutagent takes no new work and waits
+# for running jobs (device reservations) to end, bounded by its -drain-timeout
+# (9h by default). Send SIGTERM only to dutagent itself, not to the tools it
+# runs, so a flash in progress is not killed underneath it, and let dutagent's
+# own bound apply instead of systemd's 90s default. To stop at once, send the
+# signal again: systemctl kill --kill-whom=main dutagent
+KillMode=mixed
+TimeoutStopSec=infinity
 ExecStart=/usr/bin/dutagent -a 0.0.0.0:2024 -c /etc/dutagent/config.yaml
 # The port 2024 is unused
 #   see https://en.wikipedia.org/wiki/List_of_TCP_and_UDP_port_numbers

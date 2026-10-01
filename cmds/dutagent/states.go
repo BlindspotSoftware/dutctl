@@ -142,13 +142,14 @@ func checkDeviceAccess(_ context.Context, args runCmdArgs) (runCmdArgs, fsm.Stat
 // records the hold on args.autoLock so Run releases it on every exit path.
 //
 // Errors: CodeFailedPrecondition when another owner holds the device
-// (locker.ErrWrongOwner); CodeInternal otherwise.
+// (locker.ErrWrongOwner) or the agent is shutting down and the caller has not
+// reserved the device (locker.ErrDraining); CodeInternal otherwise.
 func acquireAutoLock(_ context.Context, args runCmdArgs) (runCmdArgs, fsm.State[runCmdArgs], error) {
 	device := args.cmdMsg.GetDevice()
 
 	_, err := args.locker.AutoLock(device, args.user)
 	if err != nil {
-		if errors.Is(err, locker.ErrWrongOwner) {
+		if errors.Is(err, locker.ErrWrongOwner) || errors.Is(err, locker.ErrDraining) {
 			return args, nil, connect.NewError(connect.CodeFailedPrecondition, err)
 		}
 

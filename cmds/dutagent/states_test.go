@@ -304,6 +304,35 @@ func TestAcquireAutoLock(t *testing.T) {
 			t.Error("hold recorded despite a failed acquire")
 		}
 	})
+
+	t.Run("draining_refuses_unreserved_device_with_FailedPrecondition", func(t *testing.T) {
+		l := locker.New()
+		l.Drain()
+
+		hold := &autoLockHold{}
+		args := runCmdArgs{cmdMsg: cmdMsg, locker: l, user: "alice", autoLock: hold}
+
+		_, _, err := acquireAutoLock(context.Background(), args)
+		if connect.CodeOf(err) != connect.CodeFailedPrecondition || !errors.Is(err, locker.ErrDraining) {
+			t.Errorf("err = %v, want FailedPrecondition wrapping ErrDraining", err)
+		}
+	})
+
+	t.Run("draining_lets_the_reservation_owner_run", func(t *testing.T) {
+		l := locker.New()
+		if _, err := l.Lock(device, "alice", time.Hour); err != nil {
+			t.Fatalf("setup Lock: %v", err)
+		}
+
+		l.Drain()
+
+		hold := &autoLockHold{}
+		args := runCmdArgs{cmdMsg: cmdMsg, locker: l, user: "alice", autoLock: hold}
+
+		if _, _, err := acquireAutoLock(context.Background(), args); err != nil {
+			t.Errorf("owner of the reservation refused while draining: %v", err)
+		}
+	})
 }
 
 func TestClearAutoLock(t *testing.T) {
