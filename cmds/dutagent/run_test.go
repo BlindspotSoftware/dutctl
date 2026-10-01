@@ -32,10 +32,10 @@ const (
 )
 
 // clientStream is a session.Stream standing in for a live client. Receive hands
-// out the queued requests and then blocks, as a client holding the stream open
-// does, until the client hangs up. Send records every response, or fails with
-// sendErr if set; sendFor makes each Send take that long, like a transport write
-// that outlives its caller.
+// out the queued requests, then those pushed later, and otherwise blocks, as a
+// client holding the stream open does, until the client hangs up. Send records
+// every response, or fails with sendErr if set; sendFor makes each Send take
+// that long, like a transport write that outlives its caller.
 type clientStream struct {
 	mu      sync.Mutex
 	reqs    []*pb.RunRequest
@@ -46,6 +46,7 @@ type clientStream struct {
 	sendFor  time.Duration
 	inFlight atomic.Int32
 
+	pushed   chan *pb.RunRequest
 	gone     chan struct{}
 	hangOnce sync.Once
 }
@@ -53,10 +54,15 @@ type clientStream struct {
 func newClientStream(t *testing.T, reqs ...*pb.RunRequest) *clientStream {
 	t.Helper()
 
-	s := &clientStream{reqs: reqs, gone: make(chan struct{})}
+	s := &clientStream{reqs: reqs, pushed: make(chan *pb.RunRequest, 1), gone: make(chan struct{})}
 	t.Cleanup(s.hangUp)
 
 	return s
+}
+
+// push sends req from the client while the run is under way.
+func (s *clientStream) push(req *pb.RunRequest) {
+	s.pushed <- req
 }
 
 // hangUp ends the stream from the client side: a blocked Receive returns.
@@ -83,9 +89,12 @@ func (s *clientStream) Receive() (*pb.RunRequest, error) {
 
 	s.mu.Unlock()
 
-	<-s.gone
-
-	return nil, connect.NewError(connect.CodeCanceled, errors.New("client hung up"))
+	select {
+	case req := <-s.pushed:
+		return req, nil
+	case <-s.gone:
+		return nil, connect.NewError(connect.CodeCanceled, errors.New("client hung up"))
+	}
 }
 
 func (s *clientStream) Send(res *pb.RunResponse) error {
@@ -502,7 +511,7 @@ func TestRunSameUserSecondRunRejected(t *testing.T) {
 		t.Errorf("alice's second run: code = %v (err = %v), want FailedPrecondition matching ErrAlreadyRunning", connect.CodeOf(err), err)
 	}
 
-	want := `device "dev" is still running a command for "alice"`
+	want := `device "dev" is still running a command for "alice"; a cancelled command keeps the device until it has stopped`
 	var ce *connect.Error
 	if !errors.As(err, &ce) || ce.Message() != want {
 		t.Errorf("alice's second run: err = %v, want the message %q", err, want)
@@ -618,6 +627,35 @@ func TestRunCancellation(t *testing.T) {
 			<-ctx.Done()
 
 			return ctx.Err()
+		})
+
+		stream := newClientStream(t, commandReq(testDevice, testCommand))
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		go func() {
+			<-started
+			cancel()
+			stream.hangUp()
+		}()
+
+		err := svc.run(ctx, stream, "alice")
+		if connect.CodeOf(err) != connect.CodeCanceled {
+			t.Fatalf("code = %v (err = %v), want Canceled", connect.CodeOf(err), err)
+		}
+	})
+
+	// A subprocess module stopped by SIGTERM fails with the tool's own error, not
+	// ctx.Err(); the run is still reported as cancelled, not as a module failure.
+	t.Run("module fails with its own error after the hang-up", func(t *testing.T) {
+		started := make(chan struct{})
+
+		svc := newRunService(func(ctx context.Context, _ module.Session, _ ...string) error {
+			close(started)
+			<-ctx.Done()
+
+			return errors.New("flash tool exited: signal: terminated")
 		})
 
 		stream := newClientStream(t, commandReq(testDevice, testCommand))
@@ -887,59 +925,214 @@ func TestRunModules(t *testing.T) {
 	})
 }
 
-func TestWaitModules(t *testing.T) {
-	boom := errors.New("boom")
-
+// TestRunHoldsDeviceUntilModulesReturn guards the device against being handed
+// on while a module still drives it. A module that honors ctx can still need
+// time to stop — procexec gives a subprocess a grace period after SIGTERM — so
+// the run must end, and release its auto-lock, only once the module returned,
+// on every path that cancels it.
+func TestRunHoldsDeviceUntilModulesReturn(t *testing.T) {
 	tests := []struct {
-		name      string
-		cancelled bool
-		moduleErr []error // values sent on the module channel, in order
-		brokerErr []error // values sent on the broker channel, which is then closed
+		name string
+		// send is what the client sends once the module runs; nil means the
+		// client cancels and hangs up instead.
+		send      *pb.RunRequest
 		wantCode  connect.Code
+		wantCause error // the cause the module's context reports
 	}{
-		{name: "modules and broker succeed", moduleErr: []error{nil}},
-		{name: "context cancelled", cancelled: true, wantCode: connect.CodeCanceled},
-		{name: "module fails", moduleErr: []error{boom}, wantCode: connect.CodeAborted},
-		{name: "broker fails", brokerErr: []error{boom}, wantCode: connect.CodeInternal},
-		{name: "broker rejects a file transfer", brokerErr: []error{session.ErrBadFileTransfer}, wantCode: connect.CodeInvalidArgument},
+		{
+			name:      "client hangs up",
+			wantCode:  connect.CodeCanceled,
+			wantCause: context.Canceled,
+		},
+		{
+			// A file nobody requested is a protocol violation that fails the
+			// upstream worker, which aborts the modules.
+			name: "client breaks the file protocol",
+			send: &pb.RunRequest{Msg: &pb.RunRequest_File{
+				File: &pb.File{Path: "unrequested", Content: []byte("x")},
+			}},
+			wantCode:  connect.CodeInvalidArgument,
+			wantCause: session.ErrBadFileTransfer,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			started, stopping, release := make(chan struct{}), make(chan struct{}), make(chan struct{})
+
+			var (
+				svc         *rpcService
+				cause       error
+				heldAtStop  bool
+				releaseOnce sync.Once
+			)
+
+			svc = newRunService(func(ctx context.Context, _ module.Session, _ ...string) error {
+				close(started)
+				<-ctx.Done()
+				cause = context.Cause(ctx)
+				close(stopping)
+
+				<-release // still stopping, like a subprocess in its grace period
+
+				hold, ok := deviceHold(svc)
+				heldAtStop = ok && hold.Owner == "alice"
+
+				return ctx.Err()
+			})
+
+			t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
+
+			stream := newClientStream(t, commandReq(testDevice, testCommand))
+
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 
-			if tt.cancelled {
+			done := make(chan error, 1)
+
+			go func() { done <- svc.run(ctx, stream, "alice") }()
+
+			select {
+			case <-started:
+			case err := <-done:
+				t.Fatalf("run returned before its module started: %v", err)
+			}
+
+			if tt.send != nil {
+				stream.push(tt.send)
+			} else {
 				cancel()
+				stream.hangUp()
 			}
 
-			moduleErrCh := make(chan error, 1)
-			for _, err := range tt.moduleErr {
-				moduleErrCh <- err
+			select {
+			case <-stopping:
+			case <-time.After(time.Second):
+				t.Fatal("the module's context was not cancelled")
 			}
 
-			brokerErrCh := make(chan error, 2)
-			for _, err := range tt.brokerErr {
-				brokerErrCh <- err
+			// While the module is stopping, the run must not end. A slow runner
+			// can only make this pass by mistake, never fail by mistake.
+			select {
+			case err := <-done:
+				t.Fatalf("run returned (%v) while its module was still running", err)
+			case <-time.After(50 * time.Millisecond):
 			}
 
-			close(brokerErrCh)
-
-			// A case that never reports on the module channel must still
-			// end: its outcome comes from the broker channel or the context.
-			err := waitModules(ctx, moduleErrCh, brokerErrCh)
-
-			if tt.wantCode == 0 {
-				if err != nil {
-					t.Fatalf("unexpected error: %v", err)
-				}
-
-				return
+			if _, ok := deviceHold(svc); !ok {
+				t.Error("device free while its module is still running")
 			}
 
+			releaseOnce.Do(func() { close(release) })
+
+			err := <-done
 			if connect.CodeOf(err) != tt.wantCode {
 				t.Fatalf("code = %v (err = %v), want %v", connect.CodeOf(err), err, tt.wantCode)
 			}
+
+			if !errors.Is(cause, tt.wantCause) {
+				t.Errorf("module context cause = %v, want %v", cause, tt.wantCause)
+			}
+
+			if !heldAtStop {
+				t.Error("device released before the module returned")
+			}
+
+			if hold, ok := deviceHold(svc); ok {
+				t.Errorf("auto-lock still held after run returned: %+v", hold)
+			}
 		})
+	}
+}
+
+// A user who cancels a run and retries at once is turned away while the
+// cancelled run's module is still stopping: the device runs one command at a
+// time, and the cancelled one still drives it. Once the module has returned,
+// the retry is admitted.
+func TestRunRetryWhileCancelledModuleStops(t *testing.T) {
+	started, stopping, release := make(chan struct{}), make(chan struct{}), make(chan struct{})
+
+	var (
+		releaseOnce sync.Once
+		retries     atomic.Int32
+	)
+
+	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
+
+	svc := newRunService(func(ctx context.Context, _ module.Session, args ...string) error {
+		if fmt.Sprint(args) == "[retry]" {
+			retries.Add(1)
+
+			return nil
+		}
+
+		close(started)
+		<-ctx.Done()
+		close(stopping)
+		<-release // still stopping, like a subprocess in its grace period
+
+		return ctx.Err()
+	})
+
+	first := newClientStream(t, commandReq(testDevice, testCommand))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	firstDone := make(chan error, 1)
+
+	go func() { firstDone <- svc.run(ctx, first, "alice") }()
+
+	select {
+	case <-started:
+	case err := <-firstDone:
+		t.Fatalf("first run returned before its module started: %v", err)
+	}
+
+	cancel()
+	first.hangUp()
+
+	select {
+	case <-stopping:
+	case <-time.After(time.Second):
+		t.Fatal("the cancelled run's module did not see the cancellation")
+	}
+
+	// A run that returned here would have released the device under its module.
+	select {
+	case err := <-firstDone:
+		t.Fatalf("cancelled run returned (%v) while its module was still stopping", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	// The cancelled run's module is still stopping: the retry must be turned away.
+	err := svc.run(context.Background(), newClientStream(t, commandReq(testDevice, testCommand, "retry")), "alice")
+	if connect.CodeOf(err) != connect.CodeFailedPrecondition || !errors.Is(err, locker.ErrAlreadyRunning) {
+		t.Errorf("retry while the cancelled module stops: code = %v (err = %v), want FailedPrecondition matching ErrAlreadyRunning",
+			connect.CodeOf(err), err)
+	}
+
+	if n := retries.Load(); n != 0 {
+		t.Errorf("retry ran its module %d time(s) while the cancelled module still stopped", n)
+	}
+
+	releaseOnce.Do(func() { close(release) })
+
+	if err := <-firstDone; connect.CodeOf(err) != connect.CodeCanceled {
+		t.Fatalf("cancelled run: code = %v (err = %v), want Canceled", connect.CodeOf(err), err)
+	}
+
+	// The module has returned and the cancelled run has ended: the retry runs.
+	err = svc.run(context.Background(), newClientStream(t, commandReq(testDevice, testCommand, "retry")), "alice")
+	if err != nil {
+		t.Fatalf("retry after the cancelled module returned: unexpected error: %v", err)
+	}
+
+	if n := retries.Load(); n != 1 {
+		t.Errorf("retry ran its module %d time(s), want 1", n)
+	}
+
+	if hold, ok := deviceHold(svc); ok {
+		t.Errorf("auto-lock still held after both runs returned: %+v", hold)
 	}
 }

@@ -17,13 +17,15 @@ Modules must implement the following interface:
 ```go
 type Module interface {
   Help() string
-  Init() error
-  Deinit() error
+  Init(ctx context.Context) error
+  Deinit(ctx context.Context) error
   Run(ctx context.Context, s Session, args ...string) error
 }
 ```
 
 See [`pkg/module/module.go`](../pkg/module/module.go) for further information on the set of functions.
+`Run` must return promptly once its context is cancelled (the command was aborted or the client disconnected):
+until it returns, the device stays busy, even for the user who aborted the command, and a forced unlock does not free it.
 With the _Session_ provided to the module, it is able to interact with the client during execution (status messages,
 request input, file transfer, etc.).
 

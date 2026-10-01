@@ -214,7 +214,7 @@ func TestAutoLockRejectsSameOwnerWhileBusy(t *testing.T) {
 				t.Errorf("second AutoLock: err = %v matches ErrWrongOwner or is a *Error, but the device's holder is the caller", err)
 			}
 
-			want := `device "dev" is still running a command for "alice"`
+			want := `device "dev" is still running a command for "alice"; a cancelled command keeps the device until it has stopped`
 			if err.Error() != want {
 				t.Errorf("second AutoLock: message = %q, want %q", err.Error(), want)
 			}

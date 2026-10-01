@@ -15,6 +15,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/BlindspotSoftware/dutctl/pkg/module"
+
 	pb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1"
 )
 
@@ -58,226 +60,207 @@ func (s *testStream) Receive() (*pb.RunRequest, error) {
 	return nil, io.EOF
 }
 
-// collectErrors waits until errCh is closed or timeout; returns slice of errors read.
-func collectErrors(t *testing.T, errCh <-chan error, timeout time.Duration) []error {
+// blockingStream returns a testStream whose Receive blocks, as a client holding
+// the stream open does, until the test ends; its Send fails with sendErr if set.
+func blockingStream(t *testing.T, sendErr error) *testStream {
 	t.Helper()
-	var errs []error
-	deadline := time.After(timeout)
-	for {
-		select {
-		case e, ok := <-errCh:
-			if !ok {
-				return errs
-			}
-			if e == nil {
-				// Desired semantics: never send nil; fail immediately.
-				t.Fatalf("received unexpected nil error value on error channel")
-			}
-			errs = append(errs, e)
-		case <-deadline:
-			t.Fatalf("timeout waiting for error channel to close; collected %d errors", len(errs))
-		}
+
+	s := &testStream{sendErr: sendErr, recvBlock: true, unblockCh: make(chan struct{})}
+	t.Cleanup(func() { close(s.unblockCh) })
+
+	return s
+}
+
+// start starts b over stream, returning the session and the modules' context,
+// and stops b when the test ends.
+func start(t *testing.T, b *Broker, stream Stream) (module.Session, context.Context) {
+	t.Helper()
+
+	sess, runCtx := b.Start(context.Background(), stream)
+	t.Cleanup(func() { _ = b.Stop() })
+
+	return sess, runCtx
+}
+
+// awaitFailure waits until the broker has reported a worker failure.
+func awaitFailure(t *testing.T, runCtx context.Context) {
+	t.Helper()
+
+	select {
+	case <-runCtx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("no worker failure reported")
 	}
 }
 
-// These tests verify the broker error-channel contract: the channel is
-// error-only (a nil error is never sent) and is closed once both workers
-// have completed.
+// awaitClosed waits until the session has been torn down, its workers gone.
+func awaitClosed(t *testing.T, sess module.Session) {
+	t.Helper()
 
-func TestBroker_SuccessNoTraffic(t *testing.T) {
+	select {
+	case <-sess.(*backend).done:
+	case <-time.After(time.Second):
+		t.Fatal("session not closed")
+	}
+}
+
+func TestBrokerStopWithoutFailure(t *testing.T) {
+	b := &Broker{}
+	_, runCtx := start(t, b, blockingStream(t, nil))
+
+	if err := b.Stop(); err != nil {
+		t.Fatalf("Stop: unexpected error: %v", err)
+	}
+
+	// Stop ends the modules' context, but not with a failure.
+	if cause := context.Cause(runCtx); !errors.Is(cause, context.Canceled) {
+		t.Errorf("run context cause after a clean stop = %v, want context.Canceled", cause)
+	}
+}
+
+// A client that closes its side ends the workers, but not the modules: they may
+// still be running and must not be aborted.
+func TestBrokerClientCloseLeavesModulesRunning(t *testing.T) {
+	b := &Broker{}
+	sess, runCtx := start(t, b, &testStream{recvErrs: []error{nil}}) // nil => EOF
+
+	awaitClosed(t, sess)
+
+	if err := runCtx.Err(); err != nil {
+		t.Errorf("run context done after the client closed its side: %v (cause %v)", err, context.Cause(runCtx))
+	}
+
+	if err := b.Stop(); err != nil {
+		t.Fatalf("Stop: unexpected error: %v", err)
+	}
+}
+
+// Cancelling the context passed to Start tears the session down by itself, so a
+// module blocked in a session call unwinds even before anyone calls Stop.
+func TestBrokerParentCancelClosesSession(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	b := &Broker{}
-	stream := &testStream{recvErrs: []error{io.EOF}}
-	_, errCh := b.Start(ctx, stream)
+	sess, runCtx := b.Start(ctx, blockingStream(t, nil))
 
-	// Cancel broker context to simulate modules finished successfully.
 	cancel()
 
-	errs := collectErrors(t, errCh, 200*time.Millisecond)
-	if len(errs) != 0 {
-		for _, e := range errs {
-			if e != nil {
-				// Fail: success path should have no errors.
-				t.Fatalf("unexpected error on success path: %v", e)
-			}
-		}
+	awaitClosed(t, sess)
+
+	if runCtx.Err() == nil {
+		t.Error("modules' context still live after its parent was cancelled")
+	}
+
+	if err := b.Stop(); err != nil {
+		t.Fatalf("Stop: unexpected error: %v", err)
 	}
 }
 
-// Success via EOF without explicit cancel: broker should see EOF, both workers finish, err channel closes with no errors.
-func TestBroker_SuccessEOFNoCancel(t *testing.T) {
-	b := &Broker{}
-	stream := &testStream{recvErrs: []error{nil}} // nil => EOF
-	ctx := context.Background()
-	_, errCh := b.Start(ctx, stream)
-
-	// Collect errors (expected none) and assert channel closure.
-	errs := collectErrors(t, errCh, 200*time.Millisecond)
-	if len(errs) != 0 {
-		for _, e := range errs {
-			t.Fatalf("unexpected error on pure EOF success: %v", e)
-		}
-	}
-	select {
-	case _, ok := <-errCh:
-		if ok {
-			t.Fatalf("error channel not closed after EOF success")
-		}
-	default: // no residual value buffered
-	}
-}
-
-// Forwarding a stdin message should land in session.stdinCh; success path no errors.
-func TestBroker_StdinForwarding(t *testing.T) {
+// Forwarding a stdin message should land in session.stdinCh.
+func TestBrokerStdinForwarding(t *testing.T) {
 	b := &Broker{}
 	stdinPayload := []byte("user input")
 	req := &pb.RunRequest{Msg: &pb.RunRequest_Console{Console: &pb.Console{Data: &pb.Console_Stdin{Stdin: stdinPayload}}}}
-	stream := &testStream{recvReqs: []*pb.RunRequest{req}, recvErrs: []error{nil}} // after first req, EOF
-	ctx, cancel := context.WithCancel(context.Background())
-	sess, errCh := b.Start(ctx, stream)
+	stream := &testStream{recvReqs: []*pb.RunRequest{req}} // EOF after the request
+	sess, _ := start(t, b, stream)
 
-	// Drain stdin from internal session.
 	internal := sess.(*backend)
 	select {
 	case data := <-internal.stdinCh:
 		if string(data) != string(stdinPayload) {
 			t.Fatalf("stdin mismatch: got %q want %q", string(data), string(stdinPayload))
 		}
-	case <-time.After(200 * time.Millisecond):
-		// Timed out waiting for the forwarded stdin payload.
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for the forwarded stdin payload")
 	}
 
-	cancel() // simulate module completion
-
-	_ = collectErrors(t, errCh, 200*time.Millisecond) // expect none
+	if err := b.Stop(); err != nil {
+		t.Fatalf("Stop: unexpected error: %v", err)
+	}
 }
 
 // Cancellation during a blocked receive should terminate fromClientWorker without producing errors.
-func TestBroker_CancelDuringBlockedReceive(t *testing.T) {
+func TestBrokerCancelDuringBlockedReceive(t *testing.T) {
 	b := &Broker{}
 	stream := &testStream{recvBlock: true, unblockCh: make(chan struct{})}
+
 	ctx, cancel := context.WithCancel(context.Background())
-	_, errCh := b.Start(ctx, stream)
+	b.Start(ctx, stream)
 
 	// Cancel promptly, then unblock the fake receive so worker goroutine does not leak.
 	cancel()
 	close(stream.unblockCh)
 
-	errs := collectErrors(t, errCh, 200*time.Millisecond)
-	if len(errs) != 0 {
-		for _, e := range errs {
-			t.Fatalf("unexpected error on cancel-during-block: %v", e)
-		}
+	if err := b.Stop(); err != nil {
+		t.Fatalf("Stop: unexpected error on cancel-during-block: %v", err)
 	}
 }
 
-// Ensure both distinct errors are observed (send + receive) with the channel eventually closing.
-func TestBroker_DualErrorsSet(t *testing.T) {
-	b := &Broker{}
-	sendErr := errors.New("send died")
-	recvErr := errors.New("recv died")
-	stream := &testStream{sendErr: sendErr, recvErrs: []error{recvErr}}
-	ctx := context.Background()
-	sess, errCh := b.Start(ctx, stream)
+func TestBrokerWorkerFailure(t *testing.T) {
+	sendErr := errors.New("send failed")
+	recvErr := errors.New("receive failed")
 
-	// Trigger send error.
-	// Print blocks until a worker receives it; before the session gained a
-	// done-guard it hangs if the workers already tore down on the injected error,
-	// so run it async — a blocked send leaks harmlessly instead of wedging the test.
-	go sess.Print("trigger")
+	tests := []struct {
+		name    string
+		stream  func(t *testing.T) *testStream
+		print   bool // print once, to make the downstream worker send
+		wantErr error
+	}{
+		{
+			name:    "send fails",
+			stream:  func(t *testing.T) *testStream { t.Helper(); return blockingStream(t, sendErr) },
+			print:   true,
+			wantErr: sendErr,
+		},
+		{
+			name:    "receive fails",
+			stream:  func(*testing.T) *testStream { return &testStream{recvErrs: []error{recvErr}} },
+			wantErr: recvErr,
+		},
+	}
 
-	errs := collectErrors(t, errCh, 300*time.Millisecond)
-	if len(errs) == 1 {
-		// Acceptable: only one error may be reported due to cancellation timing.
-		if !errors.Is(errs[0], sendErr) && !errors.Is(errs[0], recvErr) {
-			t.Fatalf("expected send or recv error, got: %v", errs[0])
-		}
-	} else if len(errs) == 2 {
-		foundSend, foundRecv := false, false
-		for _, e := range errs {
-			if errors.Is(e, sendErr) {
-				foundSend = true
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b := &Broker{}
+			sess, runCtx := start(t, b, tt.stream(t))
+
+			if tt.print {
+				// Async: after the failure the print is dropped via the done
+				// signal, but it must not hold up the test either way.
+				go sess.Print("hello")
 			}
-			if errors.Is(e, recvErr) {
-				foundRecv = true
+
+			awaitFailure(t, runCtx)
+
+			if cause := context.Cause(runCtx); !errors.Is(cause, tt.wantErr) {
+				t.Errorf("run context cause = %v, want %v", cause, tt.wantErr)
 			}
-		}
-		if !foundSend || !foundRecv {
-			t.Fatalf("missing expected errors: send=%v recv=%v", foundSend, foundRecv)
-		}
-	} else {
-		t.Fatalf("expected one or two errors, got %d", len(errs))
+
+			if err := b.Stop(); !errors.Is(err, tt.wantErr) {
+				t.Errorf("Stop = %v, want %v", err, tt.wantErr)
+			}
+		})
 	}
 }
 
-func TestBroker_ToClientSendError(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
+// When both workers fail, Stop and the run context's cause must name the same
+// failure: the first one.
+func TestBrokerFirstFailureWins(t *testing.T) {
 	b := &Broker{}
-	stream := &testStream{sendErr: errors.New("send failed")}
-	session, errCh := b.Start(ctx, stream)
+	stream := &testStream{sendErr: errors.New("send died"), recvErrs: []error{errors.New("recv died")}}
+	sess, runCtx := start(t, b, stream)
 
-	// Trigger toClientWorker by printing.
-	// Async: Print blocks until a worker receives it, which may never happen once
-	// the workers tear down on the injected error; a leaked send is harmless here.
-	go session.Print("hello")
+	go sess.Print("hello")
 
-	errs := collectErrors(t, errCh, 200*time.Millisecond)
-	if len(errs) != 1 || !errors.Is(errs[0], stream.sendErr) {
-		// WANT: exactly one send error matching stream.sendErr.
+	awaitFailure(t, runCtx)
+
+	err := b.Stop()
+	if err == nil {
+		t.Fatal("Stop = nil, want the first worker failure")
 	}
-}
 
-func TestBroker_FromClientReceiveError(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	b := &Broker{}
-	badErr := errors.New("receive failed")
-	stream := &testStream{recvErrs: []error{badErr}}
-	_, errCh := b.Start(ctx, stream)
-
-	errs := collectErrors(t, errCh, 200*time.Millisecond)
-	if len(errs) != 1 || !errors.Is(errs[0], badErr) {
-		// WANT one receive error.
-	}
-}
-
-func TestBroker_FromClientEOFThenCancel(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	b := &Broker{}
-	stream := &testStream{recvErrs: []error{nil}} // nil slot => EOF
-	_, errCh := b.Start(ctx, stream)
-
-	cancel() // module completion triggers broker cancel
-
-	errs := collectErrors(t, errCh, 200*time.Millisecond)
-	if len(errs) != 0 {
-		// WANT: no errors on EOF success.
-	}
-}
-
-func TestBroker_DualErrors(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	b := &Broker{}
-	sendErr := errors.New("send died")
-	recvErr := errors.New("recv died")
-	stream := &testStream{sendErr: sendErr, recvErrs: []error{recvErr}}
-	session, errCh := b.Start(ctx, stream)
-
-	// Trigger toClient error
-	// Async: Print blocks until a worker receives it, which may never happen once
-	// the workers tear down on the injected error; a leaked send is harmless here.
-	go session.Print("hello")
-
-	errs := collectErrors(t, errCh, 300*time.Millisecond)
-	if len(errs) < 2 {
-		// WANT both errors; order unspecified.
+	if cause := context.Cause(runCtx); !errors.Is(cause, err) {
+		t.Errorf("run context cause = %v, but Stop reports %v", cause, err)
 	}
 }
 
@@ -291,12 +274,12 @@ func TestBroker_DualErrors(t *testing.T) {
 func TestBrokerSessionCallsUnblockAfterTeardown(t *testing.T) {
 	b := &Broker{}
 	// Immediate EOF makes fromClientWorker return, which cancels the workers and
-	// closes the session's done signal; errCh closing confirms both are gone.
+	// closes the session's done signal; Stop returning confirms both are gone.
 	stream := &testStream{recvErrs: []error{nil}}
-	sess, errCh := b.Start(context.Background(), stream)
+	sess, _ := start(t, b, stream)
 
-	if errs := collectErrors(t, errCh, time.Second); len(errs) != 0 {
-		t.Fatalf("unexpected errors on EOF teardown: %v", errs)
+	if err := b.Stop(); err != nil {
+		t.Fatalf("unexpected error on EOF teardown: %v", err)
 	}
 
 	finished := make(chan struct{})
@@ -369,7 +352,7 @@ func TestBackendCurrentFileRace(t *testing.T) {
 }
 
 // TestBrokerReceiveLoopExitsOnCancel is a regression test for the receive-loop
-// goroutine leak (3b): when the broker is cancelled while stream.Receive is
+// goroutine leak (3b): when the broker is stopped while stream.Receive is
 // blocked, the inner goroutine must exit once Receive returns — its resCh send is
 // guarded by ctx.Done — rather than wedge forever on a channel the returned main
 // loop no longer drains. It is a goroutine-liveness check: pre-fix, the goroutine
@@ -379,13 +362,11 @@ func TestBrokerReceiveLoopExitsOnCancel(t *testing.T) {
 
 	b := &Broker{}
 	stream := &testStream{recvBlock: true, unblockCh: make(chan struct{})}
-	ctx, cancel := context.WithCancel(context.Background())
-	_, errCh := b.Start(ctx, stream)
+	b.Start(context.Background(), stream)
 
-	cancel() // fromClientWorker returns via ctx.Done; the workers tear down
-
-	if errs := collectErrors(t, errCh, time.Second); len(errs) != 0 {
-		t.Fatalf("unexpected errors on cancel: %v", errs)
+	// fromClientWorker returns via ctx.Done; the workers tear down.
+	if err := b.Stop(); err != nil {
+		t.Fatalf("unexpected error on stop: %v", err)
 	}
 
 	// The inner receive-loop goroutine is still parked in the fake's blocking
@@ -437,50 +418,50 @@ func (s *slowStream) Send(_ *pb.RunResponse) error {
 	return nil
 }
 
-// TestBrokerWaitWaitsForInFlightSend covers the guarantee the RPC handler relies
-// on: once the workers are cancelled and Wait returned, no Send is in flight.
-func TestBrokerWaitWaitsForInFlightSend(t *testing.T) {
+// TestBrokerStopWaitsForInFlightSend covers the guarantee the RPC handler relies
+// on: once Stop returned, no Send is in flight.
+func TestBrokerStopWaitsForInFlightSend(t *testing.T) {
 	stream := &slowStream{sendFor: 100 * time.Millisecond, closed: make(chan struct{})}
 	defer close(stream.closed)
 
-	ctx, cancel := context.WithCancel(context.Background())
 	b := &Broker{}
-	sesh, _ := b.Start(ctx, stream)
+	sesh, _ := start(t, b, stream)
 
 	// Print returns once a worker has taken the message, while its Send is
 	// still running.
 	sesh.Print("module output")
 
-	cancel()
-	b.Wait()
+	if err := b.Stop(); err != nil {
+		t.Fatalf("Stop: unexpected error: %v", err)
+	}
 
-	// The worker took the message, so it must have sent it by the time Wait
-	// returns: a send not yet started or still running both outlive Wait.
+	// The worker took the message, so it must have sent it by the time Stop
+	// returns: a send not yet started or still running both outlive Stop.
 	if sends, inFlight := stream.sends.Load(), stream.inFlight.Load(); sends != 1 || inFlight != 0 {
-		t.Errorf("a send outlived Wait (sends=%d, in flight=%d)", sends, inFlight)
+		t.Errorf("a send outlived Stop (sends=%d, in flight=%d)", sends, inFlight)
 	}
 }
 
-func TestBrokerWaitWithoutStartAndTwice(t *testing.T) {
+func TestBrokerStopWithoutStartAndTwice(t *testing.T) {
 	done := make(chan struct{})
 
 	go func() {
 		defer close(done)
 
 		b := &Broker{}
-		b.Wait() // never started
+		if err := b.Stop(); err != nil { // never started
+			t.Errorf("Stop on an unstarted broker = %v, want nil", err)
+		}
 
-		ctx, cancel := context.WithCancel(context.Background())
-		b.Start(ctx, &testStream{recvErrs: []error{io.EOF}})
-		cancel()
+		b.Start(context.Background(), &testStream{recvErrs: []error{io.EOF}})
 
-		b.Wait()
-		b.Wait()
+		_ = b.Stop()
+		_ = b.Stop()
 	}()
 
 	select {
 	case <-done:
 	case <-time.After(time.Second):
-		t.Fatal("Wait blocked on an unstarted or already stopped broker")
+		t.Fatal("Stop blocked on an unstarted or already stopped broker")
 	}
 }

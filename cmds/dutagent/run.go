@@ -51,7 +51,7 @@ func (a *rpcService) run(ctx context.Context, stream session.Stream, user string
 
 	// Deferred, so the device is handed on however the run ends, a panic
 	// included. It runs once runInSession has returned, that is, once the
-	// stream is quiet.
+	// modules have returned and the stream is quiet.
 	defer clearAutoLock(ctx, a.locker, device, user)
 
 	// Module execution is the agent's core orchestration: scope it "agent" and
@@ -138,42 +138,44 @@ func clearAutoLock(ctx context.Context, lk *locker.Locker, device, user string) 
 }
 
 // runInSession runs mods, each with its resolved args, in a session: a
-// session.Broker carries their I/O over stream while they run. It returns once
-// the modules have finished and the broker's workers have stopped, or at the
-// first failure.
+// session.Broker carries their I/O over stream while they run. The modules run
+// on the calling goroutine, so it returns only once they have: the device stays
+// busy for as long as a module drives it, even one slow to stop after a
+// cancellation. It also returns only once the broker's workers have stopped.
 //
-// Errors: see waitModules.
+// Errors: CodeCanceled/CodeDeadlineExceeded when ctx is done (via cancelCode); a
+// failed stream or a client protocol violation via brokerError; a module failure
+// via moduleError.
 func runInSession(ctx context.Context, stream session.Stream, mods []dut.Module, moduleArgs [][]string) error {
-	// The modules run under runCtx; the workers under a child of it, so the
-	// workers can be stopped once the modules are done without cancelling the
-	// modules' context.
-	runCtx, cancelRun := context.WithCancel(ctx)
-	defer cancelRun()
-
-	workerCtx, stopWorkers := context.WithCancel(runCtx)
-
 	var broker session.Broker
 
-	// A worker still inside a stream Send when the handler returns writes to a
-	// response writer connect has invalidated, and panics in a goroutine no
-	// recover covers. So on every exit path, stop the workers and wait for them.
-	defer broker.Wait()
-	defer stopWorkers()
+	// sessCtx is cancelled when a worker fails: the stream is broken, so the
+	// modules must stop.
+	sess, sessCtx := broker.Start(ctx, stream)
 
-	sess, brokerErrCh := broker.Start(workerCtx, stream)
+	// Stopping the broker waits for its workers. The deferred Stop covers the
+	// panic path, where its error has no one to go to: a worker still inside a
+	// stream Send when the handler returns writes to a response writer connect
+	// has invalidated, and panics in a goroutine no recover covers. Stop is
+	// idempotent, so on the normal path it is a no-op after the one below.
+	defer func() { _ = broker.Stop() }()
 
-	// The modules run in a goroutine so a failing stream ends the run without
-	// waiting for them. The channel is buffered for its single result, so the
-	// goroutine never blocks on it once runInSession has returned.
-	moduleErrCh := make(chan error, 1)
+	modErr := runModules(sessCtx, sess, mods, moduleArgs)
+	brokerErr := broker.Stop()
 
-	go func() {
-		defer stopWorkers() // the modules are done: nothing more to carry
-
-		moduleErrCh <- runModules(runCtx, sess, mods, moduleArgs)
-	}()
-
-	return waitModules(ctx, moduleErrCh, brokerErrCh)
+	switch {
+	case ctx.Err() != nil:
+		return connect.NewError(cancelCode(ctx.Err()), fmt.Errorf("module execution aborted: %v", ctx.Err()))
+	case brokerErr != nil:
+		// A worker failure is reported over a module error: it cancelled the
+		// modules' context and closed their session, so a module error is
+		// usually its fallout.
+		return brokerError(brokerErr)
+	case modErr != nil:
+		return moduleError(modErr)
+	default:
+		return nil
+	}
 }
 
 // runModules runs mods in order with their resolved args, stopping at the first
@@ -211,41 +213,6 @@ func runModules(ctx context.Context, sess module.Session, mods []dut.Module, mod
 	}
 
 	l.Info("all modules finished successfully")
-
-	return nil
-}
-
-// waitModules waits until the modules have finished and the broker's workers
-// have stopped, and returns early at the first failure or cancellation.
-// moduleErrCh carries the modules' single result; brokerErrCh carries worker
-// errors only and is closed once both workers have stopped. A source that has
-// finished is set to nil, which disables its select case: a closed channel
-// would be selected again on every iteration.
-//
-// Errors: CodeCanceled/CodeDeadlineExceeded on context cancellation (via
-// cancelCode); a module failure via moduleError; a broker failure via
-// brokerError.
-func waitModules(ctx context.Context, moduleErrCh, brokerErrCh <-chan error) error {
-	for moduleErrCh != nil || brokerErrCh != nil {
-		select {
-		case <-ctx.Done():
-			return connect.NewError(cancelCode(ctx.Err()), fmt.Errorf("module execution aborted: %v", ctx.Err()))
-
-		case err := <-moduleErrCh:
-			if err != nil {
-				return moduleError(err)
-			}
-
-			moduleErrCh = nil
-
-		case err, ok := <-brokerErrCh:
-			if ok {
-				return brokerError(err)
-			}
-
-			brokerErrCh = nil
-		}
-	}
 
 	return nil
 }
