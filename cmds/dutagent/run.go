@@ -8,6 +8,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"time"
 
 	"connectrpc.com/connect"
 	"github.com/BlindspotSoftware/dutctl/internal/dutagent/locker"
@@ -200,7 +202,11 @@ func runModules(ctx context.Context, sess module.Session, mods []dut.Module, mod
 		// only the module's own records are scoped to it.
 		modCtx := log.With(log.WithScope(ctx, "module"), "module", mod.Config.Name, "module-index", idx+1)
 
+		returned := warnUntilReturned(modCtx, mlog, stopWarnInterval)
 		err := catchPanic(func() error { return mod.Run(modCtx, sess, moduleArgs[idx]...) })
+
+		returned()
+
 		if err != nil {
 			// Deliberate detail+summary logging (not log-and-return spam): this
 			// agent-scope line records which module failed (name/index/total) —
@@ -215,4 +221,53 @@ func runModules(ctx context.Context, sess module.Session, mods []dut.Module, mod
 	l.Info("all modules finished successfully")
 
 	return nil
+}
+
+// stopWarnInterval is how often the agent warns about a module that has not
+// returned since the command was cancelled.
+const stopWarnInterval = 10 * time.Second
+
+// warnUntilReturned logs a warning every interval from the moment ctx is done
+// until the returned function is called, which the caller does once the module
+// has returned. A cancelled module keeps its device busy until it returns, and
+// nothing else would say so; if it warned, it also logs when the module finally
+// returns. The returned function waits for the warnings to stop, so none is
+// logged after it.
+func warnUntilReturned(ctx context.Context, l *slog.Logger, interval time.Duration) func() {
+	done, exited := make(chan struct{}), make(chan struct{})
+
+	stop := context.AfterFunc(ctx, func() {
+		defer close(exited)
+
+		cancelled := time.Now()
+		ticker := time.NewTicker(interval)
+
+		defer ticker.Stop()
+
+		warned := false
+
+		for {
+			select {
+			case <-done:
+				if warned {
+					l.Warn("module returned after the command was cancelled", "after", time.Since(cancelled).Round(time.Second))
+				}
+
+				return
+			case <-ticker.C:
+				warned = true
+
+				l.Warn("module still running after the command was cancelled; the device stays busy until it returns",
+					"waiting", time.Since(cancelled).Round(time.Second), "cause", context.Cause(ctx))
+			}
+		}
+	})
+
+	return func() {
+		close(done)
+
+		if !stop() {
+			<-exited // the warnings had started
+		}
+	}
 }

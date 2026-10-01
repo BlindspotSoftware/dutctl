@@ -1136,3 +1136,92 @@ func TestRunRetryWhileCancelledModuleStops(t *testing.T) {
 		t.Errorf("auto-lock still held after both runs returned: %+v", hold)
 	}
 }
+
+// logSink collects log output written from several goroutines.
+type logSink struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (s *logSink) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.buf.Write(p)
+}
+
+func (s *logSink) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.buf.String()
+}
+
+func TestWarnUntilReturned(t *testing.T) {
+	newLogger := func() (*slog.Logger, *logSink) {
+		sink := &logSink{}
+
+		return slog.New(slog.NewTextHandler(sink, nil)), sink
+	}
+
+	t.Run("silent while the command is not cancelled", func(t *testing.T) {
+		l, sink := newLogger()
+
+		returned := warnUntilReturned(context.Background(), l, time.Millisecond)
+		time.Sleep(20 * time.Millisecond)
+		returned()
+
+		if out := sink.String(); out != "" {
+			t.Errorf("logged without a cancellation: %q", out)
+		}
+	})
+
+	t.Run("silent when the module returns promptly after the cancel", func(t *testing.T) {
+		l, sink := newLogger()
+
+		ctx, cancel := context.WithCancel(context.Background())
+
+		returned := warnUntilReturned(ctx, l, time.Hour)
+		cancel()
+		returned()
+
+		if out := sink.String(); out != "" {
+			t.Errorf("logged for a module that returned promptly: %q", out)
+		}
+	})
+
+	t.Run("warns while a cancelled module runs on, then when it returns", func(t *testing.T) {
+		l, sink := newLogger()
+
+		ctx, cancel := context.WithCancelCause(context.Background())
+
+		returned := warnUntilReturned(ctx, l, 5*time.Millisecond)
+		cancel(errors.New("client hung up"))
+
+		deadline := time.Now().Add(2 * time.Second)
+		for !strings.Contains(sink.String(), "module still running") {
+			if time.Now().After(deadline) {
+				t.Fatalf("no warning while the cancelled module ran on; log: %q", sink.String())
+			}
+
+			time.Sleep(time.Millisecond)
+		}
+
+		returned()
+
+		out := sink.String()
+		if !strings.Contains(out, "client hung up") {
+			t.Errorf("warning does not name the cause: %q", out)
+		}
+
+		if !strings.Contains(out, "module returned after the command was cancelled") {
+			t.Errorf("no note that the module finally returned: %q", out)
+		}
+
+		time.Sleep(20 * time.Millisecond)
+
+		if later := sink.String(); later != out {
+			t.Errorf("logged after the module returned: %q", strings.TrimPrefix(later, out))
+		}
+	})
+}
