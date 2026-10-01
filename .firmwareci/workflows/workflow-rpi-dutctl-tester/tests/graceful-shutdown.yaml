@@ -1,0 +1,175 @@
+---
+name: graceful shutdown
+description: >-
+  Restart the dutagent service while a job holds the device. The agent keeps
+  serving the job, its running command survives the restart, and the agent
+  restarts once the job releases the device.
+
+# Everything runs on the tester as root: systemctl, and the client installed by
+# the package, which talks to the agent on localhost.
+#
+# The tester shadows the packaged unit with a local copy in
+# /etc/systemd/system, so the stop settings we ship (KillMode, TimeoutStopSec)
+# would not apply there. The first step copies exactly those settings out of
+# the packaged unit into a runtime drop-in, so the test checks what the package
+# ships; the last step removes it again.
+#
+# A step fails if its command exits non-zero, even when the regex matches, so
+# "systemctl is-active" (non-zero unless active) ends in "|| true" where the
+# expected state is "deactivating".
+
+defaults:
+  transport_root: &transport_root
+    proto: ssh
+    options:
+      host: "[[attributes.Host]]"
+      user: root
+      identity_file: "/root/.ssh/fwci"
+      # TODO: The ssh keys (identity_file) are hard-coded in the FWCI docker at the moment
+
+stages:
+  - name: Test graceful shutdown
+    steps:
+      - cmd: shell
+        name: Apply the packaged stop settings to the agent
+        transport: *transport_root
+        parameters:
+          command: |
+            set -e
+            dir=/run/systemd/system/[[attributes.DutagentService]].d
+            mkdir -p "$dir"
+            {
+              echo '[Service]'
+              grep -E '^(KillMode|TimeoutStopSec)=' /usr/lib/systemd/system/[[attributes.DutagentService]]
+            } >"$dir/zz-packaged-stop.conf"
+            systemctl daemon-reload
+            cat "$dir/zz-packaged-stop.conf"
+
+      - cmd: shell
+        name: Agent stops by signalling dutagent only
+        transport: *transport_root
+        parameters:
+          command: "systemctl show -p KillMode [[attributes.DutagentService]]"
+          expect:
+            - regex: "(?m)^KillMode=mixed$"
+        options:
+          on-error: continue
+
+      - cmd: shell
+        name: systemd does not cut a long shutdown short
+        transport: *transport_root
+        parameters:
+          command: "systemctl show -p TimeoutStopUSec [[attributes.DutagentService]]"
+          expect:
+            - regex: "(?m)^TimeoutStopUSec=infinity$"
+        options:
+          on-error: continue
+
+      # ================================================================
+      #  A job reserves the device and runs a long command, then the
+      #  service is restarted the way a package update does it
+      # ================================================================
+      - cmd: shell
+        name: Restart waits while a job holds the device
+        transport: *transport_root
+        parameters:
+          command: |
+            dutctl() { /usr/bin/dutctl -s localhost:[[attributes.DutagentPort]] -u fwci-job [[attributes.DeviceName]] "$@"; }
+            rm -f /tmp/fwci-gs-run.log
+            date '+%Y-%m-%d %H:%M:%S' >/tmp/fwci-gs-start
+            dutctl lock 10m
+            dutctl run 'sleep 6; echo survived' >/tmp/fwci-gs-run.log 2>&1 </dev/null &
+            sleep 1
+            systemctl restart --no-block [[attributes.DutagentService]]
+            sleep 1
+            systemctl is-active [[attributes.DutagentService]] || true
+          expect:
+            - regex: "(?m)^deactivating$"
+        options:
+          timeout: 30s
+          on-error: continue
+
+      - cmd: shell
+        name: The job's running command survives the restart
+        transport: *transport_root
+        parameters:
+          # Without KillMode=mixed, systemd's SIGTERM would hit the command's
+          # own processes and it would never print this.
+          command: |
+            n=0
+            until grep -q survived /tmp/fwci-gs-run.log || [ "$n" -gt 150 ]; do n=$((n + 1)); sleep 0.1; done
+            cat /tmp/fwci-gs-run.log
+          expect:
+            - regex: "survived"
+        options:
+          timeout: 30s
+          on-error: continue
+
+      - cmd: shell
+        name: The job can still run commands during the restart
+        transport: *transport_root
+        parameters:
+          command: "/usr/bin/dutctl -s localhost:[[attributes.DutagentPort]] -u fwci-job [[attributes.DeviceName]] run 'echo still-served'"
+          expect:
+            - regex: "still-served"
+        options:
+          timeout: 30s
+          on-error: continue
+
+      - cmd: shell
+        name: Restart still waits until the job releases the device
+        transport: *transport_root
+        parameters:
+          command: "systemctl is-active [[attributes.DutagentService]] || true"
+          expect:
+            - regex: "(?m)^deactivating$"
+        options:
+          on-error: continue
+
+      - cmd: shell
+        name: Releasing the device lets the agent restart
+        transport: *transport_root
+        parameters:
+          command: |
+            /usr/bin/dutctl -s localhost:[[attributes.DutagentPort]] -u fwci-job [[attributes.DeviceName]] unlock
+            n=0
+            until [ "$(systemctl is-active [[attributes.DutagentService]])" = active ] || [ "$n" -gt 300 ]; do n=$((n + 1)); sleep 0.1; done
+            systemctl is-active [[attributes.DutagentService]]
+          expect:
+            - regex: "(?m)^active$"
+        options:
+          timeout: 60s
+          on-error: continue
+
+      - cmd: shell
+        name: The old agent stopped because the job ended
+        transport: *transport_root
+        parameters:
+          command: "journalctl -u [[attributes.DutagentService]] --since \"$(cat /tmp/fwci-gs-start)\" --no-pager | grep -c 'graceful shutdown: all jobs ended'"
+          expect:
+            - regex: "(?m)^[1-9][0-9]*$"
+        options:
+          on-error: continue
+
+      - cmd: shell
+        name: The restarted agent takes new reservations
+        transport: *transport_root
+        parameters:
+          command: |
+            n=0
+            until ss -ltn | grep -q ':[[attributes.DutagentPort]] ' || [ "$n" -gt 50 ]; do n=$((n + 1)); sleep 0.2; done
+            /usr/bin/dutctl -s localhost:[[attributes.DutagentPort]] -u next-job [[attributes.DeviceName]] lock 1m
+          expect:
+            - regex: "locked by \"next-job\""
+        options:
+          timeout: 30s
+          on-error: continue
+
+      - cmd: shell
+        name: Remove the runtime drop-in
+        transport: *transport_root
+        parameters:
+          command: |
+            /usr/bin/dutctl -s localhost:[[attributes.DutagentPort]] -u next-job [[attributes.DeviceName]] unlock >/dev/null 2>&1 || true
+            rm -f /run/systemd/system/[[attributes.DutagentService]].d/zz-packaged-stop.conf
+            systemctl daemon-reload
