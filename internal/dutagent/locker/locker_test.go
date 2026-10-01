@@ -169,21 +169,117 @@ func TestAutoLockNoExpiry(t *testing.T) {
 	}
 }
 
-func TestAutoLockSameOwnerIdempotent(t *testing.T) {
+// A device runs one command at a time, even for its own owner: a second run is
+// turned away with an error of its own, which does not present the owner as a
+// stranger holding the device, and the first run keeps the device. Neither the
+// owner's reservation nor a forced unlock of it lets the second run in.
+func TestAutoLockRejectsSameOwnerWhileBusy(t *testing.T) {
+	tests := []struct {
+		name    string
+		reserve bool
+		force   bool // force-clear the reservation before the second AutoLock
+	}{
+		{name: "busy"},
+		{name: "reserved and busy", reserve: true},
+		{name: "reservation forced away", reserve: true, force: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			l := New()
+
+			if tt.reserve {
+				if _, err := l.Lock("dev", "alice", time.Hour); err != nil {
+					t.Fatalf("Lock: %v", err)
+				}
+			}
+
+			if _, err := l.AutoLock("dev", "alice"); err != nil {
+				t.Fatalf("first AutoLock: %v", err)
+			}
+
+			if tt.force {
+				if err := l.ForceClearLock("dev"); err != nil {
+					t.Fatalf("ForceClearLock: %v", err)
+				}
+			}
+
+			_, err := l.AutoLock("dev", "alice")
+			if !errors.Is(err, ErrAlreadyRunning) {
+				t.Fatalf("second AutoLock: err = %v, want ErrAlreadyRunning", err)
+			}
+
+			var le *Error
+			if errors.Is(err, ErrWrongOwner) || errors.As(err, &le) {
+				t.Errorf("second AutoLock: err = %v matches ErrWrongOwner or is a *Error, but the device's holder is the caller", err)
+			}
+
+			want := `device "dev" is still running a command for "alice"`
+			if err.Error() != want {
+				t.Errorf("second AutoLock: message = %q, want %q", err.Error(), want)
+			}
+
+			if err := l.ClearAutoLock("dev", "alice"); err != nil {
+				t.Fatalf("ClearAutoLock: %v", err)
+			}
+
+			// A reservation shadows the Busy hold in StatusAll; clearing it also
+			// proves the rejection left it alone.
+			if tt.reserve && !tt.force {
+				if err := l.ClearLock("dev", "alice"); err != nil {
+					t.Fatalf("ClearLock: %v", err)
+				}
+			}
+
+			if hold, ok := l.StatusAll()["dev"]; ok {
+				t.Errorf("StatusAll[dev] = %+v after the first run's release, want free: the rejected run took the device over", hold)
+			}
+		})
+	}
+}
+
+// A device busy with one owner's run turns another owner away with a *Error
+// naming the holder, as a reservation does.
+func TestAutoLockRejectsOtherOwnerWhileBusy(t *testing.T) {
 	l := New()
 
-	first, err := l.AutoLock("dev", "alice")
-	if err != nil {
-		t.Fatalf("first AutoLock: %v", err)
+	if _, err := l.AutoLock("dev", "alice"); err != nil {
+		t.Fatalf("alice's AutoLock: %v", err)
 	}
 
-	second, err := l.AutoLock("dev", "alice")
-	if err != nil {
-		t.Fatalf("second AutoLock: %v", err)
+	_, err := l.AutoLock("dev", "bob")
+
+	var le *Error
+	if !errors.As(err, &le) {
+		t.Fatalf("bob's AutoLock: err = %v, want *Error", err)
 	}
 
-	if !second.LockedAt.Equal(first.LockedAt) {
-		t.Errorf("re-AutoLock changed LockedAt: first=%v second=%v", first.LockedAt, second.LockedAt)
+	if le.Holder.Kind != Busy || le.Holder.Owner != "alice" {
+		t.Errorf("Error = %+v, want kind=busy owner=alice", le)
+	}
+
+	if errors.Is(err, ErrAlreadyRunning) {
+		t.Errorf("bob's AutoLock: err = %v matches ErrAlreadyRunning, but the device runs alice's command", err)
+	}
+}
+
+// Once a run has released its hold, the device is free for the next run,
+// whoever asks.
+func TestAutoLockAfterRelease(t *testing.T) {
+	l := New()
+
+	for _, owner := range []string{"alice", "alice", "bob", "alice"} {
+		if _, err := l.AutoLock("dev", owner); err != nil {
+			t.Fatalf("%s's AutoLock on a released device: %v", owner, err)
+		}
+
+		if err := l.ClearAutoLock("dev", owner); err != nil {
+			t.Fatalf("%s's ClearAutoLock: %v", owner, err)
+		}
+	}
+
+	if hold, ok := l.StatusAll()["dev"]; ok {
+		t.Errorf("StatusAll[dev] = %+v after the last release, want free", hold)
 	}
 }
 

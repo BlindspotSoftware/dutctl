@@ -45,6 +45,12 @@ client until the session is cancelled (Ctrl-C / disconnect), or until `-t`
 elapses — reaching the `-t` deadline in monitor mode is a success. No matching
 is done.
 
+A device runs one command at a time, so while the monitor runs the device stays
+busy for every other command, yours included: a power cycle from a second
+terminal, for example, is rejected until the monitor ends. To power-cycle the
+device and follow its output, configure one command whose modules do both in
+turn, such as a power cycle followed by `serial` with `expect` steps.
+
 ## Flags
 
 | Flag | Description |

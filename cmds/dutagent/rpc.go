@@ -337,8 +337,9 @@ func (a *rpcService) Unlock(
 // Errors: CodeInvalidArgument if the first message is not a command, the
 // arguments cannot be resolved (Command.ModuleArgs) or the client breaks the file
 // transfer protocol (session.ErrBadFileTransfer); CodeNotFound for an unknown
-// device or command; CodeFailedPrecondition when another owner holds the device;
-// CodeAborted if the initial receive or a module fails;
+// device or command; CodeFailedPrecondition when another owner holds the device
+// or it is already running a command for the caller (a device runs one command
+// at a time); CodeAborted if the initial receive or a module fails;
 // CodeCanceled/CodeDeadlineExceeded on cancellation; a failed stream keeps the
 // transport's connect code; CodeInternal otherwise.
 func (a *rpcService) Run(
