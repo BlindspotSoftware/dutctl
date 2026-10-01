@@ -5,9 +5,12 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -16,6 +19,7 @@ import (
 	"connectrpc.com/connect"
 	"github.com/BlindspotSoftware/dutctl/internal/dutagent/locker"
 	"github.com/BlindspotSoftware/dutctl/internal/dutagent/session"
+	"github.com/BlindspotSoftware/dutctl/internal/log"
 	"github.com/BlindspotSoftware/dutctl/pkg/dut"
 	"github.com/BlindspotSoftware/dutctl/pkg/module"
 
@@ -249,6 +253,18 @@ func TestRunRejectedBeforeModules(t *testing.T) {
 			},
 			wantCode: connect.CodeFailedPrecondition,
 		},
+		{
+			name: "device busy with the same user's run",
+			reqs: []*pb.RunRequest{commandReq(testDevice, testCommand)},
+			setup: func(t *testing.T, svc *rpcService) {
+				t.Helper()
+
+				if _, err := svc.locker.AutoLock(testDevice, "alice"); err != nil {
+					t.Fatalf("setup AutoLock: %v", err)
+				}
+			},
+			wantCode: connect.CodeFailedPrecondition,
+		},
 	}
 
 	for _, tt := range tests {
@@ -445,6 +461,75 @@ func TestRunKeepsSameUsersReservation(t *testing.T) {
 
 	if hold, ok := deviceHold(svc); ok {
 		t.Errorf("Busy hold still present after the run: %+v", hold)
+	}
+}
+
+// A device runs one command at a time, even for one user: a second run of the
+// same user, e.g. a power cycle from another terminal while a console is open,
+// is rejected as the device being busy, without presenting the user as a
+// stranger holding it. The first run keeps the device until it ends.
+func TestRunSameUserSecondRunRejected(t *testing.T) {
+	started, release := make(chan struct{}), make(chan struct{})
+
+	var secondRan atomic.Bool
+
+	svc := newRunService(func(_ context.Context, _ module.Session, args ...string) error {
+		if fmt.Sprint(args) == "[long]" {
+			close(started)
+			<-release
+
+			return nil
+		}
+
+		secondRan.Store(true)
+
+		return nil
+	})
+
+	long := newClientStream(t, commandReq(testDevice, testCommand, "long"))
+	done := make(chan error, 1)
+
+	go func() { done <- svc.run(context.Background(), long, "alice") }()
+
+	select {
+	case <-started:
+	case err := <-done:
+		t.Fatalf("alice's first run returned before its module started: %v", err)
+	}
+
+	err := svc.run(context.Background(), newClientStream(t, commandReq(testDevice, testCommand)), "alice")
+	if connect.CodeOf(err) != connect.CodeFailedPrecondition || !errors.Is(err, locker.ErrAlreadyRunning) {
+		t.Errorf("alice's second run: code = %v (err = %v), want FailedPrecondition matching ErrAlreadyRunning", connect.CodeOf(err), err)
+	}
+
+	want := `device "dev" is still running a command for "alice"`
+	var ce *connect.Error
+	if !errors.As(err, &ce) || ce.Message() != want {
+		t.Errorf("alice's second run: err = %v, want the message %q", err, want)
+	}
+
+	if secondRan.Load() {
+		t.Error("alice's second run ran its module while the first still ran")
+	}
+
+	err = svc.run(context.Background(), newClientStream(t, commandReq(testDevice, testCommand)), "bob")
+	if connect.CodeOf(err) != connect.CodeFailedPrecondition || !errors.Is(err, locker.ErrWrongOwner) {
+		t.Errorf("bob's run: code = %v (err = %v), want FailedPrecondition matching ErrWrongOwner", connect.CodeOf(err), err)
+	}
+
+	hold, ok := deviceHold(svc)
+	if !ok || hold.Owner != "alice" || hold.Kind != locker.Busy {
+		t.Errorf("hold = %+v (ok=%v) while alice's first run is still going, want alice's Busy hold", hold, ok)
+	}
+
+	close(release)
+
+	if err := <-done; err != nil {
+		t.Fatalf("alice's first run: unexpected error: %v", err)
+	}
+
+	if hold, ok := deviceHold(svc); ok {
+		t.Errorf("auto-lock still held after the first run returned: %+v", hold)
 	}
 }
 
@@ -711,12 +796,22 @@ func TestClearAutoLock(t *testing.T) {
 		}
 	})
 
-	t.Run("missing_auto_lock_is_tolerated", func(t *testing.T) {
+	t.Run("missing_auto_lock_is_logged", func(t *testing.T) {
 		l := locker.New()
 
-		// Nothing held: ClearAutoLock returns ErrNotLocked, which clearAutoLock
-		// swallows. The test asserts it neither panics nor fails.
-		clearAutoLock(context.Background(), l, testDevice, "alice")
+		var buf bytes.Buffer
+
+		ctx := log.Into(context.Background(), slog.New(slog.NewTextHandler(&buf, nil)))
+
+		// Nothing held: a device runs one command at a time, so no other run
+		// shares the hold, and a forced unlock no longer ends it. The
+		// ErrNotLocked from ClearAutoLock is therefore unexpected, and
+		// clearAutoLock warns about it instead of passing over it.
+		clearAutoLock(ctx, l, testDevice, "alice")
+
+		if out := buf.String(); !strings.Contains(out, "level=WARN") || !strings.Contains(out, "failed to release auto-lock") {
+			t.Errorf("log = %q, want a warning that the auto-lock could not be released", out)
+		}
 	})
 }
 

@@ -102,15 +102,18 @@ func findCommand(devices dut.Devlist, device, command string) (dut.Command, erro
 
 // acquireAutoLock takes the command-scoped auto-lock on device for user.
 // AutoLock checks both lock slots under the locker's mutex, so a device that
-// another owner has reserved or is running a command on is rejected here,
-// atomically with the acquire.
+// another owner has reserved, or that is already running a command for anyone,
+// user included, is rejected here, atomically with the acquire.
 //
 // Errors: CodeFailedPrecondition when another owner holds the device
-// (locker.ErrWrongOwner); CodeInternal otherwise.
+// (locker.ErrWrongOwner) or the device is already running a command for user
+// (locker.ErrAlreadyRunning); CodeInternal otherwise.
 func acquireAutoLock(lk *locker.Locker, device, user string) error {
 	_, err := lk.AutoLock(device, user)
 	if err != nil {
-		if errors.Is(err, locker.ErrWrongOwner) {
+		// One code for both: either way the device is busy until its state
+		// changes, and the message tells the client which case it is.
+		if errors.Is(err, locker.ErrWrongOwner) || errors.Is(err, locker.ErrAlreadyRunning) {
 			return connect.NewError(connect.CodeFailedPrecondition, err)
 		}
 
@@ -122,14 +125,14 @@ func acquireAutoLock(lk *locker.Locker, device, user string) error {
 
 // clearAutoLock releases the command-scoped auto-lock for device held by user.
 // It never touches the explicit lock slot, so an explicit Lock the same owner
-// holds for the device survives the run. ErrNotLocked is tolerated: a forced
-// unlock no longer wipes the slot, but a run of the same owner that shared the
-// hold may already have released it. Any other failure is logged rather than
-// returned, as this runs during Run teardown (including panic unwinding), where
-// no caller is left to handle it.
+// holds for the device survives the run. Only this run holds the auto-lock (a
+// device runs one command at a time), and a forced unlock leaves it in place,
+// so the run's hold is still there to release and any failure is unexpected.
+// It is logged as a warning rather than returned, as this runs during Run
+// teardown (including panic unwinding), where no caller is left to handle it.
 func clearAutoLock(ctx context.Context, lk *locker.Locker, device, user string) {
 	err := lk.ClearAutoLock(device, user)
-	if err != nil && !errors.Is(err, locker.ErrNotLocked) {
+	if err != nil {
 		log.FromContext(ctx).Warn("failed to release auto-lock", "device", device, "err", err)
 	}
 }

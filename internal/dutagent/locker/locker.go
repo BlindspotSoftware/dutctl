@@ -28,6 +28,12 @@ var (
 	// has no reservation to release but is running a command: a forced unlock
 	// releases only a reservation and never ends a running command.
 	ErrBusy = errors.New("device is running a command")
+	// ErrAlreadyRunning is matched by the error AutoLock returns when the device
+	// is already running a command for the owner asking to run another: a device
+	// runs one command at a time, whoever asks. errors.Is matches it only for the
+	// hold's own owner; another owner gets a *Error, which matches ErrWrongOwner
+	// instead.
+	ErrAlreadyRunning = errors.New("device is already running a command")
 )
 
 // Kind is the sort of hold a device carries.
@@ -137,6 +143,24 @@ func (e *busyError) Unwrap() error {
 	return ErrBusy
 }
 
+// runningError is the error AutoLock returns when device is already running a
+// command for owner, the owner asking to run another. It exists to name both in
+// its message without presenting owner as a stranger holding the device; callers
+// match it with errors.Is(err, ErrAlreadyRunning), to which it unwraps. It is
+// returned as a pointer and uses a pointer receiver.
+type runningError struct {
+	device string
+	owner  string
+}
+
+func (e *runningError) Error() string {
+	return fmt.Sprintf("device %q is still running a command for %q", e.device, e.owner)
+}
+
+func (e *runningError) Unwrap() error {
+	return ErrAlreadyRunning
+}
+
 // Locker tracks per-device holds of two kinds: a Reserved hold driven by
 // Lock/ClearLock/ForceClearLock and a Busy hold driven by AutoLock/
 // ClearAutoLock. The two are stored separately so a clear of one never affects
@@ -146,8 +170,8 @@ func (e *busyError) Unwrap() error {
 // restart.
 type Locker struct {
 	mu sync.Mutex
-	// reserved holds Reserved-kind holds (the `lock` command); busy holds
-	// Busy-kind holds taken automatically while a command runs.
+	// reserved holds Reserved-kind holds (the `lock` command); busy holds the
+	// Busy-kind hold of the one command a device runs at a time.
 	reserved map[string]Hold
 	busy     map[string]Hold
 	log      *slog.Logger
@@ -282,9 +306,17 @@ func (l *Locker) ForceClearLock(device string) error {
 	return nil
 }
 
-// AutoLock acquires the Busy hold on device for owner. Busy holds carry no
-// expiry. Re-acquiring by the same owner is a no-op. If either hold is held by
-// a different owner, a *Error is returned.
+// AutoLock acquires the Busy hold on device for owner, for one command. A
+// device runs one command at a time, whoever asks: while it has a Busy hold,
+// AutoLock rejects another owner with a *Error and the hold's own owner with an
+// error matching ErrAlreadyRunning. A Reserved hold of another owner is
+// rejected with a *Error as well; owner's own reservation does not stand in the
+// way.
+//
+// A Busy hold never expires, and only ClearAutoLock ends it; ForceClearLock
+// leaves it alone. So each successful AutoLock must be followed by exactly one
+// ClearAutoLock once the command has returned, or the device stays busy until
+// the agent restarts.
 func (l *Locker) AutoLock(device, owner string) (Hold, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -294,8 +326,9 @@ func (l *Locker) AutoLock(device, owner string) (Hold, error) {
 		return Hold{}, blocker
 	}
 
-	if existing, held := l.busy[device]; held {
-		return existing, nil
+	// checkLocked let owner through, so a Busy hold here is owner's own.
+	if _, held := l.busy[device]; held {
+		return Hold{}, &runningError{device: device, owner: owner}
 	}
 
 	hold := Hold{Owner: owner, LockedAt: time.Now(), Kind: Busy}
