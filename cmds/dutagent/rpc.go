@@ -272,12 +272,15 @@ func (a *rpcService) Lock(
 }
 
 // Unlock is the handler for the Unlock RPC. A normal release requires a named
-// caller; a forced release (the cooperative override) does not.
+// caller; a forced release (the cooperative override) does not. A forced release
+// breaks a reservation only: it never ends a running command, whose device stays
+// busy until the command returns.
 //
 // Errors: CodeUnauthenticated for an anonymous non-force release;
 // CodePermissionDenied when another owner holds the lock (locker.ErrWrongOwner);
-// CodeFailedPrecondition when the device is not locked (locker.ErrNotLocked);
-// CodeInternal otherwise.
+// CodeFailedPrecondition when the device is not locked (locker.ErrNotLocked) or,
+// for a forced release, has no reservation but is running a command
+// (locker.ErrBusy); CodeInternal otherwise.
 func (a *rpcService) Unlock(
 	ctx context.Context,
 	req *connect.Request[pb.UnlockRequest],
@@ -312,7 +315,10 @@ func (a *rpcService) Unlock(
 		// where a device held by someone else is CodeFailedPrecondition (busy).
 		case errors.Is(err, locker.ErrWrongOwner):
 			return nil, connect.NewError(connect.CodePermissionDenied, err)
-		case errors.Is(err, locker.ErrNotLocked):
+		// A device that runs a command is busy until the command returns,
+		// which a forced release does not change: the same code as a device
+		// with nothing to release, and the message tells the client which it is.
+		case errors.Is(err, locker.ErrNotLocked), errors.Is(err, locker.ErrBusy):
 			return nil, connect.NewError(connect.CodeFailedPrecondition, err)
 		default:
 			return nil, connect.NewError(connect.CodeInternal, err)

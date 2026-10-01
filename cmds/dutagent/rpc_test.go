@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -160,6 +161,48 @@ func TestUnlockRPCForce(t *testing.T) {
 	if _, err := svc.Unlock(userCtx("bob"), unlockReq("devA", true)); err != nil {
 		t.Errorf("forced Unlock by non-owner: %v", err)
 	}
+}
+
+// A forced unlock breaks a reservation, never a running command: on a device
+// that only runs a command it fails as a precondition, and on one that is also
+// reserved it releases the reservation and leaves the device in use.
+func TestUnlockRPCForceWhileRunning(t *testing.T) {
+	t.Run("running only", func(t *testing.T) {
+		svc := newTestService()
+
+		if _, err := svc.locker.AutoLock("devA", "alice"); err != nil {
+			t.Fatalf("AutoLock: %v", err)
+		}
+
+		_, err := svc.Unlock(userCtx("bob"), unlockReq("devA", true))
+		if connect.CodeOf(err) != connect.CodeFailedPrecondition || !errors.Is(err, locker.ErrBusy) {
+			t.Errorf("forced Unlock: code = %v (err = %v), want FailedPrecondition matching ErrBusy", connect.CodeOf(err), err)
+		}
+
+		if hold, ok := svc.locker.StatusAll()["devA"]; !ok || hold.Kind != locker.Busy {
+			t.Errorf("hold = %+v (ok=%v) after the forced Unlock, want alice's Busy hold", hold, ok)
+		}
+	})
+
+	t.Run("reserved and running", func(t *testing.T) {
+		svc := newTestService()
+
+		if _, err := svc.Lock(userCtx("alice"), lockReq("devA", 60)); err != nil {
+			t.Fatalf("Lock: %v", err)
+		}
+
+		if _, err := svc.locker.AutoLock("devA", "alice"); err != nil {
+			t.Fatalf("AutoLock: %v", err)
+		}
+
+		if _, err := svc.Unlock(userCtx("bob"), unlockReq("devA", true)); err != nil {
+			t.Fatalf("forced Unlock: unexpected error: %v", err)
+		}
+
+		if hold, ok := svc.locker.StatusAll()["devA"]; !ok || hold.Kind != locker.Busy {
+			t.Errorf("hold = %+v (ok=%v) after the forced Unlock, want alice's Busy hold", hold, ok)
+		}
+	})
 }
 
 func TestLockRPCDurationBoundaries(t *testing.T) {

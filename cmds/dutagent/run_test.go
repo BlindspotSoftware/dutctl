@@ -448,6 +448,82 @@ func TestRunKeepsSameUsersReservation(t *testing.T) {
 	}
 }
 
+// A forced unlock breaks a reservation, never a running command. While alice's
+// run is going, bob's forced unlock releases her reservation but leaves the
+// device busy: bob's run is turned away, and a second forced unlock finds only
+// the command and fails. Once alice's run has returned, the device is free and
+// bob's run is admitted.
+func TestRunForcedUnlockKeepsDeviceBusy(t *testing.T) {
+	started, release := make(chan struct{}), make(chan struct{})
+
+	var bobRan atomic.Bool
+
+	svc := newRunService(func(_ context.Context, _ module.Session, args ...string) error {
+		if fmt.Sprint(args) == "[alice]" {
+			close(started)
+			<-release
+
+			return nil
+		}
+
+		bobRan.Store(true)
+
+		return nil
+	})
+
+	if _, err := svc.locker.Lock(testDevice, "alice", time.Hour); err != nil {
+		t.Fatalf("setup Lock: %v", err)
+	}
+
+	alices := newClientStream(t, commandReq(testDevice, testCommand, "alice"))
+	done := make(chan error, 1)
+
+	go func() { done <- svc.run(context.Background(), alices, "alice") }()
+
+	select {
+	case <-started:
+	case err := <-done:
+		t.Fatalf("alice's run returned before its module started: %v", err)
+	}
+
+	if _, err := svc.Unlock(userCtx("bob"), unlockReq(testDevice, true)); err != nil {
+		t.Fatalf("bob's forced unlock of alice's reservation: unexpected error: %v", err)
+	}
+
+	err := svc.run(context.Background(), newClientStream(t, commandReq(testDevice, testCommand, "bob")), "bob")
+	if connect.CodeOf(err) != connect.CodeFailedPrecondition || !errors.Is(err, locker.ErrWrongOwner) {
+		t.Errorf("bob's run after the forced unlock: code = %v (err = %v), want FailedPrecondition matching ErrWrongOwner",
+			connect.CodeOf(err), err)
+	}
+
+	if bobRan.Load() {
+		t.Error("bob's module ran while alice's run was still going")
+	}
+
+	_, err = svc.Unlock(userCtx("bob"), unlockReq(testDevice, true))
+	if connect.CodeOf(err) != connect.CodeFailedPrecondition || !errors.Is(err, locker.ErrBusy) {
+		t.Errorf("bob's second forced unlock: code = %v (err = %v), want FailedPrecondition matching ErrBusy", connect.CodeOf(err), err)
+	}
+
+	close(release)
+
+	if err := <-done; err != nil {
+		t.Fatalf("alice's run: unexpected error: %v", err)
+	}
+
+	if hold, ok := deviceHold(svc); ok {
+		t.Fatalf("hold = %+v after alice's run returned, want the device free", hold)
+	}
+
+	if err := svc.run(context.Background(), newClientStream(t, commandReq(testDevice, testCommand, "bob")), "bob"); err != nil {
+		t.Fatalf("bob's run on the freed device: unexpected error: %v", err)
+	}
+
+	if !bobRan.Load() {
+		t.Error("bob's run on the freed device did not run its module")
+	}
+}
+
 func TestRunCancellation(t *testing.T) {
 	t.Run("client hangs up during the module", func(t *testing.T) {
 		started := make(chan struct{})

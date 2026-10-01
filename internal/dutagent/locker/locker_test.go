@@ -253,7 +253,30 @@ func TestClearAutoLockErrors(t *testing.T) {
 	}
 }
 
-func TestForceClearLockWipesBothSlots(t *testing.T) {
+func TestForceClearLockReleasesReservation(t *testing.T) {
+	l := New()
+
+	if _, err := l.Lock("dev", "alice", time.Hour); err != nil {
+		t.Fatalf("Lock: %v", err)
+	}
+
+	if err := l.ForceClearLock("dev"); err != nil {
+		t.Fatalf("ForceClearLock: %v", err)
+	}
+
+	if hold, ok := l.StatusAll()["dev"]; ok {
+		t.Errorf("StatusAll[dev] = %+v after ForceClearLock, want free", hold)
+	}
+
+	if err := l.ForceClearLock("dev"); !errors.Is(err, ErrNotLocked) {
+		t.Errorf("ForceClearLock on free device: err = %v, want ErrNotLocked", err)
+	}
+}
+
+// A forced unlock breaks a reservation, never a running command: the Busy hold
+// survives it, and the device stays busy for everyone else until the command's
+// own release.
+func TestForceClearLockLeavesBusyHold(t *testing.T) {
 	l := New()
 
 	if _, err := l.Lock("dev", "alice", time.Hour); err != nil {
@@ -268,12 +291,79 @@ func TestForceClearLockWipesBothSlots(t *testing.T) {
 		t.Fatalf("ForceClearLock: %v", err)
 	}
 
-	if _, ok := l.StatusAll()["dev"]; ok {
-		t.Error("device still appears in StatusAll after ForceClearLock")
+	hold, ok := l.StatusAll()["dev"]
+	if !ok || hold.Kind != Busy || hold.Owner != "alice" {
+		t.Fatalf("StatusAll[dev] = %+v (ok=%v) after ForceClearLock, want alice's Busy hold", hold, ok)
 	}
 
-	if err := l.ForceClearLock("dev"); !errors.Is(err, ErrNotLocked) {
-		t.Errorf("ForceClearLock on free device: err = %v, want ErrNotLocked", err)
+	var le *Error
+	if _, err := l.AutoLock("dev", "bob"); !errors.As(err, &le) || le.Holder.Kind != Busy {
+		t.Errorf("bob's AutoLock after ForceClearLock: err = %v, want a *Error naming the Busy hold", err)
+	}
+
+	if err := l.ForceClearLock("dev"); !errors.Is(err, ErrBusy) {
+		t.Errorf("second ForceClearLock: err = %v, want ErrBusy", err)
+	}
+
+	if err := l.ClearAutoLock("dev", "alice"); err != nil {
+		t.Fatalf("ClearAutoLock: %v", err)
+	}
+
+	if hold, ok := l.StatusAll()["dev"]; ok {
+		t.Errorf("StatusAll[dev] = %+v after the command's release, want free", hold)
+	}
+}
+
+// A device that runs a command but has no reservation has nothing a forced
+// unlock may release: it says so, naming the command's owner, and frees nothing.
+func TestForceClearLockRejectsBusyDevice(t *testing.T) {
+	l := New()
+
+	if _, err := l.AutoLock("dev", "alice"); err != nil {
+		t.Fatalf("AutoLock: %v", err)
+	}
+
+	err := l.ForceClearLock("dev")
+	if !errors.Is(err, ErrBusy) {
+		t.Fatalf("ForceClearLock: err = %v, want ErrBusy", err)
+	}
+
+	if errors.Is(err, ErrNotLocked) || errors.Is(err, ErrWrongOwner) {
+		t.Errorf("ForceClearLock: err = %v matches ErrNotLocked or ErrWrongOwner, want ErrBusy only", err)
+	}
+
+	if want := `device "dev" is running a command for "alice", which a forced unlock does not end`; err.Error() != want {
+		t.Errorf("ForceClearLock: message = %q, want %q", err.Error(), want)
+	}
+
+	hold, ok := l.StatusAll()["dev"]
+	if !ok || hold.Kind != Busy || hold.Owner != "alice" {
+		t.Fatalf("StatusAll[dev] = %+v (ok=%v) after ForceClearLock, want alice's Busy hold", hold, ok)
+	}
+
+	if err := l.ClearAutoLock("dev", "alice"); err != nil {
+		t.Errorf("ClearAutoLock after the rejected ForceClearLock: %v", err)
+	}
+}
+
+// A reservation that has run out is no reservation: a forced unlock of a device
+// whose reservation has expired but which still runs a command reports the
+// command, not a released reservation.
+func TestForceClearLockExpiredReservationWhileBusy(t *testing.T) {
+	l := New()
+
+	if _, err := l.Lock("dev", "alice", time.Millisecond); err != nil {
+		t.Fatalf("Lock: %v", err)
+	}
+
+	if _, err := l.AutoLock("dev", "alice"); err != nil {
+		t.Fatalf("AutoLock: %v", err)
+	}
+
+	time.Sleep(10 * time.Millisecond)
+
+	if err := l.ForceClearLock("dev"); !errors.Is(err, ErrBusy) {
+		t.Errorf("ForceClearLock after the reservation expired: err = %v, want ErrBusy", err)
 	}
 }
 
