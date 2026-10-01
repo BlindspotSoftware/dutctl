@@ -122,10 +122,11 @@ func acquireAutoLock(lk *locker.Locker, device, user string) error {
 
 // clearAutoLock releases the command-scoped auto-lock for device held by user.
 // It never touches the explicit lock slot, so an explicit Lock the same owner
-// holds for the device survives the run. ErrNotLocked is tolerated because a
-// forced unlock by an admin may have wiped the slot concurrently; any other
-// failure is logged rather than returned, as this runs during Run teardown
-// (including panic unwinding), where no caller is left to handle it.
+// holds for the device survives the run. ErrNotLocked is tolerated: a forced
+// unlock no longer wipes the slot, but a run of the same owner that shared the
+// hold may already have released it. Any other failure is logged rather than
+// returned, as this runs during Run teardown (including panic unwinding), where
+// no caller is left to handle it.
 func clearAutoLock(ctx context.Context, lk *locker.Locker, device, user string) {
 	err := lk.ClearAutoLock(device, user)
 	if err != nil && !errors.Is(err, locker.ErrNotLocked) {

@@ -24,6 +24,10 @@ var (
 	// duration. A reservation always requires a positive expiry; the no-expiry
 	// semantic belongs to a Busy hold.
 	ErrInvalidDuration = errors.New("lock duration must be positive")
+	// ErrBusy is matched by the error ForceClearLock returns for a device that
+	// has no reservation to release but is running a command: a forced unlock
+	// releases only a reservation and never ends a running command.
+	ErrBusy = errors.New("device is running a command")
 )
 
 // Kind is the sort of hold a device carries.
@@ -116,12 +120,30 @@ func (e *Error) Unwrap() error {
 	return ErrWrongOwner
 }
 
+// busyError is the error ForceClearLock returns when device has no reservation
+// but is running a command for owner. It exists to name both in its message;
+// callers match it with errors.Is(err, ErrBusy), to which it unwraps. It is
+// returned as a pointer and uses a pointer receiver.
+type busyError struct {
+	device string
+	owner  string
+}
+
+func (e *busyError) Error() string {
+	return fmt.Sprintf("device %q is running a command for %q, which a forced unlock does not end", e.device, e.owner)
+}
+
+func (e *busyError) Unwrap() error {
+	return ErrBusy
+}
+
 // Locker tracks per-device holds of two kinds: a Reserved hold driven by
 // Lock/ClearLock/ForceClearLock and a Busy hold driven by AutoLock/
-// ClearAutoLock. The two are stored separately so a normal clear of one never
-// affects the other. ForceClearLock is the one exception: it is an admin
-// escape hatch that clears both. Locker is safe for concurrent use. Hold state
-// is held in memory only and is lost on agent restart.
+// ClearAutoLock. The two are stored separately so a clear of one never affects
+// the other, a forced one included: ForceClearLock breaks a reservation, and a
+// running command keeps its Busy hold until it returns. Locker is safe for
+// concurrent use. Hold state is held in memory only and is lost on agent
+// restart.
 type Locker struct {
 	mu sync.Mutex
 	// reserved holds Reserved-kind holds (the `lock` command); busy holds
@@ -235,30 +257,27 @@ func (l *Locker) ClearLock(device, owner string) error {
 	return nil
 }
 
-// ForceClearLock releases both holds on device regardless of owner. As an admin
-// escape hatch, it intentionally clears any Busy hold as well so a stuck command
-// holder cannot survive a forced unlock. Returns ErrNotLocked only when neither
-// hold was held.
+// ForceClearLock releases the Reserved hold on device regardless of owner: it is
+// the escape hatch for a reservation its owner forgot to release. It never
+// touches the Busy hold, so a running command keeps its device until the command
+// returns; a forced unlock does not end it. It returns ErrNotLocked for a free
+// device, and an error matching ErrBusy for a device that has no reservation
+// but is running a command.
 func (l *Locker) ForceClearLock(device string) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	reservation, hadReservation := l.liveReservation(device)
-	busyHold, hadBusy := l.busy[device]
+	reservation, reserved := l.liveReservation(device)
+	if !reserved {
+		if hold, busy := l.busy[device]; busy {
+			return &busyError{device: device, owner: hold.Owner}
+		}
 
-	if !hadReservation && !hadBusy {
 		return ErrNotLocked
 	}
 
-	if hadReservation {
-		l.log.Warn("force-clearing hold", "kind", Reserved, "device", device, "previous_owner", reservation.Owner)
-		delete(l.reserved, device)
-	}
-
-	if hadBusy {
-		l.log.Warn("force-clearing hold", "kind", Busy, "device", device, "previous_owner", busyHold.Owner)
-		delete(l.busy, device)
-	}
+	l.log.Warn("force-clearing hold", "kind", Reserved, "device", device, "previous_owner", reservation.Owner)
+	delete(l.reserved, device)
 
 	return nil
 }

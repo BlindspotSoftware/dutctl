@@ -56,6 +56,9 @@ The lock command reserves a device for the current user for an optional duration
 releases it; add the force keyword to release a lock held by another user.
 Locks are advisory, so reserve a device only as long as you need it.
 
+A forced unlock releases a reservation but does not end a running command: the
+device stays busy until the command returns.
+
 When dutctl is run without any positional arguments, it defaults to the list command.
 `
 
