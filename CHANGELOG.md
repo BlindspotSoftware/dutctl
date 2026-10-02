@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.0.0-alpha.5](https://github.com/BlindspotSoftware/dutctl/compare/v1.0.0-alpha.4...v1.0.0-alpha.5) (2026-10-02)
+
+
+### Features
+
+* warn while a cancelled module keeps its device busy ([f8eac19](https://github.com/BlindspotSoftware/dutctl/commit/f8eac19fd0295e2dc32496b438eed856f7220a4f))
+
+
+### Bug Fixes
+
+* keep the device busy until its modules have returned ([597af6f](https://github.com/BlindspotSoftware/dutctl/commit/597af6f6f90495bec0cc0131bd8a5148e0753c60))
+* let a forced unlock release only a reservation ([4a8e3d9](https://github.com/BlindspotSoftware/dutctl/commit/4a8e3d96549d62e80a752efc0256f58810a04a15))
+* run one command at a time on a device, even for its owner ([bebf27f](https://github.com/BlindspotSoftware/dutctl/commit/bebf27f7a746b5cee91100dc66a0f766a378bd02))
+
+
+### Other Work
+
+* drive the Run handler end to end through a stream seam ([9236fa8](https://github.com/BlindspotSoftware/dutctl/commit/9236fa8c51a960e6bc705b33645571a02e6120e7))
+* remove the unused fsm package and stream fake ([6e7b2e4](https://github.com/BlindspotSoftware/dutctl/commit/6e7b2e4a60470d60cc268643c7d4bcdac563dd93))
+* run the Run RPC as straight-line code ([216e818](https://github.com/BlindspotSoftware/dutctl/commit/216e8182defed8728aa6e560520ee63ab0328c55))
+
 ## [1.0.0-alpha.4](https://github.com/BlindspotSoftware/dutctl/compare/v1.0.0-alpha.3...v1.0.0-alpha.4) (2026-09-29)
 
 
