@@ -24,6 +24,20 @@ func cancelCode(err error) connect.Code {
 	return connect.CodeCanceled
 }
 
+// cancelError maps a run whose ctx is done to the connect error that fails it.
+// A run the agent aborted while stopping is CodeAborted wrapping the cause,
+// errAbortedByShutdown: the command did not complete, for a reason on the
+// agent's side, and Run's summary tells it from a module failure, CodeAborted
+// too, by errors.Is. Otherwise the code comes from cancelCode.
+func cancelError(ctx context.Context) error {
+	cause := context.Cause(ctx)
+	if errors.Is(cause, errAbortedByShutdown) {
+		return connect.NewError(connect.CodeAborted, fmt.Errorf("module execution aborted: %w", cause))
+	}
+
+	return connect.NewError(cancelCode(ctx.Err()), fmt.Errorf("module execution aborted: %v", ctx.Err()))
+}
+
 // receiveError classifies an error from the initial stream Receive: a context
 // cancellation maps via cancelCode, an already cancellation-coded connect error
 // keeps its code, and anything else is CodeAborted (the run was aborted before it

@@ -19,8 +19,9 @@ import (
 
 func newTestService() *rpcService {
 	return &rpcService{
-		devices: dut.Devlist{"devA": dut.Device{}, "otherDev": dut.Device{}},
-		locker:  locker.New(),
+		devices:  dut.Devlist{"devA": dut.Device{}, "otherDev": dut.Device{}},
+		locker:   locker.New(),
+		aborting: context.Background(),
 	}
 }
 

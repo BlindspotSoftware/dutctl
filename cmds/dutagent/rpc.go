@@ -26,6 +26,9 @@ import (
 type rpcService struct {
 	devices dut.Devlist
 	locker  *locker.Locker
+	// aborting is done once the agent aborts its running commands (the second
+	// stop stage, see stopper); each run is then cancelled with its cause.
+	aborting context.Context //nolint:containedctx // agent-lifetime stop stage, not a request context
 }
 
 // rpcLogger returns a logger scoped to the RPC subsystem and tagged with the
@@ -342,7 +345,7 @@ func (a *rpcService) Unlock(
 // device or command; CodeFailedPrecondition when another owner holds the device,
 // it is already running a command for the caller (a device runs one command at a
 // time) or the agent is shutting down; CodeAborted if the initial receive or a
-// module fails;
+// module fails, or the agent aborts the run while it stops;
 // CodeCanceled/CodeDeadlineExceeded on cancellation; a failed stream keeps the
 // transport's connect code; CodeInternal otherwise.
 func (a *rpcService) Run(
@@ -367,8 +370,9 @@ func (a *rpcService) Run(
 	switch code := connect.CodeOf(err); {
 	case err == nil:
 		l.Info("request finished successfully")
-	case code == connect.CodeCanceled, code == connect.CodeDeadlineExceeded:
-		// Ended from outside, by its client: expected, not a fault.
+	case code == connect.CodeCanceled, code == connect.CodeDeadlineExceeded, errors.Is(err, errAbortedByShutdown):
+		// Ended from outside, by its client or by the agent stopping: expected,
+		// not a fault.
 		l.Warn("request cancelled", "err", err)
 	default:
 		l.Error("request finished with error", "err", err)

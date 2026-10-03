@@ -156,8 +156,9 @@ func newRunService(mods ...funcModule) *rpcService {
 	}
 
 	return &rpcService{
-		devices: dut.Devlist{testDevice: dut.Device{Cmds: map[string]dut.Command{testCommand: cmd}}},
-		locker:  locker.New(),
+		devices:  dut.Devlist{testDevice: dut.Device{Cmds: map[string]dut.Command{testCommand: cmd}}},
+		locker:   locker.New(),
+		aborting: context.Background(),
 	}
 }
 
@@ -972,15 +973,22 @@ func TestRunHoldsDeviceUntilModulesReturn(t *testing.T) {
 	tests := []struct {
 		name string
 		// send is what the client sends once the module runs; nil means the
-		// client cancels and hangs up instead.
-		send      *pb.RunRequest
-		wantCode  connect.Code
-		wantCause error // the cause the module's context reports
+		// client cancels and hangs up instead, unless agentAborts is set.
+		send        *pb.RunRequest
+		agentAborts bool // the agent aborts its running commands while stopping
+		wantCode    connect.Code
+		wantCause   error // the cause the module's context reports
 	}{
 		{
 			name:      "client hangs up",
 			wantCode:  connect.CodeCanceled,
 			wantCause: context.Canceled,
+		},
+		{
+			name:        "agent aborts its running commands",
+			agentAborts: true,
+			wantCode:    connect.CodeAborted,
+			wantCause:   errAbortedByShutdown,
 		},
 		{
 			// A file nobody requested is a protocol violation that fails the
@@ -1021,6 +1029,11 @@ func TestRunHoldsDeviceUntilModulesReturn(t *testing.T) {
 
 			t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
 
+			abort, abortAgent := context.WithCancelCause(context.Background())
+			defer abortAgent(nil)
+
+			svc.aborting = abort
+
 			stream := newClientStream(t, commandReq(testDevice, testCommand))
 
 			ctx, cancel := context.WithCancel(context.Background())
@@ -1036,9 +1049,12 @@ func TestRunHoldsDeviceUntilModulesReturn(t *testing.T) {
 				t.Fatalf("run returned before its module started: %v", err)
 			}
 
-			if tt.send != nil {
+			switch {
+			case tt.send != nil:
 				stream.push(tt.send)
-			} else {
+			case tt.agentAborts:
+				abortAgent(errAbortedByShutdown)
+			default:
 				cancel()
 				stream.hangUp()
 			}
@@ -1066,6 +1082,11 @@ func TestRunHoldsDeviceUntilModulesReturn(t *testing.T) {
 			err := <-done
 			if connect.CodeOf(err) != tt.wantCode {
 				t.Fatalf("code = %v (err = %v), want %v", connect.CodeOf(err), err, tt.wantCode)
+			}
+
+			// The client learns why the agent ended its command.
+			if tt.agentAborts && !errors.Is(err, errAbortedByShutdown) {
+				t.Errorf("err = %v, want it to name errAbortedByShutdown", err)
 			}
 
 			if !errors.Is(cause, tt.wantCause) {

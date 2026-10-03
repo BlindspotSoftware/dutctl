@@ -16,9 +16,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"os/signal"
 	"runtime/debug"
-	"syscall"
 	"time"
 
 	"connectrpc.com/connect"
@@ -83,6 +81,7 @@ type agent struct {
 	// state
 	config            config
 	modulesNeedDeinit bool
+	locks             *locker.Locker
 }
 
 // config holds the dutagent configuration that is parsed from YAML data.
@@ -100,25 +99,29 @@ const (
 
 // registerTimeout bounds the one-shot registration RPC to the dutserver. Connect
 // propagates it as a grpc-timeout header and the transport honors it, so an
-// unreachable or slow server fails fast instead of hanging agent startup.
+// unreachable or slow server fails fast instead of hanging agent startup. The
+// first stop signal ends the registration too.
 const registerTimeout = 10 * time.Second
 
 // deinitTimeout bounds module de-initialization during shutdown so a wedged module
 // cannot hang teardown indefinitely.
 const deinitTimeout = 15 * time.Second
 
-// initTimeout bounds module initialization at startup so a wedged module Init
-// (e.g. probing absent hardware) fails startup rather than hanging forever. It is
-// generous because Init may legitimately talk to slow devices.
+// initTimeout ends the context of every module's Init 5 min after the modules
+// began to initialize; a module that honors it, say one probing absent
+// hardware, then fails the startup instead of hanging it. It is generous
+// because Init may legitimately talk to slow devices.
 const initTimeout = 5 * time.Minute
 
-// cleanup takes care of a graceful shutdown of the agent and its running service.
-// Afterwards agt.exit is called. If clean-up fails, agt.exit is called with code 1,
-// otherwise with the provided exitCode.
-func (agt *agent) cleanup(code exitCode) {
+// cleanup deinitializes the modules, if they were initialized, and then calls
+// agt.exit. If clean-up fails, agt.exit is called with code 1, otherwise with
+// the provided exitCode. The caller makes sure that no command runs any more,
+// so no module is deinitialized while it runs. ctx is the agent's lifetime
+// context, which carries its logger.
+func (agt *agent) cleanup(ctx context.Context, code exitCode) {
 	if agt.modulesNeedDeinit {
 		// Bound Deinit: deinitWithin leaves behind a module that ignores its context.
-		ctx, cancel := context.WithTimeout(context.Background(), deinitTimeout)
+		ctx, cancel := context.WithTimeout(ctx, deinitTimeout)
 		defer cancel()
 
 		err := deinitWithin(ctx, agt.config.Devices)
@@ -166,16 +169,10 @@ func printInitErr(err error) {
 	slog.Error("module error", "err", err)
 }
 
-// startRPCService starts the RPC service and serves until ctx is cancelled (a
-// signal), draining in-flight requests, or until the server stops on its own. It
-// returns the server error, if any; the caller classifies a graceful stop via
-// ctx.Err().
-func (agt *agent) startRPCService(ctx context.Context) error {
-	service := &rpcService{
-		devices: agt.config.Devices,
-		locker:  locker.New(),
-	}
-
+// startRPCService serves service until ctx is cancelled, draining in-flight
+// requests, or until the server stops on its own. It returns the server error,
+// if any; the caller classifies a graceful stop via ctx.Err().
+func (agt *agent) startRPCService(ctx context.Context, service *rpcService) error {
 	mux := http.NewServeMux()
 	path, handler := dutctlv1connect.NewDeviceServiceHandler(
 		service,
@@ -191,7 +188,7 @@ func (agt *agent) startRPCService(ctx context.Context) error {
 	return rpc.ListenAndServe(ctx, agt.address, mux)
 }
 
-func (agt *agent) registerWithServer() error {
+func (agt *agent) registerWithServer(ctx context.Context) error {
 	slog.Info("registering with server", "server", agt.server)
 
 	client := rpc.NewRelayClient(agt.server)
@@ -200,7 +197,7 @@ func (agt *agent) registerWithServer() error {
 		Address: agt.address,
 	})
 
-	ctx, cancel := context.WithTimeout(context.Background(), registerTimeout)
+	ctx, cancel := context.WithTimeout(ctx, registerTimeout)
 	defer cancel()
 
 	_, err := client.Register(ctx, req)
@@ -229,86 +226,88 @@ func (agt *agent) start() {
 		agt.exit(0)
 	}
 
+	// ctx is the agent's lifetime context; it carries the agent-scoped logger.
+	ctx := log.Into(context.Background(), slog.Default())
+
+	agt.locks = locker.New()
+
+	// Stop signals take the agent through its stop stages from here on (see
+	// stopper). Until the RPC service runs, the first one interrupts the startup.
+	stop, stopNotify := notifyStops(ctx, agt.locks, agt.exit)
+	defer stopNotify()
+
 	// By design dutagent's code does not panic.
 	// But other code could, or *things* happen at runtime. So we catch it here
-	// to do a graceful shutdown
+	// to do a graceful shutdown: commands may still run, so abort them as the
+	// second stop stage does before the modules are deinitialized.
 	defer func() {
 		if r := recover(); r != nil {
 			slog.Error("recovered from panic", "panic", r, "stack", string(debug.Stack()))
-			agt.cleanup(exit1)
+			stop.abortAndWait(ctx)
+			agt.cleanup(ctx, exit1)
 		}
 	}()
-
-	// A signal (Ctrl-C / SIGTERM / SIGQUIT) cancels ctx, which drives a graceful
-	// shutdown: the RPC service drains in-flight requests, then modules are
-	// de-initialised. This replaces an out-of-band signal handler, so shutdown runs
-	// on this goroutine rather than racing the running service.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
-	defer stop()
 
 	err := agt.loadConfig()
 	if agt.checkConfig {
 		if err != nil {
 			slog.Error("bad configuration", "err", err)
-			agt.cleanup(exit1)
+			agt.cleanup(ctx, exit1)
 		}
 
 		slog.Info("configuration is valid")
-		agt.cleanup(exit0)
+		agt.cleanup(ctx, exit0)
 	} else if err != nil {
 		slog.Error("loading config failed", "err", err)
-		agt.cleanup(exit1)
+		agt.cleanup(ctx, exit1)
 	}
 
-	// initCtx carries module initialization; it flows into every module's Init via
-	// internal/log. It derives from the signal context so Ctrl-C interrupts a slow
-	// startup, and is bounded by initTimeout so a wedged Init fails startup instead
-	// of hanging forever.
-	initCtx, cancelInit := context.WithTimeout(ctx, initTimeout)
+	// initCtx is the parent of every module's Init context. It ends with the first
+	// stop signal, so Ctrl-C interrupts a slow startup, and after initTimeout, so
+	// an Init that honors its context cannot block the startup forever.
+	initCtx, cancelInit := context.WithTimeout(stop.draining, initTimeout)
 	defer cancelInit()
 
 	agt.modulesNeedDeinit = true
 	err = initModules(initCtx, agt.config.Devices)
 
+	// A stop signal during the startup ends it here, also when a module's Init
+	// ignored its context; an Init error it caused is no failure of its own.
+	if stop.draining.Err() != nil {
+		slog.Info("stopped during startup")
+		agt.cleanup(ctx, exit0)
+	}
+
 	if agt.dryRun {
 		if err != nil {
 			printInitErr(err)
 			slog.Info("initialization failed - dry run finished")
-			agt.cleanup(exit1)
+			agt.cleanup(ctx, exit1)
 		}
 
 		slog.Info("initialization successful - dry run finished")
-		agt.cleanup(exit0)
+		agt.cleanup(ctx, exit0)
 	} else if err != nil {
 		printInitErr(err)
 		slog.Error("module initialization failed", "err", err)
-		agt.cleanup(exit1)
+		agt.cleanup(ctx, exit1)
 	}
 
 	if agt.server != "" {
-		err := agt.registerWithServer()
+		// A stop signal may also arrive while the agent registers.
+		err := agt.registerWithServer(stop.draining)
+		if stop.draining.Err() != nil {
+			slog.Info("stopped during startup")
+			agt.cleanup(ctx, exit0)
+		}
+
 		if err != nil {
 			slog.Error("registering with server failed", "server", agt.server, "err", err)
-			agt.cleanup(exit1)
+			agt.cleanup(ctx, exit1)
 		}
 	}
 
-	err = agt.startRPCService(ctx)
-	if ctx.Err() != nil {
-		// A signal cancelled ctx: graceful shutdown. ListenAndServe has drained; a
-		// non-nil err means the drain did not fully complete within the grace
-		// period, which we accept — the process exit closes what remains.
-		if err != nil {
-			slog.Warn("graceful shutdown did not fully drain in time", "err", err)
-		}
-
-		slog.Info("shutting down")
-		agt.cleanup(exit0)
-	}
-
-	// Reached only if the server stopped on its own (e.g. failed to bind).
-	slog.Error("rpc service stopped", "err", err)
-	agt.cleanup(exit1)
+	agt.cleanup(ctx, agt.serve(ctx, stop))
 }
 
 func (agt *agent) printVersion() {
