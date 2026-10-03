@@ -498,3 +498,110 @@ func TestStatusAllReportsEffectiveHold(t *testing.T) {
 		t.Errorf("gamma = %+v, want the reservation to shadow the Busy hold", got)
 	}
 }
+
+// While draining, the Locker takes no new work, but a job that holds a
+// reservation can run to its end: its owner may run commands on the device and
+// extend or release the reservation.
+func TestDrainLetsReservationsFinish(t *testing.T) {
+	l := New()
+
+	if _, err := l.Lock("job", "alice", time.Minute); err != nil {
+		t.Fatalf("setup Lock: %v", err)
+	}
+
+	l.Drain()
+
+	if _, err := l.Lock("free", "bob", time.Minute); !errors.Is(err, ErrShuttingDown) {
+		t.Errorf("new reservation: err = %v, want ErrShuttingDown", err)
+	}
+
+	if _, err := l.AutoLock("free", "bob"); !errors.Is(err, ErrShuttingDown) {
+		t.Errorf("command on an unreserved device: err = %v, want ErrShuttingDown", err)
+	}
+
+	// Another owner learns that the device is taken, as before draining: the
+	// more useful answer of the two.
+	if _, err := l.AutoLock("job", "bob"); !errors.Is(err, ErrWrongOwner) {
+		t.Errorf("command on alice's device by bob: err = %v, want ErrWrongOwner", err)
+	}
+
+	if _, err := l.Lock("job", "alice", time.Hour); err != nil {
+		t.Errorf("owner extending the reservation: %v", err)
+	}
+
+	if _, err := l.AutoLock("job", "alice"); err != nil {
+		t.Fatalf("owner running a command on the reserved device: %v", err)
+	}
+
+	if err := l.ClearAutoLock("job", "alice"); err != nil {
+		t.Errorf("ClearAutoLock: %v", err)
+	}
+
+	if err := l.ClearLock("job", "alice"); err != nil {
+		t.Errorf("owner releasing the reservation: %v", err)
+	}
+
+	// Without the reservation, alice's device is closed to her too.
+	if _, err := l.AutoLock("job", "alice"); !errors.Is(err, ErrShuttingDown) {
+		t.Errorf("command after the reservation ended: err = %v, want ErrShuttingDown", err)
+	}
+}
+
+// Closing ends every reservation and grants no new hold at all, while a
+// running command keeps its Busy hold until it returns.
+func TestCloseEndsReservationsKeepsRunningCommands(t *testing.T) {
+	l := New()
+
+	if _, err := l.Lock("job", "alice", time.Hour); err != nil {
+		t.Fatalf("setup Lock: %v", err)
+	}
+
+	if _, err := l.AutoLock("busy", "bob"); err != nil {
+		t.Fatalf("setup AutoLock: %v", err)
+	}
+
+	l.Close()
+	l.Drain() // does not reopen a closed Locker
+
+	status := l.StatusAll()
+	if len(status) != 1 || status["busy"].Kind != Busy {
+		t.Errorf("StatusAll() = %+v, want only bob's running command", status)
+	}
+
+	if _, err := l.Lock("job", "alice", time.Hour); !errors.Is(err, ErrShuttingDown) {
+		t.Errorf("Lock after Close: err = %v, want ErrShuttingDown", err)
+	}
+
+	if _, err := l.AutoLock("job", "alice"); !errors.Is(err, ErrShuttingDown) {
+		t.Errorf("AutoLock after Close: err = %v, want ErrShuttingDown", err)
+	}
+
+	if err := l.ClearAutoLock("busy", "bob"); err != nil {
+		t.Errorf("releasing the running command's hold: %v", err)
+	}
+
+	if status := l.StatusAll(); len(status) != 0 {
+		t.Errorf("StatusAll() = %+v after the command returned, want nothing", status)
+	}
+}
+
+// An empty draining Locker grants nothing to anyone: so once it is empty, the
+// agent may stop, as no new work can begin.
+func TestDrainedLockerStaysEmpty(t *testing.T) {
+	l := New()
+	l.Drain()
+
+	for _, owner := range []string{"alice", "bob"} {
+		if _, err := l.Lock("dev", owner, time.Minute); !errors.Is(err, ErrShuttingDown) {
+			t.Errorf("Lock by %s: err = %v, want ErrShuttingDown", owner, err)
+		}
+
+		if _, err := l.AutoLock("dev", owner); !errors.Is(err, ErrShuttingDown) {
+			t.Errorf("AutoLock by %s: err = %v, want ErrShuttingDown", owner, err)
+		}
+	}
+
+	if status := l.StatusAll(); len(status) != 0 {
+		t.Errorf("StatusAll() = %+v, want nothing", status)
+	}
+}

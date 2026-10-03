@@ -274,6 +274,16 @@ func TestRunRejectedBeforeModules(t *testing.T) {
 			},
 			wantCode: connect.CodeFailedPrecondition,
 		},
+		{
+			name: "agent is shutting down",
+			reqs: []*pb.RunRequest{commandReq(testDevice, testCommand)},
+			setup: func(t *testing.T, svc *rpcService) {
+				t.Helper()
+
+				svc.locker.Drain()
+			},
+			wantCode: connect.CodeFailedPrecondition,
+		},
 	}
 
 	for _, tt := range tests {
