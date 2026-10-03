@@ -211,8 +211,13 @@ func runModules(ctx context.Context, sess module.Session, mods []dut.Module, mod
 			// Deliberate detail+summary logging (not log-and-return spam): this
 			// agent-scope line records which module failed (name/index/total) —
 			// metadata lost once moduleError flattens the error with %v and Run
-			// logs the rpc-scope summary.
-			mlog.Error("module failed", "err", err)
+			// logs the rpc-scope summary. A module that stopped because its command
+			// was cancelled did not fail on its own: its error is the fallout.
+			if ctx.Err() != nil {
+				mlog.Warn("module stopped after the command was cancelled", "err", err, "cause", context.Cause(ctx))
+			} else {
+				mlog.Error("module failed", "err", err)
+			}
 
 			return err
 		}
