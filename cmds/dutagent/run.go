@@ -56,6 +56,15 @@ func (a *rpcService) run(ctx context.Context, stream session.Stream, user string
 	// modules have returned and the stream is quiet.
 	defer clearAutoLock(ctx, a.locker, device, user)
 
+	// Besides its client, the agent can end the run: it aborts every running
+	// command in the second stop stage.
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+
+	//nolint:contextcheck // a.aborting is the agent's stop stage, deliberately not derived from the request
+	stopAbort := context.AfterFunc(a.aborting, func() { cancel(context.Cause(a.aborting)) })
+	defer stopAbort()
+
 	// Module execution is the agent's core orchestration: scope it "agent" and
 	// tag the device and command, which then descend to every record on this path.
 	ctx = log.With(log.WithScope(ctx, "agent"), "device", device, "command", command)
@@ -147,9 +156,9 @@ func clearAutoLock(ctx context.Context, lk *locker.Locker, device, user string) 
 // busy for as long as a module drives it, even one slow to stop after a
 // cancellation. It also returns only once the broker's workers have stopped.
 //
-// Errors: CodeCanceled/CodeDeadlineExceeded when ctx is done (via cancelCode); a
-// failed stream or a client protocol violation via brokerError; a module failure
-// via moduleError.
+// Errors: when ctx is done, via cancelError (CodeAborted if the agent aborted
+// the run, otherwise CodeCanceled/CodeDeadlineExceeded); a failed stream or a
+// client protocol violation via brokerError; a module failure via moduleError.
 func runInSession(ctx context.Context, stream session.Stream, mods []dut.Module, moduleArgs [][]string) error {
 	var broker session.Broker
 
@@ -169,7 +178,7 @@ func runInSession(ctx context.Context, stream session.Stream, mods []dut.Module,
 
 	switch {
 	case ctx.Err() != nil:
-		return connect.NewError(cancelCode(ctx.Err()), fmt.Errorf("module execution aborted: %v", ctx.Err()))
+		return cancelError(ctx)
 	case brokerErr != nil:
 		// A worker failure is reported over a module error: it cancelled the
 		// modules' context and closed their session, so a module error is

@@ -61,3 +61,46 @@ func TestBrokerError(t *testing.T) {
 		})
 	}
 }
+
+// TestCancelError verifies that a run the agent aborted while stopping is
+// CodeAborted naming the cause, and that any other cancellation keeps the code
+// cancelCode gives it.
+func TestCancelError(t *testing.T) {
+	tests := []struct {
+		name string
+		done func() context.Context
+		want connect.Code
+	}{
+		{"agent shutdown", func() context.Context {
+			ctx, cancel := context.WithCancelCause(context.Background())
+			cancel(errAbortedByShutdown)
+
+			return ctx
+		}, connect.CodeAborted},
+		{"client cancel", func() context.Context {
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+
+			return ctx
+		}, connect.CodeCanceled},
+		{"deadline", func() context.Context {
+			ctx, cancel := context.WithTimeout(context.Background(), 0)
+			t.Cleanup(cancel)
+
+			return ctx
+		}, connect.CodeDeadlineExceeded},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := cancelError(tt.done())
+			if got := connect.CodeOf(err); got != tt.want {
+				t.Errorf("cancelError code = %v (err = %v), want %v", got, err, tt.want)
+			}
+
+			if tt.want == connect.CodeAborted && !errors.Is(err, errAbortedByShutdown) {
+				t.Errorf("cancelError = %v, want it to name errAbortedByShutdown", err)
+			}
+		})
+	}
+}

@@ -55,7 +55,7 @@ func serve(ctx context.Context, ln net.Listener, handler http.Handler) error {
 		// The server stopped on its own.
 		return err
 	case <-ctx.Done():
-		// A signal cancelled ctx: stop accepting and drain in-flight requests,
+		// The caller cancelled ctx: stop accepting and drain in-flight requests,
 		// bounded by shutdownGracePeriod. The shutdown context is derived from ctx
 		// with WithoutCancel, so it keeps ctx's values but not its (already-fired)
 		// cancellation — inheriting the cancellation would make it done immediately
