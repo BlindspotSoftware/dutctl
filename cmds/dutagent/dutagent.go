@@ -117,12 +117,11 @@ const initTimeout = 5 * time.Minute
 // otherwise with the provided exitCode.
 func (agt *agent) cleanup(code exitCode) {
 	if agt.modulesNeedDeinit {
-		// Bound Deinit so a wedged module cannot hang shutdown indefinitely; the
-		// context flows into every module's Deinit via internal/log.
+		// Bound Deinit: deinitWithin leaves behind a module that ignores its context.
 		ctx, cancel := context.WithTimeout(context.Background(), deinitTimeout)
 		defer cancel()
 
-		err := deinitModules(ctx, agt.config.Devices)
+		err := deinitWithin(ctx, agt.config.Devices)
 		if err != nil {
 			printInitErr(err)
 			slog.Error("module deinitialization failed - system might be in an UNKNOWN STATE", "err", err)

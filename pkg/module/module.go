@@ -61,6 +61,8 @@ type Module interface {
 	// Init may fail after partially allocating resources that still need cleanup.
 	//
 	// The context carries a logger scoped to this module; obtain it with log.FromContext(ctx).
+	// It is done 15 seconds after deinitialization began; the agent then exits without
+	// waiting for the modules that have not returned.
 	Deinit(ctx context.Context) error
 	// Run is the entry point and executes the module with the given arguments.
 	//

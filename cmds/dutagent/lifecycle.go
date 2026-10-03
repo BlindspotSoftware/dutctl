@@ -137,3 +137,19 @@ func deinitModules(ctx context.Context, devices dut.Devlist) error {
 
 	return nil
 }
+
+// deinitWithin runs deinitModules under ctx and returns once it has, or once
+// ctx is done, with an error wrapping ctx.Err(). So a module whose Deinit
+// ignores ctx cannot hold up the agent's exit: it is left behind.
+func deinitWithin(ctx context.Context, devices dut.Devlist) error {
+	done := make(chan error, 1)
+
+	go func() { done <- deinitModules(ctx, devices) }()
+
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		return fmt.Errorf("module deinitialization did not finish in time: %w", ctx.Err())
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/BlindspotSoftware/dutctl/pkg/dut"
 	"github.com/BlindspotSoftware/dutctl/pkg/module"
@@ -128,5 +129,46 @@ func TestDeinitModulesAggregatesAndRunsAll(t *testing.T) {
 
 	if len(initErr.Errs) != 1 {
 		t.Fatalf("expected 1 aggregated error, got %d", len(initErr.Errs))
+	}
+}
+
+// stuckDeinitModule is a module whose Deinit ignores its context and returns
+// only once release is closed.
+type stuckDeinitModule struct {
+	lifecycleModule
+
+	release chan struct{}
+}
+
+func (m *stuckDeinitModule) Deinit(context.Context) error {
+	<-m.release
+
+	return nil
+}
+
+// A module whose Deinit ignores its context must not hold up the agent's exit:
+// deinitWithin returns once its context is done.
+func TestDeinitWithinLeavesStuckModuleBehind(t *testing.T) {
+	stuck := &stuckDeinitModule{release: make(chan struct{})}
+	t.Cleanup(func() { close(stuck.release) })
+
+	devs := dut.Devlist{"devA": {Cmds: map[string]dut.Command{
+		"cmd": {Modules: []dut.Module{wrap("stuck", stuck)}},
+	}}}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	done := make(chan error, 1)
+
+	go func() { done <- deinitWithin(ctx, devs) }()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Errorf("err = %v, want it to wrap context.DeadlineExceeded", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("deinitWithin waited for a Deinit that ignores its context")
 	}
 }
