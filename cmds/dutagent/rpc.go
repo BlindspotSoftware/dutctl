@@ -360,10 +360,15 @@ func (a *rpcService) Run(
 	l.Info("request received")
 
 	err = a.run(ctx, rpc.NewRunStream(stream), user)
-	if err != nil {
-		l.Error("request finished with error", "err", err)
-	} else {
+
+	switch code := connect.CodeOf(err); {
+	case err == nil:
 		l.Info("request finished successfully")
+	case code == connect.CodeCanceled, code == connect.CodeDeadlineExceeded:
+		// Ended from outside, by its client: expected, not a fault.
+		l.Warn("request cancelled", "err", err)
+	default:
+		l.Error("request finished with error", "err", err)
 	}
 
 	return err

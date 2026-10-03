@@ -923,6 +923,34 @@ func TestRunModules(t *testing.T) {
 			t.Errorf("module ran %d time(s) on a cancelled context", runs)
 		}
 	})
+
+	// A module that stops because its command was cancelled did not fail on
+	// its own: it is logged as a warning, not as an error.
+	t.Run("a module stopped by a cancellation logs a warning", func(t *testing.T) {
+		var buf bytes.Buffer
+
+		ctx, cancel := context.WithCancel(log.Into(context.Background(), slog.New(slog.NewTextHandler(&buf, nil))))
+		defer cancel()
+
+		mod := dut.Module{Module: funcModule(func(ctx context.Context, _ module.Session, _ ...string) error {
+			cancel()
+			<-ctx.Done()
+
+			return errors.New("flash tool exited: signal: terminated")
+		})}
+		mod.Config.Name = "stopped"
+
+		err := runModules(ctx, nil, []dut.Module{mod}, [][]string{nil})
+		if err == nil {
+			t.Fatal("runModules returned nil for a module that returned an error")
+		}
+
+		out := buf.String()
+		if !strings.Contains(out, "level=WARN") || !strings.Contains(out, "module stopped after the command was cancelled") ||
+			strings.Contains(out, "level=ERROR") {
+			t.Errorf("log = %q, want a warning that the module stopped after the cancellation, and no error", out)
+		}
+	})
 }
 
 // TestRunHoldsDeviceUntilModulesReturn guards the device against being handed
