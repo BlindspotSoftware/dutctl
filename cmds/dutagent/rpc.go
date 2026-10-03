@@ -205,7 +205,8 @@ const defaultLockDuration = 30 * time.Minute
 // Errors: CodeUnauthenticated for an anonymous caller; CodeNotFound for an unknown
 // device (dut.ErrDeviceNotFound); CodeInvalidArgument for a negative duration
 // (locker.ErrInvalidDuration); CodeFailedPrecondition when another owner holds the
-// device (locker.ErrWrongOwner); CodeInternal otherwise.
+// device (locker.ErrWrongOwner) or the agent is shutting down
+// (locker.ErrShuttingDown); CodeInternal otherwise.
 func (a *rpcService) Lock(
 	ctx context.Context,
 	req *connect.Request[pb.LockRequest],
@@ -247,8 +248,9 @@ func (a *rpcService) Lock(
 		switch {
 		// ErrWrongOwner is CodeFailedPrecondition on acquire (the device is busy) —
 		// deliberately different from release in Unlock, which is CodePermissionDenied
-		// (you may not unlock another user's lock).
-		case errors.Is(lockErr, locker.ErrWrongOwner):
+		// (you may not unlock another user's lock). A shutting-down agent is
+		// busy the same way: the client may try again once it is back.
+		case errors.Is(lockErr, locker.ErrWrongOwner), errors.Is(lockErr, locker.ErrShuttingDown):
 			return nil, connect.NewError(connect.CodeFailedPrecondition, lockErr)
 		case errors.Is(lockErr, locker.ErrInvalidDuration):
 			return nil, connect.NewError(connect.CodeInvalidArgument, lockErr)
@@ -337,9 +339,10 @@ func (a *rpcService) Unlock(
 // Errors: CodeInvalidArgument if the first message is not a command, the
 // arguments cannot be resolved (Command.ModuleArgs) or the client breaks the file
 // transfer protocol (session.ErrBadFileTransfer); CodeNotFound for an unknown
-// device or command; CodeFailedPrecondition when another owner holds the device
-// or it is already running a command for the caller (a device runs one command
-// at a time); CodeAborted if the initial receive or a module fails;
+// device or command; CodeFailedPrecondition when another owner holds the device,
+// it is already running a command for the caller (a device runs one command at a
+// time) or the agent is shutting down; CodeAborted if the initial receive or a
+// module fails;
 // CodeCanceled/CodeDeadlineExceeded on cancellation; a failed stream keeps the
 // transport's connect code; CodeInternal otherwise.
 func (a *rpcService) Run(

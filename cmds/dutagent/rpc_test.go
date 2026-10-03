@@ -294,3 +294,25 @@ func TestListRPCExplicitShadowsAuto(t *testing.T) {
 		t.Error("expected explicit-slot expires_at to win, got 0")
 	}
 }
+
+// A stopping agent answers a new reservation as it answers a busy device, so a
+// client can try again once the agent is back, while the owner of a job under way
+// may still extend its reservation.
+func TestLockRPCWhileShuttingDown(t *testing.T) {
+	svc := newTestService()
+
+	if _, err := svc.Lock(userCtx("alice"), lockReq("devA", 60)); err != nil {
+		t.Fatalf("Lock before the shutdown: %v", err)
+	}
+
+	svc.locker.Drain()
+
+	_, err := svc.Lock(userCtx("bob"), lockReq("otherDev", 60))
+	if connect.CodeOf(err) != connect.CodeFailedPrecondition || !errors.Is(err, locker.ErrShuttingDown) {
+		t.Errorf("new reservation: err = %v, want FailedPrecondition matching ErrShuttingDown", err)
+	}
+
+	if _, err := svc.Lock(userCtx("alice"), lockReq("devA", 120)); err != nil {
+		t.Errorf("owner extending the reservation: %v", err)
+	}
+}

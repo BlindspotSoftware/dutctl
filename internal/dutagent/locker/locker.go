@@ -34,6 +34,9 @@ var (
 	// hold's own owner; another owner gets a *Error, which matches ErrWrongOwner
 	// instead.
 	ErrAlreadyRunning = errors.New("device is already running a command")
+	// ErrShuttingDown is returned by Lock and AutoLock for a hold the Locker no
+	// longer grants because the agent is stopping (see Drain and Close).
+	ErrShuttingDown = errors.New("dutagent is shutting down and takes no new work; try again once it is back")
 )
 
 // Kind is the sort of hold a device carries.
@@ -166,17 +169,28 @@ func (e *runningError) Unwrap() error {
 // Lock/ClearLock/ForceClearLock and a Busy hold driven by AutoLock/
 // ClearAutoLock. The two are stored separately so a clear of one never affects
 // the other, a forced one included: ForceClearLock breaks a reservation, and a
-// running command keeps its Busy hold until it returns. Locker is safe for
-// concurrent use. Hold state is held in memory only and is lost on agent
-// restart.
+// running command keeps its Busy hold until it returns. While the agent stops,
+// Drain and then Close restrict which new holds the Locker grants. Locker is
+// safe for concurrent use. Hold state is held in memory only and is lost on
+// agent restart.
 type Locker struct {
 	mu sync.Mutex
 	// reserved holds Reserved-kind holds (the `lock` command); busy holds the
 	// Busy-kind hold of the one command a device runs at a time.
 	reserved map[string]Hold
 	busy     map[string]Hold
+	mode     mode
 	log      *slog.Logger
 }
+
+// mode is which new holds a Locker grants.
+type mode int
+
+const (
+	open     mode = iota // every hold the rules allow
+	draining             // only work on a device the caller has reserved (Drain)
+	closed               // none (Close)
+)
 
 // New returns a ready-to-use Locker.
 func New() *Locker {
@@ -221,11 +235,29 @@ func (l *Locker) checkLocked(device, owner string) *Error {
 	return nil
 }
 
+// admits reports whether the Locker's mode lets owner take a new hold on
+// device: while draining, only a device owner has reserved is still open to
+// owner, so a job that holds a reservation can run to its end. The caller must
+// hold l.mu.
+func (l *Locker) admits(device, owner string) bool {
+	switch l.mode {
+	case open:
+		return true
+	case draining:
+		hold, reserved := l.liveReservation(device)
+
+		return reserved && hold.Owner == owner
+	default:
+		return false
+	}
+}
+
 // Lock acquires the Reserved hold on device for owner. dur must be positive;
 // ErrInvalidDuration is returned otherwise. If the device is already reserved
 // by the same owner, the reservation is extended: the new expiry is the later
 // of the current and now+dur. If either hold is held by a different owner, a
-// *Error is returned.
+// *Error is returned. While the agent stops, ErrShuttingDown is returned for a
+// new reservation, and once the Locker is closed also for an extension.
 func (l *Locker) Lock(device, owner string, dur time.Duration) (Hold, error) {
 	if dur <= 0 {
 		return Hold{}, ErrInvalidDuration
@@ -237,6 +269,10 @@ func (l *Locker) Lock(device, owner string, dur time.Duration) (Hold, error) {
 	blocker := l.checkLocked(device, owner)
 	if blocker != nil {
 		return Hold{}, blocker
+	}
+
+	if !l.admits(device, owner) {
+		return Hold{}, ErrShuttingDown
 	}
 
 	now := time.Now()
@@ -312,12 +348,13 @@ func (l *Locker) ForceClearLock(device string) error {
 // AutoLock rejects another owner with a *Error and the hold's own owner with an
 // error matching ErrAlreadyRunning. A Reserved hold of another owner is
 // rejected with a *Error as well; owner's own reservation does not stand in the
-// way.
+// way. While the agent stops, ErrShuttingDown is returned on a device owner has
+// not reserved, and once the Locker is closed on every device.
 //
 // A Busy hold never expires, and only ClearAutoLock ends it; ForceClearLock
-// leaves it alone. So each successful AutoLock must be followed by exactly one
-// ClearAutoLock once the command has returned, or the device stays busy until
-// the agent restarts.
+// and Close leave it alone. So each successful AutoLock must be followed by
+// exactly one ClearAutoLock once the command has returned, or the device stays
+// busy until the agent restarts.
 func (l *Locker) AutoLock(device, owner string) (Hold, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -325,6 +362,10 @@ func (l *Locker) AutoLock(device, owner string) (Hold, error) {
 	blocker := l.checkLocked(device, owner)
 	if blocker != nil {
 		return Hold{}, blocker
+	}
+
+	if !l.admits(device, owner) {
+		return Hold{}, ErrShuttingDown
 	}
 
 	// checkLocked let owner through, so a Busy hold here is owner's own.
@@ -386,4 +427,38 @@ func (l *Locker) StatusAll() map[string]Hold {
 	}
 
 	return out
+}
+
+// Drain makes the Locker take no new work while the agent stops: from now on
+// it grants no new reservation, and a Busy hold only on a device its owner has
+// reserved, who may also extend the reservation. So the work already under way,
+// the running commands and the jobs that hold a reservation, can end on its
+// own. Once a draining Locker holds nothing, it grants no hold again, which is
+// what lets the agent stop when it is empty. Drain does nothing once the Locker
+// is closed.
+func (l *Locker) Drain() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	if l.mode == open {
+		l.mode = draining
+	}
+}
+
+// Close makes the Locker grant no new hold at all and ends every reservation:
+// the agent is aborting its work. A running command keeps its Busy hold until
+// it returns, so its device stays busy until its modules have stopped.
+func (l *Locker) Close() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	l.mode = closed
+
+	for device := range l.reserved {
+		if hold, live := l.liveReservation(device); live {
+			l.log.Info("reservation ended by shutdown", "device", device, "owner", hold.Owner)
+		}
+	}
+
+	clear(l.reserved)
 }

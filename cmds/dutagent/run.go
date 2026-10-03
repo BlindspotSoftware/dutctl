@@ -108,14 +108,16 @@ func findCommand(devices dut.Devlist, device, command string) (dut.Command, erro
 // user included, is rejected here, atomically with the acquire.
 //
 // Errors: CodeFailedPrecondition when another owner holds the device
-// (locker.ErrWrongOwner) or the device is already running a command for user
-// (locker.ErrAlreadyRunning); CodeInternal otherwise.
+// (locker.ErrWrongOwner), the device is already running a command for user
+// (locker.ErrAlreadyRunning) or the agent is shutting down
+// (locker.ErrShuttingDown); CodeInternal otherwise.
 func acquireAutoLock(lk *locker.Locker, device, user string) error {
 	_, err := lk.AutoLock(device, user)
 	if err != nil {
-		// One code for both: either way the device is busy until its state
-		// changes, and the message tells the client which case it is.
-		if errors.Is(err, locker.ErrWrongOwner) || errors.Is(err, locker.ErrAlreadyRunning) {
+		// One code for all three: either way the device is busy until its
+		// state changes, and the message tells the client which case it is.
+		if errors.Is(err, locker.ErrWrongOwner) || errors.Is(err, locker.ErrAlreadyRunning) ||
+			errors.Is(err, locker.ErrShuttingDown) {
 			return connect.NewError(connect.CodeFailedPrecondition, err)
 		}
 
