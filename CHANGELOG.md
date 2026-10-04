@@ -1,5 +1,36 @@
 # Changelog
 
+## [1.0.0-alpha.5](https://github.com/BlindspotSoftware/dutctl/compare/v1.0.0-alpha.4...v1.0.0-alpha.5) (2026-10-04)
+
+
+### Features
+
+* let the locker take no new work while the agent stops ([b62160a](https://github.com/BlindspotSoftware/dutctl/commit/b62160a7d437e35a818db9c0e970ffe5a670718e))
+* stop the agent in stages on stop signals ([52a6e1b](https://github.com/BlindspotSoftware/dutctl/commit/52a6e1ba2acf30dd5283e2ac8350016ee393a4d2))
+* warn while a cancelled module keeps its device busy ([f8eac19](https://github.com/BlindspotSoftware/dutctl/commit/f8eac19fd0295e2dc32496b438eed856f7220a4f))
+
+
+### Bug Fixes
+
+* bound module deinitialization even when a module ignores its context ([1a1a588](https://github.com/BlindspotSoftware/dutctl/commit/1a1a588e0f46c5888cc58ed2ab194962502909d4))
+* keep the device busy until its modules have returned ([597af6f](https://github.com/BlindspotSoftware/dutctl/commit/597af6f6f90495bec0cc0131bd8a5148e0753c60))
+* let a forced unlock release only a reservation ([4a8e3d9](https://github.com/BlindspotSoftware/dutctl/commit/4a8e3d96549d62e80a752efc0256f58810a04a15))
+* log a module stopped by a cancellation as a warning ([a070e62](https://github.com/BlindspotSoftware/dutctl/commit/a070e62ae945eb9716cdc392874ce87479967a23))
+* run one command at a time on a device, even for its owner ([bebf27f](https://github.com/BlindspotSoftware/dutctl/commit/bebf27f7a746b5cee91100dc66a0f766a378bd02))
+
+
+### Documentation
+
+* describe how commands and the agent end ([0c8ac5b](https://github.com/BlindspotSoftware/dutctl/commit/0c8ac5b913f8285599a9803d2118319e414937ca))
+
+
+### Other Work
+
+* drive the Run handler end to end through a stream seam ([9236fa8](https://github.com/BlindspotSoftware/dutctl/commit/9236fa8c51a960e6bc705b33645571a02e6120e7))
+* let the example systemd unit leave the stop to dutagent ([11c674e](https://github.com/BlindspotSoftware/dutctl/commit/11c674e79f01aa8c33c0bfe63531415a6cf78783))
+* remove the unused fsm package and stream fake ([6e7b2e4](https://github.com/BlindspotSoftware/dutctl/commit/6e7b2e4a60470d60cc268643c7d4bcdac563dd93))
+* run the Run RPC as straight-line code ([216e818](https://github.com/BlindspotSoftware/dutctl/commit/216e8182defed8728aa6e560520ee63ab0328c55))
+
 ## [1.0.0-alpha.4](https://github.com/BlindspotSoftware/dutctl/compare/v1.0.0-alpha.3...v1.0.0-alpha.4) (2026-09-29)
 
 
