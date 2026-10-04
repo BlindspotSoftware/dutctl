@@ -23,7 +23,8 @@ information is provided by the agent on request.
 ## DUT Agent (DA)
 The DUT Agent is a service designed to run on a single board computer, which can handle the wiring to the DUT (power
 control, reset, flasher, serial console, etc.) The specifics and supported operation for the wired DUTs are feed to the
-DUT Agent via a [configuration file](./dutagent-config.md)
+DUT Agent via a [configuration file](./dutagent-config.md). How the agent and its commands end, on stop signals,
+client cancellation and failures, is described in [dutagent-shutdown.md](./dutagent-shutdown.md).
 
 ## DUT Server
 The DUT Server is designed to let the project scale. Its basic purpose is to maintain a table with the DUT to DUT Agent

@@ -20,6 +20,7 @@ RestartSec=3s
 # a bound for running commands and reservations to end, so systemd must not cut
 # it short either (TimeoutStopSec=infinity). To abort the running commands,
 # signal dutagent again: systemctl kill --kill-whom=main dutagent
+# See docs/dutagent-shutdown.md.
 KillMode=mixed
 TimeoutStopSec=infinity
 ExecStart=/usr/bin/dutagent -a 0.0.0.0:2024 -c /etc/dutagent/config.yaml
