@@ -19,7 +19,7 @@ To abort the running commands instead, signal `dutagent` once more; signalling i
 systemctl kill --kill-whom=main dutagent
 ```
 
-Leave out `--kill-whom=main` (`--kill-who=main` before systemd 252) and the signal also reaches the tools `dutagent` runs, such as a flash programmer, which then stop mid-operation. The unit sets `KillMode=mixed` and `TimeoutStopSec=infinity` for this; dutagent itself does not depend on systemd. The configuration is read only at start, so a changed configuration takes effect with the restart.
+Leave out `--kill-whom=main` (`--kill-who=main` before systemd 252) and the signal also reaches the tools `dutagent` runs, such as a flash programmer, which then stop mid-operation. The unit sets `KillMode=mixed` and `TimeoutStopSec=infinity` for this; dutagent itself does not depend on systemd. The configuration is read only at start, so a changed configuration takes effect with the restart. [docs/dutagent-shutdown.md](../docs/dutagent-shutdown.md) shows the stages in detail.
 
 
 ## `packaging/dutagent.sysusers`

@@ -40,7 +40,7 @@ var errAbortedByShutdown = errors.New("dutagent is shutting down")
 // A failure of the agent itself enters the second stage directly, through
 // abortAndWait, which may run beside a stop signal: entering a stage is
 // idempotent, so such a signal is at worst counted one stage low, and the
-// next one exits.
+// next one exits. docs/dutagent-shutdown.md shows how the stages play out.
 type stopper struct {
 	locks *locker.Locker
 
