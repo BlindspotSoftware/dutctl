@@ -14,6 +14,14 @@ User=dutagent
 Group=dutagent
 Restart=always
 RestartSec=3s
+# Stopping: systemd signals only dutagent (KillMode=mixed), which takes its
+# running commands through its stop stages and stops the tools they run itself.
+# Whatever is left once dutagent has exited gets SIGKILL. dutagent waits without
+# a bound for running commands and reservations to end, so systemd must not cut
+# it short either (TimeoutStopSec=infinity). To abort the running commands,
+# signal dutagent again: systemctl kill --kill-whom=main dutagent
+KillMode=mixed
+TimeoutStopSec=infinity
 ExecStart=/usr/bin/dutagent -a 0.0.0.0:2024 -c /etc/dutagent/config.yaml
 # The port 2024 is unused
 #   see https://en.wikipedia.org/wiki/List_of_TCP_and_UDP_port_numbers
