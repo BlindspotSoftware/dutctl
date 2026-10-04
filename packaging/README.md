@@ -10,6 +10,17 @@ NOTE: We do not use `GoReleaser` to create releases, only to create Linux distri
 ## `dutagent.service`
 A systemd service to run `dutagent`. It is hardened and locked down, so that it runs with least privilege possible, under non-root user. Defines arguments for the `dutagent`, networking port to use, location of configuration file, restart conditions, and so on.
 
+### Stopping and restarting
+With this unit, `systemctl stop` and `systemctl restart` do not cut running work short: `dutagent` takes no new work and waits until the running commands and device reservations have ended, then stops. Meanwhile the owner of a reservation can still run commands on that device, so a job can finish. An idle agent stops at once. To update a worker without waiting for the restart to finish, use `systemctl restart --no-block dutagent`. A reboot stops the agent the same way, but systemd forces the reboot after 30 minutes; stop the agent first.
+
+To abort the running commands instead, signal `dutagent` once more; signalling it again while it aborts makes it exit at once:
+
+```
+systemctl kill --kill-whom=main dutagent
+```
+
+Leave out `--kill-whom=main` (`--kill-who=main` before systemd 252) and the signal also reaches the tools `dutagent` runs, such as a flash programmer, which then stop mid-operation. The unit sets `KillMode=mixed` and `TimeoutStopSec=infinity` for this; dutagent itself does not depend on systemd. The configuration is read only at start, so a changed configuration takes effect with the restart.
+
 
 ## `packaging/dutagent.sysusers`
 The systemd service needs a non-root user to run, with correct privileges (for example to access serial devices). For this we use `systemd-sysusers` tool to create a user and group with correct privileges. This is done automatically by `systemd` on installation of the distribution package.
