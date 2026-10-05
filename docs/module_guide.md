@@ -79,6 +79,9 @@ the full version):
   in chunks, with no raw mode anywhere. Users who pipe input into a raw console have to send CR themselves if the far
   end needs it.
 
+The [project's dummy modules](../pkg/module/dummy) contain the smallest example in both modes, the `dummy-console`
+module with a raw, a hex and a line demo.
+
 ## Registration
 
 New modules go under `pkg/module`.
