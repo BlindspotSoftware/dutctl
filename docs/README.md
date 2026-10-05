@@ -96,6 +96,21 @@ When the client's standard input ends (a pipe at its end, Ctrl-D in a line conso
 and then a ConsoleControl message with an eof event. The module's input then reports end of file, while the console's
 output and any file transfers go on; the stream itself stays open until the command ends.
 
+The mode tells the client how the module uses its console, so that the client can configure a terminal accordingly:
+
+- **LINE**: the module reads newline-terminated lines of text. The terminal is left as it is: line editing and local
+  echo are done by the terminal, Enter sends the line, and Ctrl-C interrupts the client as usual. This is the mode for
+  prompts, question-and-answer interaction and input piped to a process.
+- **RAW**: the module consumes bytes as typed and produces bytes for a terminal, as a serial port does. The terminal is
+  switched to raw mode: every key, Ctrl-C and Escape included, is sent at once and unchanged, and output is written to
+  the terminal as received. Since Ctrl-C now goes to the device, the client keeps a local escape key: `Ctrl-A x` ends
+  the session, `Ctrl-A Ctrl-A` sends a literal Ctrl-A, and `Ctrl-A e` toggles a local echo for devices that do not
+  echo themselves. The client prints a hint with these keys on standard error when it enters raw mode.
+
+Raw mode is used only when the client's standard input is a terminal and the output format is text. Otherwise, for
+example with input piped from a file or in CI, the input is forwarded as it is read, in chunks, with no raw mode
+anywhere.
+
 ![FileDownload-msg](https://github.com/user-attachments/assets/2e6d75e6-02b0-43e1-875f-3e7634b6b147)
 
 **File download to the client**: After the initial RunRequest with a Command message by the client, for commands

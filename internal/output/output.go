@@ -162,16 +162,30 @@ func streamFor(stdout, stderr io.Writer, isError bool) io.Writer {
 	return stdout
 }
 
+// IsText reports whether format selects the text formatter, which writes
+// content as it is; the structured formatters, json, yaml, csv and oneline,
+// wrap every piece of content in a record of their own. The empty format is
+// text, the default, and so is any other value. The client asks it before a
+// raw console takes the terminal, which only text output can share.
+func IsText(format string) bool {
+	switch format {
+	case "json", "yaml", "csv", "oneline":
+		return false
+	default:
+		return true
+	}
+}
+
 // New creates an appropriate output formatter based on the provided configuration.
 func New(config Config) Formatter {
-	switch config.Format {
-	case "json":
-		return newJSONFormatter(config)
-	case "yaml":
-		return newYAMLFormatter(config)
-	case "csv", "oneline":
-		return newOneLineFormatter(config)
-	default:
+	switch {
+	case IsText(config.Format):
 		return newTextFormatter(config)
+	case config.Format == "json":
+		return newJSONFormatter(config)
+	case config.Format == "yaml":
+		return newYAMLFormatter(config)
+	default: // csv and oneline, the one line formatter's two names
+		return newOneLineFormatter(config)
 	}
 }
