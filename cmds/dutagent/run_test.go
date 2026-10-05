@@ -224,8 +224,8 @@ func TestRunRejectedBeforeModules(t *testing.T) {
 		},
 		{
 			name: "first message is not a command",
-			reqs: []*pb.RunRequest{{Msg: &pb.RunRequest_Console{
-				Console: &pb.Console{Data: &pb.Console_Stdin{Stdin: []byte("hi")}},
+			reqs: []*pb.RunRequest{{Msg: &pb.RunRequest_ConsoleInput{
+				ConsoleInput: &pb.ConsoleInput{Data: []byte("hi")},
 			}}},
 			wantCode: connect.CodeInvalidArgument,
 		},

@@ -160,7 +160,7 @@ func TestBrokerParentCancelClosesSession(t *testing.T) {
 func TestBrokerStdinForwarding(t *testing.T) {
 	b := &Broker{}
 	stdinPayload := []byte("user input")
-	req := &pb.RunRequest{Msg: &pb.RunRequest_Console{Console: &pb.Console{Data: &pb.Console_Stdin{Stdin: stdinPayload}}}}
+	req := &pb.RunRequest{Msg: &pb.RunRequest_ConsoleInput{ConsoleInput: &pb.ConsoleInput{Data: stdinPayload}}}
 	stream := &testStream{recvReqs: []*pb.RunRequest{req}} // EOF after the request
 	sess, _ := start(t, b, stream)
 

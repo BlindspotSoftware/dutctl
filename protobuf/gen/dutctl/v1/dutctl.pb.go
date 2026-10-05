@@ -21,6 +21,65 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// ConsoleMode tells the client how the module uses its console, so that the
+// client can configure a terminal accordingly. The client treats an unknown
+// value as LINE.
+type ConsoleMode int32
+
+const (
+	ConsoleMode_CONSOLE_MODE_UNSPECIFIED ConsoleMode = 0
+	// The module reads newline-terminated lines of text. A terminal stays in its
+	// usual line-editing mode: the user sees what they type and edits the line,
+	// Enter sends it, and Ctrl-C still interrupts the client.
+	ConsoleMode_CONSOLE_MODE_LINE ConsoleMode = 1
+	// The module consumes bytes as typed and produces bytes for a terminal, as a
+	// serial port does. A terminal is switched to raw mode: every key, Ctrl-C and
+	// Escape included, is sent at once and unchanged, and output is written as
+	// received. The client keeps a local key sequence to end the run.
+	ConsoleMode_CONSOLE_MODE_RAW ConsoleMode = 2
+)
+
+// Enum value maps for ConsoleMode.
+var (
+	ConsoleMode_name = map[int32]string{
+		0: "CONSOLE_MODE_UNSPECIFIED",
+		1: "CONSOLE_MODE_LINE",
+		2: "CONSOLE_MODE_RAW",
+	}
+	ConsoleMode_value = map[string]int32{
+		"CONSOLE_MODE_UNSPECIFIED": 0,
+		"CONSOLE_MODE_LINE":        1,
+		"CONSOLE_MODE_RAW":         2,
+	}
+)
+
+func (x ConsoleMode) Enum() *ConsoleMode {
+	p := new(ConsoleMode)
+	*p = x
+	return p
+}
+
+func (x ConsoleMode) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ConsoleMode) Descriptor() protoreflect.EnumDescriptor {
+	return file_dutctl_v1_dutctl_proto_enumTypes[0].Descriptor()
+}
+
+func (ConsoleMode) Type() protoreflect.EnumType {
+	return &file_dutctl_v1_dutctl_proto_enumTypes[0]
+}
+
+func (x ConsoleMode) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ConsoleMode.Descriptor instead.
+func (ConsoleMode) EnumDescriptor() ([]byte, []int) {
+	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{0}
+}
+
 // ListRequest is sent by the client to request a list of devices connected to the agent.
 type ListRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -417,16 +476,17 @@ func (x *DetailsResponse) GetDetails() string {
 	return ""
 }
 
-// RunRequest is sent by the client to start a command execution on a device and optionally
-// to further interact with the agent during the command execution.
-// The first RunRequest message sent to a agent must always contain a Command message.
+// RunRequest is sent by the client to start a command execution on a device and
+// to interact with the agent while the command runs. The first RunRequest of a
+// stream must carry a Command message.
 type RunRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Msg:
 	//
 	//	*RunRequest_Command
-	//	*RunRequest_Console
+	//	*RunRequest_ConsoleInput
 	//	*RunRequest_File
+	//	*RunRequest_ConsoleControl
 	Msg           isRunRequest_Msg `protobuf_oneof:"msg"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -478,10 +538,10 @@ func (x *RunRequest) GetCommand() *Command {
 	return nil
 }
 
-func (x *RunRequest) GetConsole() *Console {
+func (x *RunRequest) GetConsoleInput() *ConsoleInput {
 	if x != nil {
-		if x, ok := x.Msg.(*RunRequest_Console); ok {
-			return x.Console
+		if x, ok := x.Msg.(*RunRequest_ConsoleInput); ok {
+			return x.ConsoleInput
 		}
 	}
 	return nil
@@ -496,6 +556,15 @@ func (x *RunRequest) GetFile() *File {
 	return nil
 }
 
+func (x *RunRequest) GetConsoleControl() *ConsoleControl {
+	if x != nil {
+		if x, ok := x.Msg.(*RunRequest_ConsoleControl); ok {
+			return x.ConsoleControl
+		}
+	}
+	return nil
+}
+
 type isRunRequest_Msg interface {
 	isRunRequest_Msg()
 }
@@ -504,30 +573,39 @@ type RunRequest_Command struct {
 	Command *Command `protobuf:"bytes,1,opt,name=command,proto3,oneof"`
 }
 
-type RunRequest_Console struct {
-	Console *Console `protobuf:"bytes,2,opt,name=console,proto3,oneof"`
+type RunRequest_ConsoleInput struct {
+	ConsoleInput *ConsoleInput `protobuf:"bytes,2,opt,name=console_input,json=consoleInput,proto3,oneof"`
 }
 
 type RunRequest_File struct {
 	File *File `protobuf:"bytes,3,opt,name=file,proto3,oneof"`
 }
 
+type RunRequest_ConsoleControl struct {
+	ConsoleControl *ConsoleControl `protobuf:"bytes,4,opt,name=console_control,json=consoleControl,proto3,oneof"`
+}
+
 func (*RunRequest_Command) isRunRequest_Msg() {}
 
-func (*RunRequest_Console) isRunRequest_Msg() {}
+func (*RunRequest_ConsoleInput) isRunRequest_Msg() {}
 
 func (*RunRequest_File) isRunRequest_Msg() {}
 
-// RunResponse is sent by the agent in response to a RunRequest and can either contain
-// just the output of the command (Print), or trigger further interaction with the client.
+func (*RunRequest_ConsoleControl) isRunRequest_Msg() {}
+
+// RunResponse is sent by the agent while a command runs: the command's output
+// (Print), the traffic of a console and the events that frame it, or a file
+// transfer.
 type RunResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Msg:
 	//
 	//	*RunResponse_Print
-	//	*RunResponse_Console
+	//	*RunResponse_ConsoleOutput
 	//	*RunResponse_FileRequest
 	//	*RunResponse_File
+	//	*RunResponse_ConsoleOpen
+	//	*RunResponse_ConsoleClose
 	Msg           isRunResponse_Msg `protobuf_oneof:"msg"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -579,10 +657,10 @@ func (x *RunResponse) GetPrint() *Print {
 	return nil
 }
 
-func (x *RunResponse) GetConsole() *Console {
+func (x *RunResponse) GetConsoleOutput() *ConsoleOutput {
 	if x != nil {
-		if x, ok := x.Msg.(*RunResponse_Console); ok {
-			return x.Console
+		if x, ok := x.Msg.(*RunResponse_ConsoleOutput); ok {
+			return x.ConsoleOutput
 		}
 	}
 	return nil
@@ -606,6 +684,24 @@ func (x *RunResponse) GetFile() *File {
 	return nil
 }
 
+func (x *RunResponse) GetConsoleOpen() *ConsoleOpen {
+	if x != nil {
+		if x, ok := x.Msg.(*RunResponse_ConsoleOpen); ok {
+			return x.ConsoleOpen
+		}
+	}
+	return nil
+}
+
+func (x *RunResponse) GetConsoleClose() *ConsoleClose {
+	if x != nil {
+		if x, ok := x.Msg.(*RunResponse_ConsoleClose); ok {
+			return x.ConsoleClose
+		}
+	}
+	return nil
+}
+
 type isRunResponse_Msg interface {
 	isRunResponse_Msg()
 }
@@ -614,8 +710,8 @@ type RunResponse_Print struct {
 	Print *Print `protobuf:"bytes,1,opt,name=print,proto3,oneof"`
 }
 
-type RunResponse_Console struct {
-	Console *Console `protobuf:"bytes,2,opt,name=console,proto3,oneof"`
+type RunResponse_ConsoleOutput struct {
+	ConsoleOutput *ConsoleOutput `protobuf:"bytes,2,opt,name=console_output,json=consoleOutput,proto3,oneof"`
 }
 
 type RunResponse_FileRequest struct {
@@ -626,13 +722,25 @@ type RunResponse_File struct {
 	File *File `protobuf:"bytes,4,opt,name=file,proto3,oneof"`
 }
 
+type RunResponse_ConsoleOpen struct {
+	ConsoleOpen *ConsoleOpen `protobuf:"bytes,5,opt,name=console_open,json=consoleOpen,proto3,oneof"`
+}
+
+type RunResponse_ConsoleClose struct {
+	ConsoleClose *ConsoleClose `protobuf:"bytes,6,opt,name=console_close,json=consoleClose,proto3,oneof"`
+}
+
 func (*RunResponse_Print) isRunResponse_Msg() {}
 
-func (*RunResponse_Console) isRunResponse_Msg() {}
+func (*RunResponse_ConsoleOutput) isRunResponse_Msg() {}
 
 func (*RunResponse_FileRequest) isRunResponse_Msg() {}
 
 func (*RunResponse_File) isRunResponse_Msg() {}
+
+func (*RunResponse_ConsoleOpen) isRunResponse_Msg() {}
+
+func (*RunResponse_ConsoleClose) isRunResponse_Msg() {}
 
 // Command is used by the client to start a command execution on a device.
 type Command struct {
@@ -695,7 +803,9 @@ func (x *Command) GetArgs() []string {
 	return nil
 }
 
-// Print is used by the agent to send the output of a command execution to the client.
+// Print is used by the agent to send the output of a command execution to the
+// client. It may be sent at any time, also while a console is open; the client
+// shows Print and console output in the order received.
 type Print struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Text          []byte                 `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
@@ -740,34 +850,31 @@ func (x *Print) GetText() []byte {
 	return nil
 }
 
-// Console is used by the client and agent during an interactive command execution.
-// An interactive session can only be started by the agent by sending the first Console message.
-type Console struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Types that are valid to be assigned to Data:
-	//
-	//	*Console_Stdin
-	//	*Console_Stdout
-	//	*Console_Stderr
-	Data          isConsole_Data `protobuf_oneof:"data"`
+// ConsoleOpen is sent by the agent when a module opens its console. It precedes
+// every ConsoleOutput of that console. The id is unique within the run, so the
+// client can mark its input for exactly this console.
+type ConsoleOpen struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            uint32                 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
+	Mode          ConsoleMode            `protobuf:"varint,2,opt,name=mode,proto3,enum=dutctl.v1.ConsoleMode" json:"mode,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *Console) Reset() {
-	*x = Console{}
+func (x *ConsoleOpen) Reset() {
+	*x = ConsoleOpen{}
 	mi := &file_dutctl_v1_dutctl_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *Console) String() string {
+func (x *ConsoleOpen) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*Console) ProtoMessage() {}
+func (*ConsoleOpen) ProtoMessage() {}
 
-func (x *Console) ProtoReflect() protoreflect.Message {
+func (x *ConsoleOpen) ProtoReflect() protoreflect.Message {
 	mi := &file_dutctl_v1_dutctl_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -779,66 +886,316 @@ func (x *Console) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use Console.ProtoReflect.Descriptor instead.
-func (*Console) Descriptor() ([]byte, []int) {
+// Deprecated: Use ConsoleOpen.ProtoReflect.Descriptor instead.
+func (*ConsoleOpen) Descriptor() ([]byte, []int) {
 	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{12}
 }
 
-func (x *Console) GetData() isConsole_Data {
+func (x *ConsoleOpen) GetId() uint32 {
+	if x != nil {
+		return x.Id
+	}
+	return 0
+}
+
+func (x *ConsoleOpen) GetMode() ConsoleMode {
+	if x != nil {
+		return x.Mode
+	}
+	return ConsoleMode_CONSOLE_MODE_UNSPECIFIED
+}
+
+// ConsoleClose is sent by the agent when the console ends: the module returned
+// or opened another console. No ConsoleOutput follows for it.
+type ConsoleClose struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ConsoleClose) Reset() {
+	*x = ConsoleClose{}
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ConsoleClose) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ConsoleClose) ProtoMessage() {}
+
+func (x *ConsoleClose) ProtoReflect() protoreflect.Message {
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ConsoleClose.ProtoReflect.Descriptor instead.
+func (*ConsoleClose) Descriptor() ([]byte, []int) {
+	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{13}
+}
+
+// ConsoleInput is sent by the client: the user's input for the open console.
+type ConsoleInput struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            uint32                 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
+	Data          []byte                 `protobuf:"bytes,2,opt,name=data,proto3" json:"data,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ConsoleInput) Reset() {
+	*x = ConsoleInput{}
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ConsoleInput) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ConsoleInput) ProtoMessage() {}
+
+func (x *ConsoleInput) ProtoReflect() protoreflect.Message {
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ConsoleInput.ProtoReflect.Descriptor instead.
+func (*ConsoleInput) Descriptor() ([]byte, []int) {
+	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *ConsoleInput) GetId() uint32 {
+	if x != nil {
+		return x.Id
+	}
+	return 0
+}
+
+func (x *ConsoleInput) GetData() []byte {
 	if x != nil {
 		return x.Data
 	}
 	return nil
 }
 
-func (x *Console) GetStdin() []byte {
+// ConsoleOutput is sent by the agent: the module's output on the open console,
+// on its standard output or its standard error stream.
+type ConsoleOutput struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Data:
+	//
+	//	*ConsoleOutput_Stdout
+	//	*ConsoleOutput_Stderr
+	Data          isConsoleOutput_Data `protobuf_oneof:"data"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ConsoleOutput) Reset() {
+	*x = ConsoleOutput{}
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ConsoleOutput) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ConsoleOutput) ProtoMessage() {}
+
+func (x *ConsoleOutput) ProtoReflect() protoreflect.Message {
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[15]
 	if x != nil {
-		if x, ok := x.Data.(*Console_Stdin); ok {
-			return x.Stdin
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
 		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ConsoleOutput.ProtoReflect.Descriptor instead.
+func (*ConsoleOutput) Descriptor() ([]byte, []int) {
+	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *ConsoleOutput) GetData() isConsoleOutput_Data {
+	if x != nil {
+		return x.Data
 	}
 	return nil
 }
 
-func (x *Console) GetStdout() []byte {
+func (x *ConsoleOutput) GetStdout() []byte {
 	if x != nil {
-		if x, ok := x.Data.(*Console_Stdout); ok {
+		if x, ok := x.Data.(*ConsoleOutput_Stdout); ok {
 			return x.Stdout
 		}
 	}
 	return nil
 }
 
-func (x *Console) GetStderr() []byte {
+func (x *ConsoleOutput) GetStderr() []byte {
 	if x != nil {
-		if x, ok := x.Data.(*Console_Stderr); ok {
+		if x, ok := x.Data.(*ConsoleOutput_Stderr); ok {
 			return x.Stderr
 		}
 	}
 	return nil
 }
 
-type isConsole_Data interface {
-	isConsole_Data()
+type isConsoleOutput_Data interface {
+	isConsoleOutput_Data()
 }
 
-type Console_Stdin struct {
-	Stdin []byte `protobuf:"bytes,1,opt,name=stdin,proto3,oneof"`
+type ConsoleOutput_Stdout struct {
+	Stdout []byte `protobuf:"bytes,1,opt,name=stdout,proto3,oneof"`
 }
 
-type Console_Stdout struct {
-	Stdout []byte `protobuf:"bytes,2,opt,name=stdout,proto3,oneof"`
+type ConsoleOutput_Stderr struct {
+	Stderr []byte `protobuf:"bytes,2,opt,name=stderr,proto3,oneof"`
 }
 
-type Console_Stderr struct {
-	Stderr []byte `protobuf:"bytes,3,opt,name=stderr,proto3,oneof"`
+func (*ConsoleOutput_Stdout) isConsoleOutput_Data() {}
+
+func (*ConsoleOutput_Stderr) isConsoleOutput_Data() {}
+
+// ConsoleControl is sent by the client: an event for the open console that is
+// not input data.
+type ConsoleControl struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Id    uint32                 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
+	// Types that are valid to be assigned to Control:
+	//
+	//	*ConsoleControl_Eof
+	Control       isConsoleControl_Control `protobuf_oneof:"control"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
-func (*Console_Stdin) isConsole_Data() {}
+func (x *ConsoleControl) Reset() {
+	*x = ConsoleControl{}
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
 
-func (*Console_Stdout) isConsole_Data() {}
+func (x *ConsoleControl) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
 
-func (*Console_Stderr) isConsole_Data() {}
+func (*ConsoleControl) ProtoMessage() {}
+
+func (x *ConsoleControl) ProtoReflect() protoreflect.Message {
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ConsoleControl.ProtoReflect.Descriptor instead.
+func (*ConsoleControl) Descriptor() ([]byte, []int) {
+	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *ConsoleControl) GetId() uint32 {
+	if x != nil {
+		return x.Id
+	}
+	return 0
+}
+
+func (x *ConsoleControl) GetControl() isConsoleControl_Control {
+	if x != nil {
+		return x.Control
+	}
+	return nil
+}
+
+func (x *ConsoleControl) GetEof() *ConsoleEof {
+	if x != nil {
+		if x, ok := x.Control.(*ConsoleControl_Eof); ok {
+			return x.Eof
+		}
+	}
+	return nil
+}
+
+type isConsoleControl_Control interface {
+	isConsoleControl_Control()
+}
+
+type ConsoleControl_Eof struct {
+	Eof *ConsoleEof `protobuf:"bytes,2,opt,name=eof,proto3,oneof"`
+}
+
+func (*ConsoleControl_Eof) isConsoleControl_Control() {}
+
+// ConsoleEof tells the agent that the user's input ended: the client's standard
+// input reached its end. The module's console input then reports end of file,
+// while its output continues. The client sends it after any pending input, for
+// every console of the run whose input ends. It is not an end of the stream:
+// file transfers and output keep flowing.
+type ConsoleEof struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ConsoleEof) Reset() {
+	*x = ConsoleEof{}
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ConsoleEof) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ConsoleEof) ProtoMessage() {}
+
+func (x *ConsoleEof) ProtoReflect() protoreflect.Message {
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ConsoleEof.ProtoReflect.Descriptor instead.
+func (*ConsoleEof) Descriptor() ([]byte, []int) {
+	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{17}
+}
 
 // FileRequest is used by the agent to request a file from the client.
 type FileRequest struct {
@@ -850,7 +1207,7 @@ type FileRequest struct {
 
 func (x *FileRequest) Reset() {
 	*x = FileRequest{}
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[13]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -862,7 +1219,7 @@ func (x *FileRequest) String() string {
 func (*FileRequest) ProtoMessage() {}
 
 func (x *FileRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[13]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -875,7 +1232,7 @@ func (x *FileRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FileRequest.ProtoReflect.Descriptor instead.
 func (*FileRequest) Descriptor() ([]byte, []int) {
-	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{13}
+	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *FileRequest) GetPath() string {
@@ -896,7 +1253,7 @@ type File struct {
 
 func (x *File) Reset() {
 	*x = File{}
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[14]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -908,7 +1265,7 @@ func (x *File) String() string {
 func (*File) ProtoMessage() {}
 
 func (x *File) ProtoReflect() protoreflect.Message {
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[14]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -921,7 +1278,7 @@ func (x *File) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use File.ProtoReflect.Descriptor instead.
 func (*File) Descriptor() ([]byte, []int) {
-	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{14}
+	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *File) GetPath() string {
@@ -954,7 +1311,7 @@ type LockRequest struct {
 
 func (x *LockRequest) Reset() {
 	*x = LockRequest{}
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[15]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -966,7 +1323,7 @@ func (x *LockRequest) String() string {
 func (*LockRequest) ProtoMessage() {}
 
 func (x *LockRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[15]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -979,7 +1336,7 @@ func (x *LockRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LockRequest.ProtoReflect.Descriptor instead.
 func (*LockRequest) Descriptor() ([]byte, []int) {
-	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{15}
+	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *LockRequest) GetDevice() string {
@@ -1007,7 +1364,7 @@ type LockResponse struct {
 
 func (x *LockResponse) Reset() {
 	*x = LockResponse{}
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[16]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1019,7 +1376,7 @@ func (x *LockResponse) String() string {
 func (*LockResponse) ProtoMessage() {}
 
 func (x *LockResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[16]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1032,7 +1389,7 @@ func (x *LockResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LockResponse.ProtoReflect.Descriptor instead.
 func (*LockResponse) Descriptor() ([]byte, []int) {
-	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{16}
+	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *LockResponse) GetDevice() string {
@@ -1061,7 +1418,7 @@ type UnlockRequest struct {
 
 func (x *UnlockRequest) Reset() {
 	*x = UnlockRequest{}
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[17]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1073,7 +1430,7 @@ func (x *UnlockRequest) String() string {
 func (*UnlockRequest) ProtoMessage() {}
 
 func (x *UnlockRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[17]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1086,7 +1443,7 @@ func (x *UnlockRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnlockRequest.ProtoReflect.Descriptor instead.
 func (*UnlockRequest) Descriptor() ([]byte, []int) {
-	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{17}
+	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *UnlockRequest) GetDevice() string {
@@ -1112,7 +1469,7 @@ type UnlockResponse struct {
 
 func (x *UnlockResponse) Reset() {
 	*x = UnlockResponse{}
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[18]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1124,7 +1481,7 @@ func (x *UnlockResponse) String() string {
 func (*UnlockResponse) ProtoMessage() {}
 
 func (x *UnlockResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[18]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1137,7 +1494,7 @@ func (x *UnlockResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnlockResponse.ProtoReflect.Descriptor instead.
 func (*UnlockResponse) Descriptor() ([]byte, []int) {
-	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{18}
+	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{23}
 }
 
 // RegisterRequest is sent by a device agent to register with the relay server.
@@ -1152,7 +1509,7 @@ type RegisterRequest struct {
 
 func (x *RegisterRequest) Reset() {
 	*x = RegisterRequest{}
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[19]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1164,7 +1521,7 @@ func (x *RegisterRequest) String() string {
 func (*RegisterRequest) ProtoMessage() {}
 
 func (x *RegisterRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[19]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1177,7 +1534,7 @@ func (x *RegisterRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterRequest.ProtoReflect.Descriptor instead.
 func (*RegisterRequest) Descriptor() ([]byte, []int) {
-	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{19}
+	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *RegisterRequest) GetDevices() []string {
@@ -1204,7 +1561,7 @@ type RegisterResponse struct {
 
 func (x *RegisterResponse) Reset() {
 	*x = RegisterResponse{}
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[20]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1216,7 +1573,7 @@ func (x *RegisterResponse) String() string {
 func (*RegisterResponse) ProtoMessage() {}
 
 func (x *RegisterResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_dutctl_v1_dutctl_proto_msgTypes[20]
+	mi := &file_dutctl_v1_dutctl_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1229,7 +1586,7 @@ func (x *RegisterResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterResponse.ProtoReflect.Descriptor instead.
 func (*RegisterResponse) Descriptor() ([]byte, []int) {
-	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{20}
+	return file_dutctl_v1_dutctl_proto_rawDescGZIP(), []int{25}
 }
 
 var File_dutctl_v1_dutctl_proto protoreflect.FileDescriptor
@@ -1258,30 +1615,45 @@ const file_dutctl_v1_dutctl_proto_rawDesc = "" +
 	"\acommand\x18\x02 \x01(\tR\acommand\x12\x18\n" +
 	"\akeyword\x18\x03 \x01(\tR\akeyword\"+\n" +
 	"\x0fDetailsResponse\x12\x18\n" +
-	"\adetails\x18\x01 \x01(\tR\adetails\"\x9a\x01\n" +
+	"\adetails\x18\x01 \x01(\tR\adetails\"\xf0\x01\n" +
 	"\n" +
 	"RunRequest\x12.\n" +
-	"\acommand\x18\x01 \x01(\v2\x12.dutctl.v1.CommandH\x00R\acommand\x12.\n" +
-	"\aconsole\x18\x02 \x01(\v2\x12.dutctl.v1.ConsoleH\x00R\aconsole\x12%\n" +
-	"\x04file\x18\x03 \x01(\v2\x0f.dutctl.v1.FileH\x00R\x04fileB\x05\n" +
-	"\x03msg\"\xd2\x01\n" +
+	"\acommand\x18\x01 \x01(\v2\x12.dutctl.v1.CommandH\x00R\acommand\x12>\n" +
+	"\rconsole_input\x18\x02 \x01(\v2\x17.dutctl.v1.ConsoleInputH\x00R\fconsoleInput\x12%\n" +
+	"\x04file\x18\x03 \x01(\v2\x0f.dutctl.v1.FileH\x00R\x04file\x12D\n" +
+	"\x0fconsole_control\x18\x04 \x01(\v2\x19.dutctl.v1.ConsoleControlH\x00R\x0econsoleControlB\x05\n" +
+	"\x03msg\"\xe2\x02\n" +
 	"\vRunResponse\x12(\n" +
-	"\x05print\x18\x01 \x01(\v2\x10.dutctl.v1.PrintH\x00R\x05print\x12.\n" +
-	"\aconsole\x18\x02 \x01(\v2\x12.dutctl.v1.ConsoleH\x00R\aconsole\x12;\n" +
+	"\x05print\x18\x01 \x01(\v2\x10.dutctl.v1.PrintH\x00R\x05print\x12A\n" +
+	"\x0econsole_output\x18\x02 \x01(\v2\x18.dutctl.v1.ConsoleOutputH\x00R\rconsoleOutput\x12;\n" +
 	"\ffile_request\x18\x03 \x01(\v2\x16.dutctl.v1.FileRequestH\x00R\vfileRequest\x12%\n" +
-	"\x04file\x18\x04 \x01(\v2\x0f.dutctl.v1.FileH\x00R\x04fileB\x05\n" +
+	"\x04file\x18\x04 \x01(\v2\x0f.dutctl.v1.FileH\x00R\x04file\x12;\n" +
+	"\fconsole_open\x18\x05 \x01(\v2\x16.dutctl.v1.ConsoleOpenH\x00R\vconsoleOpen\x12>\n" +
+	"\rconsole_close\x18\x06 \x01(\v2\x17.dutctl.v1.ConsoleCloseH\x00R\fconsoleCloseB\x05\n" +
 	"\x03msg\"O\n" +
 	"\aCommand\x12\x16\n" +
 	"\x06device\x18\x01 \x01(\tR\x06device\x12\x18\n" +
 	"\acommand\x18\x02 \x01(\tR\acommand\x12\x12\n" +
 	"\x04args\x18\x03 \x03(\tR\x04args\"\x1b\n" +
 	"\x05Print\x12\x12\n" +
-	"\x04text\x18\x01 \x01(\fR\x04text\"]\n" +
-	"\aConsole\x12\x16\n" +
-	"\x05stdin\x18\x01 \x01(\fH\x00R\x05stdin\x12\x18\n" +
-	"\x06stdout\x18\x02 \x01(\fH\x00R\x06stdout\x12\x18\n" +
-	"\x06stderr\x18\x03 \x01(\fH\x00R\x06stderrB\x06\n" +
-	"\x04data\"!\n" +
+	"\x04text\x18\x01 \x01(\fR\x04text\"I\n" +
+	"\vConsoleOpen\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\rR\x02id\x12*\n" +
+	"\x04mode\x18\x02 \x01(\x0e2\x16.dutctl.v1.ConsoleModeR\x04mode\"\x0e\n" +
+	"\fConsoleClose\"2\n" +
+	"\fConsoleInput\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\rR\x02id\x12\x12\n" +
+	"\x04data\x18\x02 \x01(\fR\x04data\"K\n" +
+	"\rConsoleOutput\x12\x18\n" +
+	"\x06stdout\x18\x01 \x01(\fH\x00R\x06stdout\x12\x18\n" +
+	"\x06stderr\x18\x02 \x01(\fH\x00R\x06stderrB\x06\n" +
+	"\x04data\"V\n" +
+	"\x0eConsoleControl\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\rR\x02id\x12)\n" +
+	"\x03eof\x18\x02 \x01(\v2\x15.dutctl.v1.ConsoleEofH\x00R\x03eofB\t\n" +
+	"\acontrol\"\f\n" +
+	"\n" +
+	"ConsoleEof\"!\n" +
 	"\vFileRequest\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\"4\n" +
 	"\x04File\x12\x12\n" +
@@ -1300,7 +1672,11 @@ const file_dutctl_v1_dutctl_proto_rawDesc = "" +
 	"\x0fRegisterRequest\x12\x18\n" +
 	"\adevices\x18\x01 \x03(\tR\adevices\x12\x18\n" +
 	"\aaddress\x18\x02 \x01(\tR\aaddress\"\x12\n" +
-	"\x10RegisterResponse2\x8d\x03\n" +
+	"\x10RegisterResponse*X\n" +
+	"\vConsoleMode\x12\x1c\n" +
+	"\x18CONSOLE_MODE_UNSPECIFIED\x10\x00\x12\x15\n" +
+	"\x11CONSOLE_MODE_LINE\x10\x01\x12\x14\n" +
+	"\x10CONSOLE_MODE_RAW\x10\x022\x8d\x03\n" +
 	"\rDeviceService\x129\n" +
 	"\x04List\x12\x16.dutctl.v1.ListRequest\x1a\x17.dutctl.v1.ListResponse\"\x00\x12E\n" +
 	"\bCommands\x12\x1a.dutctl.v1.CommandsRequest\x1a\x1b.dutctl.v1.CommandsResponse\"\x00\x12B\n" +
@@ -1323,60 +1699,72 @@ func file_dutctl_v1_dutctl_proto_rawDescGZIP() []byte {
 	return file_dutctl_v1_dutctl_proto_rawDescData
 }
 
-var file_dutctl_v1_dutctl_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
+var file_dutctl_v1_dutctl_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_dutctl_v1_dutctl_proto_msgTypes = make([]protoimpl.MessageInfo, 26)
 var file_dutctl_v1_dutctl_proto_goTypes = []any{
-	(*ListRequest)(nil),      // 0: dutctl.v1.ListRequest
-	(*ListResponse)(nil),     // 1: dutctl.v1.ListResponse
-	(*DeviceInfo)(nil),       // 2: dutctl.v1.DeviceInfo
-	(*LockState)(nil),        // 3: dutctl.v1.LockState
-	(*CommandsRequest)(nil),  // 4: dutctl.v1.CommandsRequest
-	(*CommandsResponse)(nil), // 5: dutctl.v1.CommandsResponse
-	(*DetailsRequest)(nil),   // 6: dutctl.v1.DetailsRequest
-	(*DetailsResponse)(nil),  // 7: dutctl.v1.DetailsResponse
-	(*RunRequest)(nil),       // 8: dutctl.v1.RunRequest
-	(*RunResponse)(nil),      // 9: dutctl.v1.RunResponse
-	(*Command)(nil),          // 10: dutctl.v1.Command
-	(*Print)(nil),            // 11: dutctl.v1.Print
-	(*Console)(nil),          // 12: dutctl.v1.Console
-	(*FileRequest)(nil),      // 13: dutctl.v1.FileRequest
-	(*File)(nil),             // 14: dutctl.v1.File
-	(*LockRequest)(nil),      // 15: dutctl.v1.LockRequest
-	(*LockResponse)(nil),     // 16: dutctl.v1.LockResponse
-	(*UnlockRequest)(nil),    // 17: dutctl.v1.UnlockRequest
-	(*UnlockResponse)(nil),   // 18: dutctl.v1.UnlockResponse
-	(*RegisterRequest)(nil),  // 19: dutctl.v1.RegisterRequest
-	(*RegisterResponse)(nil), // 20: dutctl.v1.RegisterResponse
+	(ConsoleMode)(0),         // 0: dutctl.v1.ConsoleMode
+	(*ListRequest)(nil),      // 1: dutctl.v1.ListRequest
+	(*ListResponse)(nil),     // 2: dutctl.v1.ListResponse
+	(*DeviceInfo)(nil),       // 3: dutctl.v1.DeviceInfo
+	(*LockState)(nil),        // 4: dutctl.v1.LockState
+	(*CommandsRequest)(nil),  // 5: dutctl.v1.CommandsRequest
+	(*CommandsResponse)(nil), // 6: dutctl.v1.CommandsResponse
+	(*DetailsRequest)(nil),   // 7: dutctl.v1.DetailsRequest
+	(*DetailsResponse)(nil),  // 8: dutctl.v1.DetailsResponse
+	(*RunRequest)(nil),       // 9: dutctl.v1.RunRequest
+	(*RunResponse)(nil),      // 10: dutctl.v1.RunResponse
+	(*Command)(nil),          // 11: dutctl.v1.Command
+	(*Print)(nil),            // 12: dutctl.v1.Print
+	(*ConsoleOpen)(nil),      // 13: dutctl.v1.ConsoleOpen
+	(*ConsoleClose)(nil),     // 14: dutctl.v1.ConsoleClose
+	(*ConsoleInput)(nil),     // 15: dutctl.v1.ConsoleInput
+	(*ConsoleOutput)(nil),    // 16: dutctl.v1.ConsoleOutput
+	(*ConsoleControl)(nil),   // 17: dutctl.v1.ConsoleControl
+	(*ConsoleEof)(nil),       // 18: dutctl.v1.ConsoleEof
+	(*FileRequest)(nil),      // 19: dutctl.v1.FileRequest
+	(*File)(nil),             // 20: dutctl.v1.File
+	(*LockRequest)(nil),      // 21: dutctl.v1.LockRequest
+	(*LockResponse)(nil),     // 22: dutctl.v1.LockResponse
+	(*UnlockRequest)(nil),    // 23: dutctl.v1.UnlockRequest
+	(*UnlockResponse)(nil),   // 24: dutctl.v1.UnlockResponse
+	(*RegisterRequest)(nil),  // 25: dutctl.v1.RegisterRequest
+	(*RegisterResponse)(nil), // 26: dutctl.v1.RegisterResponse
 }
 var file_dutctl_v1_dutctl_proto_depIdxs = []int32{
-	2,  // 0: dutctl.v1.ListResponse.devices:type_name -> dutctl.v1.DeviceInfo
-	3,  // 1: dutctl.v1.DeviceInfo.lock:type_name -> dutctl.v1.LockState
-	10, // 2: dutctl.v1.RunRequest.command:type_name -> dutctl.v1.Command
-	12, // 3: dutctl.v1.RunRequest.console:type_name -> dutctl.v1.Console
-	14, // 4: dutctl.v1.RunRequest.file:type_name -> dutctl.v1.File
-	11, // 5: dutctl.v1.RunResponse.print:type_name -> dutctl.v1.Print
-	12, // 6: dutctl.v1.RunResponse.console:type_name -> dutctl.v1.Console
-	13, // 7: dutctl.v1.RunResponse.file_request:type_name -> dutctl.v1.FileRequest
-	14, // 8: dutctl.v1.RunResponse.file:type_name -> dutctl.v1.File
-	3,  // 9: dutctl.v1.LockResponse.lock:type_name -> dutctl.v1.LockState
-	0,  // 10: dutctl.v1.DeviceService.List:input_type -> dutctl.v1.ListRequest
-	4,  // 11: dutctl.v1.DeviceService.Commands:input_type -> dutctl.v1.CommandsRequest
-	6,  // 12: dutctl.v1.DeviceService.Details:input_type -> dutctl.v1.DetailsRequest
-	8,  // 13: dutctl.v1.DeviceService.Run:input_type -> dutctl.v1.RunRequest
-	15, // 14: dutctl.v1.DeviceService.Lock:input_type -> dutctl.v1.LockRequest
-	17, // 15: dutctl.v1.DeviceService.Unlock:input_type -> dutctl.v1.UnlockRequest
-	19, // 16: dutctl.v1.RelayService.Register:input_type -> dutctl.v1.RegisterRequest
-	1,  // 17: dutctl.v1.DeviceService.List:output_type -> dutctl.v1.ListResponse
-	5,  // 18: dutctl.v1.DeviceService.Commands:output_type -> dutctl.v1.CommandsResponse
-	7,  // 19: dutctl.v1.DeviceService.Details:output_type -> dutctl.v1.DetailsResponse
-	9,  // 20: dutctl.v1.DeviceService.Run:output_type -> dutctl.v1.RunResponse
-	16, // 21: dutctl.v1.DeviceService.Lock:output_type -> dutctl.v1.LockResponse
-	18, // 22: dutctl.v1.DeviceService.Unlock:output_type -> dutctl.v1.UnlockResponse
-	20, // 23: dutctl.v1.RelayService.Register:output_type -> dutctl.v1.RegisterResponse
-	17, // [17:24] is the sub-list for method output_type
-	10, // [10:17] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	3,  // 0: dutctl.v1.ListResponse.devices:type_name -> dutctl.v1.DeviceInfo
+	4,  // 1: dutctl.v1.DeviceInfo.lock:type_name -> dutctl.v1.LockState
+	11, // 2: dutctl.v1.RunRequest.command:type_name -> dutctl.v1.Command
+	15, // 3: dutctl.v1.RunRequest.console_input:type_name -> dutctl.v1.ConsoleInput
+	20, // 4: dutctl.v1.RunRequest.file:type_name -> dutctl.v1.File
+	17, // 5: dutctl.v1.RunRequest.console_control:type_name -> dutctl.v1.ConsoleControl
+	12, // 6: dutctl.v1.RunResponse.print:type_name -> dutctl.v1.Print
+	16, // 7: dutctl.v1.RunResponse.console_output:type_name -> dutctl.v1.ConsoleOutput
+	19, // 8: dutctl.v1.RunResponse.file_request:type_name -> dutctl.v1.FileRequest
+	20, // 9: dutctl.v1.RunResponse.file:type_name -> dutctl.v1.File
+	13, // 10: dutctl.v1.RunResponse.console_open:type_name -> dutctl.v1.ConsoleOpen
+	14, // 11: dutctl.v1.RunResponse.console_close:type_name -> dutctl.v1.ConsoleClose
+	0,  // 12: dutctl.v1.ConsoleOpen.mode:type_name -> dutctl.v1.ConsoleMode
+	18, // 13: dutctl.v1.ConsoleControl.eof:type_name -> dutctl.v1.ConsoleEof
+	4,  // 14: dutctl.v1.LockResponse.lock:type_name -> dutctl.v1.LockState
+	1,  // 15: dutctl.v1.DeviceService.List:input_type -> dutctl.v1.ListRequest
+	5,  // 16: dutctl.v1.DeviceService.Commands:input_type -> dutctl.v1.CommandsRequest
+	7,  // 17: dutctl.v1.DeviceService.Details:input_type -> dutctl.v1.DetailsRequest
+	9,  // 18: dutctl.v1.DeviceService.Run:input_type -> dutctl.v1.RunRequest
+	21, // 19: dutctl.v1.DeviceService.Lock:input_type -> dutctl.v1.LockRequest
+	23, // 20: dutctl.v1.DeviceService.Unlock:input_type -> dutctl.v1.UnlockRequest
+	25, // 21: dutctl.v1.RelayService.Register:input_type -> dutctl.v1.RegisterRequest
+	2,  // 22: dutctl.v1.DeviceService.List:output_type -> dutctl.v1.ListResponse
+	6,  // 23: dutctl.v1.DeviceService.Commands:output_type -> dutctl.v1.CommandsResponse
+	8,  // 24: dutctl.v1.DeviceService.Details:output_type -> dutctl.v1.DetailsResponse
+	10, // 25: dutctl.v1.DeviceService.Run:output_type -> dutctl.v1.RunResponse
+	22, // 26: dutctl.v1.DeviceService.Lock:output_type -> dutctl.v1.LockResponse
+	24, // 27: dutctl.v1.DeviceService.Unlock:output_type -> dutctl.v1.UnlockResponse
+	26, // 28: dutctl.v1.RelayService.Register:output_type -> dutctl.v1.RegisterResponse
+	22, // [22:29] is the sub-list for method output_type
+	15, // [15:22] is the sub-list for method input_type
+	15, // [15:15] is the sub-list for extension type_name
+	15, // [15:15] is the sub-list for extension extendee
+	0,  // [0:15] is the sub-list for field type_name
 }
 
 func init() { file_dutctl_v1_dutctl_proto_init() }
@@ -1386,32 +1774,38 @@ func file_dutctl_v1_dutctl_proto_init() {
 	}
 	file_dutctl_v1_dutctl_proto_msgTypes[8].OneofWrappers = []any{
 		(*RunRequest_Command)(nil),
-		(*RunRequest_Console)(nil),
+		(*RunRequest_ConsoleInput)(nil),
 		(*RunRequest_File)(nil),
+		(*RunRequest_ConsoleControl)(nil),
 	}
 	file_dutctl_v1_dutctl_proto_msgTypes[9].OneofWrappers = []any{
 		(*RunResponse_Print)(nil),
-		(*RunResponse_Console)(nil),
+		(*RunResponse_ConsoleOutput)(nil),
 		(*RunResponse_FileRequest)(nil),
 		(*RunResponse_File)(nil),
+		(*RunResponse_ConsoleOpen)(nil),
+		(*RunResponse_ConsoleClose)(nil),
 	}
-	file_dutctl_v1_dutctl_proto_msgTypes[12].OneofWrappers = []any{
-		(*Console_Stdin)(nil),
-		(*Console_Stdout)(nil),
-		(*Console_Stderr)(nil),
+	file_dutctl_v1_dutctl_proto_msgTypes[15].OneofWrappers = []any{
+		(*ConsoleOutput_Stdout)(nil),
+		(*ConsoleOutput_Stderr)(nil),
+	}
+	file_dutctl_v1_dutctl_proto_msgTypes[16].OneofWrappers = []any{
+		(*ConsoleControl_Eof)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_dutctl_v1_dutctl_proto_rawDesc), len(file_dutctl_v1_dutctl_proto_rawDesc)),
-			NumEnums:      0,
-			NumMessages:   21,
+			NumEnums:      1,
+			NumMessages:   26,
 			NumExtensions: 0,
 			NumServices:   2,
 		},
 		GoTypes:           file_dutctl_v1_dutctl_proto_goTypes,
 		DependencyIndexes: file_dutctl_v1_dutctl_proto_depIdxs,
+		EnumInfos:         file_dutctl_v1_dutctl_proto_enumTypes,
 		MessageInfos:      file_dutctl_v1_dutctl_proto_msgTypes,
 	}.Build()
 	File_dutctl_v1_dutctl_proto = out.File
