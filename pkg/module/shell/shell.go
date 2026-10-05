@@ -112,7 +112,7 @@ func (s *Shell) Run(ctx context.Context, sesh module.Session, args ...string) er
 	out, err := shell.CombinedOutput()
 
 	if !s.Quiet {
-		// TODO: consider using sesh.Console() once raw mode is implemented
+		// TODO: consider a console (sesh.OpenConsole) for an interactive shell
 		sesh.Print(string(out))
 	}
 

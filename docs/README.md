@@ -107,7 +107,8 @@ happen multiple times and can be mixed with Print messages, consoles and file up
 **File Upload to the agent**: After the initial RunRequest with a Command message by the client, for commands needing
 any artifacts, these can be uploaded to the agent, with a RunResponse being a FileRequest message and the client
 answering with a RunRequest being a File message. Uploads can happen multiple times and can be mixed with Print
-messages, consoles and file downloads.
+messages, consoles and file downloads. Note that while a console is open, a file transfer waits behind the module's
+reading of the console input.
 
 > [!IMPORTANT]
 > The console protocol described here replaced the earlier single Console message. While DUT Control is in alpha, no
