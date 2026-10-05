@@ -885,7 +885,7 @@ func TestRunModules(t *testing.T) {
 
 		mods := []dut.Module{recorder(&firstArgs, &firstRuns, nil), recorder(&secondArgs, &secondRuns, nil)}
 
-		err := runModules(context.Background(), nil, mods, [][]string{{"x", "y"}, {"conf1"}})
+		err := runModules(context.Background(), nil, func() {}, mods, [][]string{{"x", "y"}, {"conf1"}})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -907,7 +907,7 @@ func TestRunModules(t *testing.T) {
 		failure := errors.New("helper failed")
 		mods := []dut.Module{recorder(&firstArgs, &firstRuns, failure), recorder(&secondArgs, &secondRuns, nil)}
 
-		err := runModules(context.Background(), nil, mods, [][]string{nil, nil})
+		err := runModules(context.Background(), nil, func() {}, mods, [][]string{nil, nil})
 		if !errors.Is(err, failure) {
 			t.Fatalf("err = %v, want %v", err, failure)
 		}
@@ -925,7 +925,7 @@ func TestRunModules(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 
-		err := runModules(ctx, nil, []dut.Module{recorder(&args, &runs, nil)}, [][]string{nil})
+		err := runModules(ctx, nil, func() {}, []dut.Module{recorder(&args, &runs, nil)}, [][]string{nil})
 		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("err = %v, want context.Canceled", err)
 		}
@@ -951,7 +951,7 @@ func TestRunModules(t *testing.T) {
 		})}
 		mod.Config.Name = "stopped"
 
-		err := runModules(ctx, nil, []dut.Module{mod}, [][]string{nil})
+		err := runModules(ctx, nil, func() {}, []dut.Module{mod}, [][]string{nil})
 		if err == nil {
 			t.Fatal("runModules returned nil for a module that returned an error")
 		}
@@ -1283,4 +1283,86 @@ func TestWarnUntilReturned(t *testing.T) {
 			t.Errorf("logged after the module returned: %q", strings.TrimPrefix(later, out))
 		}
 	})
+}
+
+// responseKinds names the responses the client received so far, in order.
+func (s *clientStream) responseKinds() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	kinds := make([]string, 0, len(s.sent))
+
+	for _, res := range s.sent {
+		switch msg := res.GetMsg().(type) {
+		case *pb.RunResponse_ConsoleOpen:
+			kinds = append(kinds, fmt.Sprintf("open:%d:%v", msg.ConsoleOpen.GetId(), msg.ConsoleOpen.GetMode()))
+		case *pb.RunResponse_ConsoleClose:
+			kinds = append(kinds, "close")
+		case *pb.RunResponse_ConsoleOutput:
+			kinds = append(kinds, "stdout:"+string(msg.ConsoleOutput.GetStdout()))
+		case *pb.RunResponse_Print:
+			kinds = append(kinds, "print:"+string(msg.Print.GetText()))
+		default:
+			kinds = append(kinds, "other")
+		}
+	}
+
+	return kinds
+}
+
+// A module's console is framed for the client: the open event, with the mode
+// the module asked for, precedes its output, and the close event follows once
+// the module returned, on a panic too. The next module starts without a
+// console and gets its own id.
+func TestRunFramesConsoles(t *testing.T) {
+	tests := []struct {
+		name string
+		mods []funcModule
+		want []string
+	}{
+		{
+			name: "console closed when the module returns",
+			mods: []funcModule{
+				func(_ context.Context, s module.Session, _ ...string) error {
+					con := s.OpenConsole(module.ConsoleOptions{Mode: module.ConsoleRaw})
+					_, err := con.Stdout.Write([]byte("hi"))
+
+					return err
+				},
+				func(_ context.Context, s module.Session, _ ...string) error {
+					con := s.OpenConsole(module.ConsoleOptions{})
+					_, err := con.Stdout.Write([]byte("next"))
+
+					return err
+				},
+			},
+			want: []string{
+				"open:1:CONSOLE_MODE_RAW", "stdout:hi", "close",
+				"open:2:CONSOLE_MODE_LINE", "stdout:next", "close",
+			},
+		},
+		{
+			name: "console closed when the module panics",
+			mods: []funcModule{
+				func(_ context.Context, s module.Session, _ ...string) error {
+					s.OpenConsole(module.ConsoleOptions{Mode: module.ConsoleRaw})
+					panic("module bug")
+				},
+			},
+			want: []string{"open:1:CONSOLE_MODE_RAW", "close"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := newRunService(tt.mods...)
+			stream := newClientStream(t, commandReq(testDevice, testCommand))
+
+			_ = svc.run(context.Background(), stream, "alice")
+
+			if got := stream.responseKinds(); fmt.Sprint(got) != fmt.Sprint(tt.want) {
+				t.Errorf("client received %q, want %q", got, tt.want)
+			}
+		})
+	}
 }
