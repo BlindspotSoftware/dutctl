@@ -86,6 +86,10 @@ func TestParseArgsErrors(t *testing.T) {
 		{"bad escape", []string{"--", "send", `x\q`}},
 		{"trailing backslash", []string{"--", "send", `x\`}},
 		{"short hex escape", []string{"--", "send", `x\x4`}},
+		{"interactive with steps", []string{"-i", "expect", "x"}},
+		{"interactive with eol", []string{"-i", "-eol", "lf"}},
+		{"interactive with default eol given", []string{"-i", "-eol", "cr"}},
+		{"interactive with keep-escapes", []string{"-i", "-keep-escapes"}},
 	}
 
 	for _, tt := range tests {
@@ -94,6 +98,26 @@ func TestParseArgsErrors(t *testing.T) {
 				t.Errorf("parseArgs(%q) = nil error, want error", tt.args)
 			}
 		})
+	}
+}
+
+func TestParseArgsInteractive(t *testing.T) {
+	cfg, err := parseArgs([]string{"-t", "5s", "-i"})
+	if err != nil {
+		t.Fatalf("parseArgs(-t 5s -i): %v", err)
+	}
+
+	if !cfg.interactive || len(cfg.steps) != 0 || cfg.timeout != 5*time.Second {
+		t.Errorf("got %+v, want interactive with no steps and a 5s timeout", cfg)
+	}
+
+	cfg, err = parseArgs(nil)
+	if err != nil {
+		t.Fatalf("parseArgs(nil): %v", err)
+	}
+
+	if cfg.interactive {
+		t.Error("interactive = true by default, want false")
 	}
 }
 

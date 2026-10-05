@@ -4,17 +4,20 @@ The serial package provides a single module:
 
 This module connects to the DUT's serial port from the _dutagent_, forwards the
 serial output it reads to the _dutctl_ client, and (optionally) drives a
-scripted `send`/`expect` sequence against the port.
+scripted `send`/`expect` sequence against the port, or bridges the port to your
+terminal as an interactive console.
 
-All input is supplied up front as arguments, which makes the module suitable for
-scripts and automated callers. With **no step arguments** it runs in **monitor**
-mode: it streams the serial output until the session is cancelled (or `-t`
-elapses). It does not use an interactive console (`session.Console`) yet.
+In monitor and scripted mode all input is supplied up front as arguments, which
+makes the module suitable for scripts and automated callers. With **no step
+arguments** it runs in **monitor** mode: it streams the serial output until the
+session is cancelled (or `-t` elapses). With `-i` it runs in **interactive**
+mode: see [Interactive mode](#interactive-mode).
 
 ```
 ARGUMENTS:
 	[-t <duration>] [-eol cr|lf|crlf|none] [-keep-escapes]                 (monitor: stream output)
 	[-t <duration>] [-eol cr|lf|crlf|none] [-keep-escapes] [--] <step>...  (run a step sequence)
+	[-t <duration>] -i                                                     (interactive console)
 
 	step := expect <regex> | send <data> | send-raw <data>
 ```
@@ -51,6 +54,37 @@ terminal, for example, is rejected until the monitor ends. To power-cycle the
 device and follow its output, configure one command whose modules do both in
 turn, such as a power cycle followed by `serial` with `expect` steps.
 
+## Interactive mode
+
+Invoking `serial -i` connects your terminal to the DUT's serial port, the way a
+terminal program such as picocom or screen does. The bytes pass exactly as they
+are on the wire in both directions, and nothing is filtered or matched:
+
+- What the DUT sends reaches your terminal unchanged, escape sequences included,
+  and your terminal interprets them. Screen-oriented programs such as `vi` or
+  `top` work.
+- What you type reaches the DUT unchanged. The client puts your terminal into
+  raw mode, so Enter sends CR, which is what a serial console expects, and
+  Ctrl-C reaches the DUT instead of interrupting the client.
+- Ctrl-A is the client's escape key: **Ctrl-A x** ends the session, **Ctrl-A e**
+  toggles a local echo for DUTs that do not echo what you type, and Ctrl-A
+  pressed twice sends one Ctrl-A to the DUT.
+- The `--- Connected ... ---` and `--- Connection closed ---` markers go to the
+  client's stderr, so `2>/dev/null` hides them and `> capture.bin` holds the
+  DUT's bytes and nothing else.
+- Input from a pipe is forwarded as it arrives, with no raw mode anywhere.
+  When it ends, the session keeps showing the DUT's output for a moment so the
+  reply to the last input is visible, then ends by itself:
+  `printf 'ls\r' | dutctl dev serial -i`.
+- `-t` bounds the whole run; reaching it is a success, as in monitor mode.
+
+`-i` takes no steps, and no `-eol` or `-keep-escapes`: those shape what a
+scripted `send` appends and what the output filter strips, while the bridge
+passes bytes verbatim. Giving them with `-i` is a usage error.
+
+Like the monitor, an interactive session keeps the device busy for every other
+command until it ends.
+
 ## Flags
 
 | Flag | Description |
@@ -58,6 +92,7 @@ turn, such as a power cycle followed by `serial` with `expect` steps.
 | `-t <duration>` | Global timeout for the whole run (e.g. `30s`, `3m`). `0` (default) means no timeout. |
 | `-eol cr\|lf\|crlf\|none` | Line ending appended by `send`. Default `cr` (`\r`), which is what serial consoles expect on Enter. |
 | `-keep-escapes` | Keep terminal escape sequences in the output instead of stripping them (e.g. for binary data or exact-byte capture). |
+| `-i` | Interactive console: bridge the port to your terminal. Takes no steps, and no `-eol` or `-keep-escapes`. |
 
 The `--` separator before the steps is optional; it is only needed if a step
 value would otherwise look like a flag.
@@ -88,6 +123,9 @@ described at https://golang.org/s/re2syntax.
 ```
 # Monitor the console (stream until cancelled).
 serial
+
+# Interactive console (end it with Ctrl-A x).
+serial -i
 
 # Wait for a boot marker, then succeed.
 serial -- expect 'Welcome to'
