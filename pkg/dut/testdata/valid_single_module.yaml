@@ -4,4 +4,4 @@ device1:
     status:
       desc: "Single module, no passthrough"
       uses:
-        - module: dummy-repeat
+        - module: dummy-console

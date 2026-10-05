@@ -81,7 +81,7 @@ Play around with the DUT Client in `T2`
 ./dutctl -s localhost:1025 list
 
 # Run a interactive command on a remote device via the DUT server
-./dutctl device2 repeat
+./dutctl device2 console
 ```
 
 The complete functionality of the client is available via the DUT Server, see `./dutctl -h`

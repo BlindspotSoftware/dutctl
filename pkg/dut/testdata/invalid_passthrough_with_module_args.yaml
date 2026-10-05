@@ -4,8 +4,8 @@ device1:
     status:
       desc: "explicit passthrough with args plus helper"
       uses:
-        - module: dummy-repeat
+        - module: dummy-console
           passthrough: true
           args:
             - "foo"
-        - module: dummy-repeat
+        - module: dummy-console

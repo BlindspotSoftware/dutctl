@@ -15,10 +15,10 @@ devices:
         uses:
           - module: dummy-status
             passthrough: true
-      repeat:
-        desc: Interactively repeat user input via the dummy-repeat module
+      console:
+        desc: Echo user input through a console via the dummy-console module
         uses:
-          - module: dummy-repeat
+          - module: dummy-console
             passthrough: true
       file-transfer:
         desc: Transfer a file, process it, and send it back via the dummy-ft module
