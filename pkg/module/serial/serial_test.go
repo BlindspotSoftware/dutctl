@@ -124,6 +124,37 @@ func TestSerialRunBadArgs(t *testing.T) {
 	}
 }
 
+func TestSerialRunInteractiveRejectsScriptArgs(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{"steps", []string{"-i", "expect", "x"}},
+		{"eol", []string{"-i", "-eol", "lf"}},
+		{"keep-escapes", []string{"-i", "-keep-escapes"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// A usage error is found before the port is opened or a console
+			// is requested, so the mock session needs no console streams.
+			s := &Serial{
+				Port: "/dev/fake",
+				Baud: 115200,
+				open: func(_ string, _ int) (port, error) {
+					t.Error("port opened despite a usage error")
+
+					return &fakePort{}, nil
+				},
+			}
+
+			if err := s.Run(context.Background(), &mock.Session{}, tt.args...); err == nil {
+				t.Errorf("Run(%q) = nil error, want usage error", tt.args)
+			}
+		})
+	}
+}
+
 func TestSerialInit(t *testing.T) {
 	t.Run("missing port", func(t *testing.T) {
 		s := &Serial{}
