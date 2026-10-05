@@ -21,7 +21,7 @@ devices:
             passthrough: true
             with:
               port: "/home/oscar/ttyS2"
-              baudrate: 115200
+              baud: 115200
       flash:
         desc: "Host SPI flash chip"
         uses:
