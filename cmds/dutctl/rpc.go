@@ -301,24 +301,25 @@ func (app *application) runRPC(ctx context.Context, device, command string, cmdA
 					Data:     string(msg.Print.GetText()),
 					Metadata: metadata,
 				})
-			case *pb.RunResponse_Console:
-				switch consoleData := msg.Console.Data.(type) {
-				case *pb.Console_Stdout:
+			case *pb.RunResponse_ConsoleOutput:
+				switch consoleData := msg.ConsoleOutput.Data.(type) {
+				case *pb.ConsoleOutput_Stdout:
 					app.formatter.WriteContent(output.Content{
 						Type:     output.TypeModuleOutput,
 						Data:     string(consoleData.Stdout),
 						Metadata: metadata,
 					})
-				case *pb.Console_Stderr:
+				case *pb.ConsoleOutput_Stderr:
 					app.formatter.WriteContent(output.Content{
 						Type:     output.TypeModuleOutput,
 						Data:     string(consoleData.Stderr),
 						IsError:  true,
 						Metadata: metadata,
 					})
-				case *pb.Console_Stdin:
-					slog.Warn("unexpected console stdin from agent", "data", string(consoleData.Stdin))
 				}
+			case *pb.RunResponse_ConsoleOpen, *pb.RunResponse_ConsoleClose:
+				// The console framing is not acted on yet: input is forwarded
+				// from the start, and output is shown as it arrives.
 			case *pb.RunResponse_FileRequest:
 				path := msg.FileRequest.GetPath()
 				slog.Debug("file requested by agent", "path", path)
@@ -410,12 +411,8 @@ func (app *application) runRPC(ctx context.Context, device, command string, cmdA
 			}
 
 			err = stream.Send(&pb.RunRequest{
-				Msg: &pb.RunRequest_Console{
-					Console: &pb.Console{
-						Data: &pb.Console_Stdin{
-							Stdin: []byte(text),
-						},
-					},
+				Msg: &pb.RunRequest_ConsoleInput{
+					ConsoleInput: &pb.ConsoleInput{Data: []byte(text)},
 				},
 			})
 			if err != nil {

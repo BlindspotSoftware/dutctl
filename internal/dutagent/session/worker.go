@@ -44,7 +44,7 @@ func toClientWorker(ctx context.Context, stream Stream, s *backend) error {
 			}
 		case bytes := <-s.stdoutCh:
 			res := &pb.RunResponse{
-				Msg: &pb.RunResponse_Console{Console: &pb.Console{Data: &pb.Console_Stdout{Stdout: bytes}}},
+				Msg: &pb.RunResponse_ConsoleOutput{ConsoleOutput: &pb.ConsoleOutput{Data: &pb.ConsoleOutput_Stdout{Stdout: bytes}}},
 			}
 
 			err := stream.Send(res)
@@ -53,7 +53,7 @@ func toClientWorker(ctx context.Context, stream Stream, s *backend) error {
 			}
 		case bytes := <-s.stderrCh:
 			res := &pb.RunResponse{
-				Msg: &pb.RunResponse_Console{Console: &pb.Console{Data: &pb.Console_Stderr{Stderr: bytes}}},
+				Msg: &pb.RunResponse_ConsoleOutput{ConsoleOutput: &pb.ConsoleOutput{Data: &pb.ConsoleOutput_Stderr{Stderr: bytes}}},
 			}
 
 			err := stream.Send(res)
@@ -189,28 +189,25 @@ func fromClientWorker(ctx context.Context, stream Stream, s *backend) error {
 
 			reqMsg := r.req.GetMsg()
 			switch msg := reqMsg.(type) {
-			case *pb.RunRequest_Console:
-				msgConsoleData := msg.Console.GetData()
-				switch consoleMsg := msgConsoleData.(type) {
-				case *pb.Console_Stdin:
-					stdin := consoleMsg.Stdin
-					if stdin == nil {
-						l.Warn("ignoring nil stdin message")
+			case *pb.RunRequest_ConsoleInput:
+				stdin := msg.ConsoleInput.GetData()
+				if stdin == nil {
+					l.Warn("ignoring console input without data")
 
-						continue
-					}
-
-					l.Debug("received stdin from client", "bytes", len(stdin))
-
-					select {
-					case <-ctx.Done():
-						return nil
-					case s.stdinCh <- stdin:
-					}
-
-				default:
-					l.Warn("unexpected console message", "type", fmt.Sprintf("%T", consoleMsg))
+					continue
 				}
+
+				l.Debug("received stdin from client", "bytes", len(stdin))
+
+				select {
+				case <-ctx.Done():
+					return nil
+				case s.stdinCh <- stdin:
+				}
+			case *pb.RunRequest_ConsoleControl:
+				// Console events are not acted on yet; a console's input ends with
+				// the session.
+				l.Debug("ignoring console control", "type", fmt.Sprintf("%T", msg.ConsoleControl.GetControl()))
 			case *pb.RunRequest_File:
 				fileMsg := msg.File
 				if fileMsg == nil {
