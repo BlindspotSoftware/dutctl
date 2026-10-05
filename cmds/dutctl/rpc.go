@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"connectrpc.com/connect"
@@ -237,6 +238,11 @@ func (app *application) runRPC(ctx context.Context, device, command string, cmdA
 
 	errChan := make(chan error, numWorkers)
 
+	// consoleID is the id of the console the agent opened last; the input the
+	// send routine forwards is marked with it, so the agent delivers it to
+	// that console and to no later one.
+	var consoleID atomic.Uint32
+
 	stream := app.rpcClient.Run(runCtx)
 	stream.RequestHeader().Set(headers.User, app.user)
 
@@ -317,9 +323,11 @@ func (app *application) runRPC(ctx context.Context, device, command string, cmdA
 						Metadata: metadata,
 					})
 				}
-			case *pb.RunResponse_ConsoleOpen, *pb.RunResponse_ConsoleClose:
-				// The console framing is not acted on yet: input is forwarded
-				// from the start, and output is shown as it arrives.
+			case *pb.RunResponse_ConsoleOpen:
+				consoleID.Store(msg.ConsoleOpen.GetId())
+			case *pb.RunResponse_ConsoleClose:
+				// The console framing is not acted on beyond the id yet: input
+				// is forwarded from the start, and output is shown as it arrives.
 			case *pb.RunResponse_FileRequest:
 				path := msg.FileRequest.GetPath()
 				slog.Debug("file requested by agent", "path", path)
@@ -412,7 +420,7 @@ func (app *application) runRPC(ctx context.Context, device, command string, cmdA
 
 			err = stream.Send(&pb.RunRequest{
 				Msg: &pb.RunRequest_ConsoleInput{
-					ConsoleInput: &pb.ConsoleInput{Data: []byte(text)},
+					ConsoleInput: &pb.ConsoleInput{Id: consoleID.Load(), Data: []byte(text)},
 				},
 			})
 			if err != nil {

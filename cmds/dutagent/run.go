@@ -173,7 +173,7 @@ func runInSession(ctx context.Context, stream session.Stream, mods []dut.Module,
 	// idempotent, so on the normal path it is a no-op after the one below.
 	defer func() { _ = broker.Stop() }()
 
-	modErr := runModules(sessCtx, sess, mods, moduleArgs)
+	modErr := runModules(sessCtx, sess, broker.CloseConsole, mods, moduleArgs)
 	brokerErr := broker.Stop()
 
 	switch {
@@ -192,8 +192,11 @@ func runInSession(ctx context.Context, stream session.Stream, mods []dut.Module,
 }
 
 // runModules runs mods in order with their resolved args, stopping at the first
-// failure or once ctx is done.
-func runModules(ctx context.Context, sess module.Session, mods []dut.Module, moduleArgs [][]string) error {
+// failure or once ctx is done. closeConsole ends the console a module has open;
+// it is called once the module returned, however it returned.
+func runModules(
+	ctx context.Context, sess module.Session, closeConsole func(), mods []dut.Module, moduleArgs [][]string,
+) error {
 	l := log.FromContext(ctx)
 	cnt := len(mods)
 
@@ -214,7 +217,13 @@ func runModules(ctx context.Context, sess module.Session, mods []dut.Module, mod
 		modCtx := log.With(log.WithScope(ctx, "module"), "module", mod.Config.Name, "module-index", idx+1)
 
 		returned := warnUntilReturned(modCtx, mlog, stopWarnInterval)
-		err := catchPanic(func() error { return mod.Run(modCtx, sess, moduleArgs[idx]...) })
+		err := catchPanic(func() error {
+			// The console ends with the module's Run, on a panic too: the
+			// defer runs inside the frame catchPanic recovers.
+			defer closeConsole()
+
+			return mod.Run(modCtx, sess, moduleArgs[idx]...)
+		})
 
 		returned()
 

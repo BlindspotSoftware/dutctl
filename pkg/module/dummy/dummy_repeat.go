@@ -7,6 +7,8 @@ package dummy
 import (
 	"bufio"
 	"context"
+	"errors"
+	"io"
 	"strings"
 
 	"github.com/BlindspotSoftware/dutctl/pkg/module"
@@ -39,18 +41,23 @@ func (d *Repeat) Deinit(_ context.Context) error {
 }
 
 func (d *Repeat) Run(_ context.Context, s module.Session, _ ...string) error {
-	cin, cout, cerr := s.Console()
+	con := s.OpenConsole(module.ConsoleOptions{})
+	cout, cerr := con.Stdout, con.Stderr
 
 	_, err := cout.Write([]byte("Hello from dummy repeat module!\nEnter one word per line. (Two words will terminate)\n"))
 	if err != nil {
 		return err
 	}
 
-	r := bufio.NewReader(cin)
+	r := bufio.NewReader(con.Stdin)
 
 	for {
 		line, err := r.ReadString('\n')
 		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil // the user's input ended
+			}
+
 			return err
 		}
 

@@ -92,14 +92,14 @@ type Module interface {
 // Session provides an environment / a context for a module.
 // Via the Session interface, modules can interact with the client during execution.
 //
-// The Print family and Console are fire-and-forget: they return no error, and a
+// The Print family and OpenConsole are fire-and-forget: they return no error, and a
 // failure to deliver output to the client (for example a broken stream) is handled
 // out-of-band by the session, which aborts the run rather than reporting the failure
 // back to the module. RequestFile and SendFile do return an error; it is reported
 // opaquely (no sentinel to match) and typically means the client declined the file
 // or the transfer stream failed.
 //
-// Console, Print, RequestFile and SendFile must be called only from the module's
+// OpenConsole, Print, RequestFile and SendFile must be called only from the module's
 // Run goroutine.
 type Session interface {
 	// Print sends a message to the client. Implementations should wrap [fmt.Sprint].
@@ -111,15 +111,76 @@ type Session interface {
 	// Println sends a message with appended newline to the client. Implementations should wrap [fmt.Sprintln].
 	// The message is displayed in the console or GUI of the client.
 	Println(a ...any)
-	// Console returns the stdin, stdout and stderr streams for the module.
-	// It thus indicates to the client that the module may want to interact with the user
-	// via standard input and output streams.
-	Console() (stdin io.Reader, stdout, stderr io.Writer)
+	// OpenConsole opens the module's console and tells the client which mode
+	// it is in; the client then forwards the user's input. Like Print, it
+	// returns once the client was told, so it waits for a stalled client; once
+	// the session is torn down it returns at once with a console whose Stdin
+	// is at its end and whose writers fail.
+	//
+	// Until a console is open the session discards the user's input; it is
+	// never queued for a later console. A module that opened a console must
+	// keep reading Stdin or close it: while a console is open, input waits for
+	// the module to read it, and a file transfer waits behind it.
+	//
+	// Stdin returns io.EOF when the user's input ended (a pipe at its end,
+	// Ctrl-D in a line console), when the module closed Stdin, when the
+	// console closed, or when the session was torn down. The end of the input
+	// is the normal end, not a failure: a module that reads its console to the
+	// end returns nil. Stdout and Stderr keep working after Stdin ended.
+	//
+	// A module has one console at a time: opening another one closes the
+	// first, whose Stdin then reports io.EOF and whose writers fail. The
+	// console closes when Run returns; a module stops every goroutine that
+	// uses it before returning. Print may be used while a console is open; the
+	// client shows both in the order sent.
+	OpenConsole(opts ConsoleOptions) Console
 	// RequestFile requests a file from the client.
 	// The file is identified by its name and is made available to the module via the returned io.Reader.
 	RequestFile(name string) (io.Reader, error)
 	// SendFile sends a file to the client.
 	SendFile(name string, r io.Reader) error
+}
+
+// ConsoleMode tells the client how a module uses its console. Only the module
+// can know, and the client acts on it by configuring a terminal: a raw console
+// puts a terminal into raw mode, a line console leaves it as it is.
+type ConsoleMode int
+
+const (
+	// ConsoleLine is a console of text lines: the user's terminal keeps its
+	// line editing and local echo, Enter sends the line, and Ctrl-C still
+	// interrupts the client. Stdin delivers the bytes as the client read them,
+	// in chunks that may hold several lines or end in the middle of one, so a
+	// module assembles lines itself, with a bufio.Reader for instance; a line
+	// the user entered on a terminal ends in '\n', a pipe's last one may not.
+	// Use it for prompts and other question-and-answer interaction, and for
+	// input piped to a process.
+	ConsoleLine ConsoleMode = iota
+	// ConsoleRaw is a console of bytes: every byte the user types reaches
+	// Stdin at once and unchanged, Ctrl-C, Escape and CR included, with no
+	// local echo, and bytes written to Stdout reach the user's terminal as
+	// they are. Use it to bridge a terminal line, such as a serial port. The
+	// client grants it only on a terminal; piped input arrives as it is read,
+	// in chunks, with no raw mode anywhere.
+	ConsoleRaw
+)
+
+// ConsoleOptions configures a console. The zero value opens a line console.
+type ConsoleOptions struct {
+	Mode ConsoleMode
+}
+
+// Console is the module's end of an open console. Stdout and Stderr are safe
+// for concurrent use; a write blocks until the client took the bytes and fails
+// with io.ErrClosedPipe once the console closed or the session was torn down,
+// also after Stdin ended. Stdin has one reader at a time, which may run on a
+// goroutine other than Run's. Close may be called from any goroutine, also
+// while a Read blocks: it ends the input, the Read returns io.EOF, and the
+// console stays open for output. Close is idempotent and never fails.
+type Console struct {
+	Stdin  io.ReadCloser
+	Stdout io.Writer
+	Stderr io.Writer
 }
 
 // Record holds the information required to register a module.

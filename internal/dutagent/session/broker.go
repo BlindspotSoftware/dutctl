@@ -45,12 +45,19 @@ type Broker struct {
 
 func (b *Broker) init() {
 	b.session.printCh = make(chan string)
-	b.session.stdinCh = make(chan []byte)
-	b.session.stdoutCh = make(chan []byte)
-	b.session.stderrCh = make(chan []byte)
+	b.session.consoleCh = make(chan consoleEvent)
 	b.session.fileReqCh = make(chan string)
 	b.session.fileCh = make(chan chan []byte)
 	b.session.uploadCh = make(chan chan []byte)
+}
+
+// CloseConsole ends the console a module has open, if any, and tells the
+// client. The module runner calls it once a module returned, from the
+// goroutine that ran the module, so a console never outlives its module and
+// the next module starts without one. It is idempotent, and it returns
+// without waiting after the broker was stopped.
+func (b *Broker) CloseConsole() {
+	b.session.closeConsole()
 }
 
 // Start launches the broker's workers, which carry the returned module
