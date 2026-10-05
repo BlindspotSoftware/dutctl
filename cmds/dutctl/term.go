@@ -5,26 +5,30 @@
 package main
 
 import (
-	"io"
 	"os"
+
+	"golang.org/x/term"
 )
 
-// isTerminal reports whether w is connected to an interactive terminal (TTY).
-//
-// Caveat of the stdlib: character devices such as /dev/null also
-// report true. That is harmless here (nothing reads color written to
-// /dev/null), while pipes and regular files — the cases that matter — correctly
-// report false.
-func isTerminal(w io.Writer) bool {
-	file, ok := w.(*os.File)
+// ttyFd returns the file descriptor behind stream if stream is a terminal: an
+// *os.File that termios accepts, the POSIX terminal interface (tcgetattr and
+// tcsetattr) behind raw mode, which x/term wraps. That excludes pipes, regular
+// files and other character devices such as /dev/null.
+func ttyFd(stream any) (int, bool) {
+	file, ok := stream.(*os.File)
 	if !ok {
-		return false
+		return 0, false
 	}
 
-	info, err := file.Stat()
-	if err != nil {
-		return false
-	}
+	fd := int(file.Fd())
 
-	return info.Mode()&os.ModeCharDevice != 0
+	return fd, term.IsTerminal(fd)
+}
+
+// isTTY reports whether stream is a terminal, by the probe of ttyFd. It gates
+// colour as well as what the console writes to the terminal while raw.
+func isTTY(stream any) bool {
+	_, ok := ttyFd(stream)
+
+	return ok
 }
