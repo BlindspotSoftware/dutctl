@@ -158,9 +158,8 @@ func newTestApp(t *testing.T, fake *fakeDeviceServiceClient, args ...string) *ap
 	t.Helper()
 
 	return &application{
-		stdin:     io.NopCloser(nil),
-		stdout:    io.Discard,
 		stderr:    io.Discard,
+		console:   newConsole(strings.NewReader(""), io.Discard, io.Discard, true),
 		exitFunc:  func(int) {},
 		args:      args,
 		rpcClient: fake,
