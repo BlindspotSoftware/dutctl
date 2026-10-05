@@ -11,4 +11,4 @@ device2:
     repeat:
       desc: "Repeat"
       uses:
-        - module: dummy-repeat
+        - module: dummy-console

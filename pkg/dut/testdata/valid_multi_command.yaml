@@ -8,4 +8,4 @@ device1:
     repeat:
       desc: "Repeat input"
       uses:
-        - module: dummy-repeat
+        - module: dummy-console

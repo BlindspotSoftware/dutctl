@@ -58,13 +58,14 @@ stages:
           timeout: 10s
 
       - cmd: shell
-        name: Test repeat
+        name: Test console in line mode
         transport:
           proto: local
         parameters:
-          command: "echo -e 'hello\nhello world\n' | [[input.DUTCTL]] -s [[attributes.DutagentEndpoint]] [[attributes.DeviceName]] dummy-repeat"
+          command: "printf 'hello\nquit\n' | [[input.DUTCTL]] -s [[attributes.DutagentEndpoint]] [[attributes.DeviceName]] dummy-console line"
           expect:
-            - regex: "Hello from dummy repeat module!\nEnter one word per line."
+            - regex: "Hello from dummy-console \\(line mode\\)"
+            - regex: "> hello"
         options:
           timeout: 10s
 

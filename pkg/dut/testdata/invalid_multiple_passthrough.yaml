@@ -4,7 +4,7 @@ device1:
     status:
       desc: "two passthrough modules"
       uses:
-        - module: dummy-repeat
+        - module: dummy-console
           passthrough: true
-        - module: dummy-repeat
+        - module: dummy-console
           passthrough: true
