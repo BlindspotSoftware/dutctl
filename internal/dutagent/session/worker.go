@@ -244,7 +244,7 @@ func fromClientWorker(ctx context.Context, stream Stream, s *backend) error {
 				// wg.Wait, the broker) forever. The buffered content send and
 				// close below never block once the rendezvous succeeds.
 				select {
-				case s.fileCh <- file:
+				case s.uploadCh <- file:
 				case <-ctx.Done():
 					return nil
 				}

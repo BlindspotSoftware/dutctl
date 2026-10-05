@@ -27,7 +27,15 @@ type backend struct {
 	stdoutCh  chan []byte
 	stderrCh  chan []byte
 	fileReqCh chan string
-	fileCh    chan chan []byte // a single file is represented by a channel of bytes
+	// A file is represented by a channel of bytes. fileCh carries a file the
+	// module sends to the client (SendFile to toClientWorker) and uploadCh one
+	// the client sends to the module (fromClientWorker to RequestFile). The two
+	// directions need channels of their own: on one shared channel, the
+	// downstream worker, which always waits for files to send, could take an
+	// upload meant for the module and echo it back to the client, while the
+	// module's RequestFile waited for it until the session ended.
+	fileCh   chan chan []byte
+	uploadCh chan chan []byte
 
 	// mu guards currentFile, which is read and written from the module goroutine
 	// (SendFile) and from both broker workers, with no channel handing it between
@@ -165,7 +173,7 @@ func (s *backend) RequestFile(name string) (io.Reader, error) {
 	var file chan []byte
 
 	select {
-	case file = <-s.fileCh:
+	case file = <-s.uploadCh:
 	case <-s.done:
 		return nil, fmt.Errorf("request file %q: %w", name, errSessionClosed)
 	}
