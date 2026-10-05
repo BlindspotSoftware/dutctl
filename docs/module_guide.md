@@ -80,7 +80,8 @@ the full version):
   end needs it.
 
 The [project's dummy modules](../pkg/module/dummy) contain the smallest example in both modes, the `dummy-console`
-module with a raw, a hex and a line demo.
+module with a raw, a hex and a line demo. The serial module's `-i` mode is the real bridge of a terminal line to a
+raw console.
 
 ## Registration
 
