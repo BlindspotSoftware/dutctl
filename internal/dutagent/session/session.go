@@ -22,12 +22,19 @@ var errSessionClosed = errors.New("session closed")
 
 // backend implements the module.Session interface.
 type backend struct {
-	printCh   chan string
-	stdinCh   chan []byte
-	stdoutCh  chan []byte
-	stderrCh  chan []byte
-	fileReqCh chan string
-	fileCh    chan chan []byte // a single file is represented by a channel of bytes
+	printCh  chan string
+	stdinCh  chan []byte
+	stdoutCh chan []byte
+	stderrCh chan []byte
+
+	// The file channels. fileReqCh carries the name of a file the module
+	// requests from the client. A file itself is a channel of bytes, fed and
+	// closed by its sender: fileUpCh carries one the client uploads, from
+	// fromClientWorker to RequestFile, and fileDownCh one the module sends
+	// down to the client, from SendFile to toClientWorker.
+	fileReqCh  chan string
+	fileUpCh   chan chan []byte
+	fileDownCh chan chan []byte
 
 	// mu guards currentFile, which is read and written from the module goroutine
 	// (SendFile) and from both broker workers, with no channel handing it between
@@ -165,7 +172,7 @@ func (s *backend) RequestFile(name string) (io.Reader, error) {
 	var file chan []byte
 
 	select {
-	case file = <-s.fileCh:
+	case file = <-s.fileUpCh:
 	case <-s.done:
 		return nil, fmt.Errorf("request file %q: %w", name, errSessionClosed)
 	}
@@ -206,7 +213,7 @@ func (s *backend) SendFile(name string, r io.Reader) error {
 	// buffered content send and close below never block once the rendezvous
 	// succeeds.
 	select {
-	case s.fileCh <- file:
+	case s.fileDownCh <- file:
 	case <-s.done:
 		return fmt.Errorf("send file %q: %w", name, errSessionClosed)
 	}

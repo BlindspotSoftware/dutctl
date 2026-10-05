@@ -49,7 +49,8 @@ func (b *Broker) init() {
 	b.session.stdoutCh = make(chan []byte)
 	b.session.stderrCh = make(chan []byte)
 	b.session.fileReqCh = make(chan string)
-	b.session.fileCh = make(chan chan []byte)
+	b.session.fileDownCh = make(chan chan []byte)
+	b.session.fileUpCh = make(chan chan []byte)
 }
 
 // Start launches the broker's workers, which carry the returned module
