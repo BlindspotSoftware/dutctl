@@ -18,10 +18,10 @@ devices:
             args:
               - foo
               - bar
-      repeat:
-        desc: Repeat input
+      console:
+        desc: Echo input through a console
         uses:
-          - module: dummy-repeat
+          - module: dummy-console
             passthrough: true
   device3:
     desc: Device 3

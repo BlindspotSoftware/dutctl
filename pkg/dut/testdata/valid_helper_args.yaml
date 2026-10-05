@@ -4,7 +4,7 @@ device1:
     status:
       desc: "Passthrough module plus helper with args"
       uses:
-        - module: dummy-repeat
+        - module: dummy-console
           passthrough: true
         - module: dummy-status
           args:

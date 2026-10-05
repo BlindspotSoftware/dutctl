@@ -4,6 +4,6 @@ device1:
     status:
       desc: "single module with args"
       uses:
-        - module: dummy-repeat
+        - module: dummy-console
           args:
             - "foo"
