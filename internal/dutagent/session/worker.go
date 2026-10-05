@@ -75,7 +75,7 @@ func toClientWorker(ctx context.Context, stream Stream, s *backend) error {
 			if err != nil {
 				return err
 			}
-		case file := <-s.fileCh:
+		case file := <-s.fileDownCh:
 			// The channel is fed and closed by SendFile right after the
 			// rendezvous, so this read always terminates: pass a nil done.
 			r, err := chanio.NewChanReader(file, nil, l)
@@ -244,7 +244,7 @@ func fromClientWorker(ctx context.Context, stream Stream, s *backend) error {
 				// wg.Wait, the broker) forever. The buffered content send and
 				// close below never block once the rendezvous succeeds.
 				select {
-				case s.fileCh <- file:
+				case s.fileUpCh <- file:
 				case <-ctx.Done():
 					return nil
 				}
