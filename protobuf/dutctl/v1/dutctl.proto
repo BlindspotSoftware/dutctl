@@ -61,25 +61,37 @@ message DetailsResponse {
   string details = 1;
 }
 
-// RunRequest is sent by the client to start a command execution on a device and optionally
-// to further interact with the agent during the command execution.
-// The first RunRequest message sent to a agent must always contain a Command message.
+// RunRequest is sent by the client to start a command execution on a device and
+// to interact with the agent while the command runs. The first RunRequest of a
+// stream must carry a Command message.
 message RunRequest {
+  // 2 carried the Console message of older alphas. It stays reserved, so that
+  // a peer of an older alpha cannot misread a message of this one.
+  reserved 2;
+  reserved "console";
   oneof msg {
     Command command = 1;
-    Console console = 2;
     File file = 3;
+    ConsoleInput console_input = 4;
+    ConsoleControl console_control = 5;
   }
 }
 
-// RunResponse is sent by the agent in response to a RunRequest and can either contain
-// just the output of the command (Print), or trigger further interaction with the client.
+// RunResponse is sent by the agent while a command runs: the command's output
+// (Print), the traffic of a console and the events that frame it, or a file
+// transfer.
 message RunResponse {
+  // 2 carried the Console message of older alphas. It stays reserved, so that
+  // a peer of an older alpha cannot misread a message of this one.
+  reserved 2;
+  reserved "console";
   oneof msg {
     Print print = 1;
-    Console console = 2;
     FileRequest file_request = 3;
     File file = 4;
+    ConsoleOpen console_open = 5;
+    ConsoleOutput console_output = 6;
+    ConsoleClose console_close = 7;
   }
 }
 
@@ -90,20 +102,80 @@ message Command {
   repeated string args = 3;
 }
 
-// Print is used by the agent to send the output of a command execution to the client.
+// Print is used by the agent to send the output of a command execution to the
+// client. It may be sent at any time, also while a console is open.
 message Print {
   bytes text = 1;
 }
 
-// Console is used by the client and agent during an interactive command execution.
-// An interactive session can only be started by the agent by sending the first Console message.
-message Console {
+// ConsoleMode tells the client how the module uses its console, so that the
+// client can configure a terminal accordingly. The client treats an unknown
+// value as LINE.
+enum ConsoleMode {
+  CONSOLE_MODE_UNSPECIFIED = 0;
+  // The module reads newline-terminated lines of text. A terminal stays in its
+  // usual line-editing mode: the user sees what they type and edits the line,
+  // Enter sends it, and Ctrl-C still interrupts the client.
+  CONSOLE_MODE_LINE = 1;
+  // The module consumes bytes as typed and produces bytes for a terminal, as a
+  // serial port does. A terminal is switched to raw mode: every key, Ctrl-C and
+  // Escape included, is sent at once and unchanged, and output is written as
+  // received. The client keeps a local key sequence to end the run.
+  CONSOLE_MODE_RAW = 2;
+}
+
+// ConsoleOpen is sent by the agent when a module opens its console: the way a
+// module and the user interact through the client's standard streams. It
+// precedes every ConsoleOutput of that console. The id is unique within the
+// run; the client marks its ConsoleInput and ConsoleControl messages with it.
+// A module has one console at a time, so a ConsoleOpen while a console is open
+// implies the end of that one.
+message ConsoleOpen {
+  uint32 id = 1;
+  ConsoleMode mode = 2;
+}
+
+// ConsoleClose is sent by the agent when the console ends: the module returned
+// or opened another console. No ConsoleOutput follows for it. The end of the
+// stream closes a console that is still open.
+message ConsoleClose {}
+
+// ConsoleInput is sent by the client: the user's input for the open console,
+// marked with its id. The agent discards input marked for any other console and
+// never queues it for a later one. The data is opaque: no hop alters it.
+message ConsoleInput {
+  uint32 id = 1;
+  bytes data = 2;
+}
+
+// ConsoleOutput is sent by the agent between ConsoleOpen and ConsoleClose: the
+// module's output on its console, on its standard output or its standard error
+// stream. It carries no id: the agent opens and closes the consoles itself and
+// sends on one ordered stream, so the output belongs to the console open at
+// that point. Outside an open console it is a protocol violation. The data is
+// opaque: no hop alters it.
+message ConsoleOutput {
   oneof data {
-    bytes stdin = 1;
-    bytes stdout = 2;
-    bytes stderr = 3;
+    bytes stdout = 1;
+    bytes stderr = 2;
   }
 }
+
+// ConsoleControl is sent by the client: an event for the open console that is
+// not input data, marked with the console's id like ConsoleInput.
+message ConsoleControl {
+  uint32 id = 1;
+  oneof control {
+    ConsoleEof eof = 2;
+  }
+}
+
+// ConsoleEof tells the agent that the user's input ended: the client's standard
+// input reached its end. The module's console input then reports end of file,
+// while its output continues. The client sends it after any pending input, for
+// every console of the run whose input ends. It is not an end of the stream:
+// file transfers and output keep flowing.
+message ConsoleEof {}
 
 // FileRequest is used by the agent to request a file from the client.
 message FileRequest {
