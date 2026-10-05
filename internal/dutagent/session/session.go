@@ -22,10 +22,8 @@ var errSessionClosed = errors.New("session closed")
 
 // backend implements the module.Session interface.
 type backend struct {
-	printCh  chan string
-	stdinCh  chan []byte
-	stdoutCh chan []byte
-	stderrCh chan []byte
+	printCh   chan string
+	consoleCh chan consoleEvent
 
 	// The file channels. fileReqCh carries the name of a file the module
 	// requests from the client. A file itself is a channel of bytes, fed and
@@ -36,16 +34,25 @@ type backend struct {
 	fileUpCh   chan chan []byte
 	fileDownCh chan chan []byte
 
-	// mu guards currentFile, which is read and written from the module goroutine
-	// (SendFile) and from both broker workers, with no channel handing it between
-	// them — their ordering runs through the client round-trip, which is not a Go
-	// happens-before edge, so the field needs its own lock.
+	// mu guards currentFile, currentConsole and lastConsoleID. currentFile is
+	// read and written from the module goroutine (SendFile) and from both
+	// broker workers, with no channel handing it between them — their
+	// ordering runs through the client round-trip, which is not a Go
+	// happens-before edge, so the field needs its own lock. currentConsole is
+	// swapped on the module goroutine and read by the upstream worker for
+	// every input it delivers.
 	mu sync.Mutex
 
 	// currentFile holds the name of the file currently being transferred.
 	// It names either the file the module requested from the client or the file
 	// being sent back to the client, since only one transfer is in flight at a time.
 	currentFile string
+
+	// currentConsole is the open console, nil while none is.
+	currentConsole *console
+	// lastConsoleID is the id of the console opened last. Each console of the
+	// run gets an id of its own, so the client marks its input for exactly one.
+	lastConsoleID uint32
 
 	// log is the session-scoped logger, frozen in by the broker (see Broker.Start)
 	// because the module.Session methods carry no context to derive it from.
@@ -108,43 +115,6 @@ func (s *backend) Println(a ...any) {
 	case s.printCh <- fmt.Sprintln(a...):
 	case <-s.done:
 	}
-}
-
-// Console returns the module's stdin/stdout/stderr streams (see module.Session).
-// It must be called only from the module's Run goroutine, and it has no error
-// return: the backing channels are always allocated by Broker.init before a module
-// runs, so a nil channel here is a broken invariant and Console panics. The agent
-// recovers that panic into a clean run error where it calls Module.Run, so a
-// module bug fails its run rather than the RPC; keep that recover.
-//
-//nolint:nonamedreturns
-func (s *backend) Console() (stdin io.Reader, stdout, stderr io.Writer) {
-	var (
-		stdinReader                io.Reader
-		stdoutWriter, stderrWriter io.Writer
-		err                        error
-	)
-
-	// The channels are always initialized by Broker.init before a module runs,
-	// so a failure here is a broken invariant (a nil channel), not a runtime
-	// condition. Console has no error return, so panic; the agent recovers it
-	// into a clean run error where it calls Module.Run.
-	stdinReader, err = chanio.NewChanReader(s.stdinCh, s.done, log.Scope(s.logger(), scopeSessionUpstream))
-	if err != nil {
-		panic(fmt.Sprintf("session.Console: stdin reader: %v", err))
-	}
-
-	stdoutWriter, err = chanio.NewChanWriter(s.stdoutCh, s.done)
-	if err != nil {
-		panic(fmt.Sprintf("session.Console: stdout writer: %v", err))
-	}
-
-	stderrWriter, err = chanio.NewChanWriter(s.stderrCh, s.done)
-	if err != nil {
-		panic(fmt.Sprintf("session.Console: stderr writer: %v", err))
-	}
-
-	return stdinReader, stdoutWriter, stderrWriter
 }
 
 // RequestFile asks the client for the named file and returns a reader over its

@@ -14,17 +14,26 @@ import (
 
 // Session is a mock implementation of the module.Session interface for testing purposes.
 //
-// Console and RequestFile panic when the field backing the requested value is not
-// set (Stdin/Stdout/Stderr for Console, RequestedFileResponse for RequestFile).
-// This is a deliberate test-double contract: an unset field is test misuse and
-// surfaces as a test failure rather than a silent zero value.
+// OpenConsole and RequestFile panic when the field backing the requested value is
+// not set (Stdin/Stdout/Stderr for OpenConsole, RequestedFileResponse for
+// RequestFile). This is a deliberate test-double contract: an unset field is test
+// misuse and surfaces as a test failure rather than a silent zero value.
+//
+// A test feeds Stdin with an io.Pipe, closing the writer to deliver io.EOF, or
+// with io.NopCloser over a bytes.Reader; a module's Stdin.Close reaches the field
+// as-is, so a closable pipe reader ends a parked Read like the real session does.
 type Session struct {
-	PrintCalled           bool
-	PrintText             string
-	ConsoleCalled         bool
-	Stdin                 io.Reader
-	Stdout                io.Writer
-	Stderr                io.Writer
+	PrintCalled bool
+	PrintText   string
+
+	// ConsoleOpened records whether OpenConsole was called, and ConsoleMode the
+	// mode the module asked for.
+	ConsoleOpened bool
+	ConsoleMode   module.ConsoleMode
+	Stdin         io.ReadCloser
+	Stdout        io.Writer
+	Stderr        io.Writer
+
 	RequestFileCalled     bool
 	RequestedFileName     string
 	RequestedFileResponse io.Reader
@@ -54,12 +63,12 @@ func (m *Session) Println(a ...any) {
 	m.PrintText = fmt.Sprintln(a...)
 }
 
-// Console records the call in ConsoleCalled and returns Stdin, Stdout, and Stderr. It
-// panics if any of those fields is unset; see the Session type documentation.
-//
-//nolint:nonamedreturns
-func (m *Session) Console() (stdin io.Reader, stdout, stderr io.Writer) {
-	m.ConsoleCalled = true
+// OpenConsole records the call in ConsoleOpened and the requested mode in
+// ConsoleMode, and returns a console over Stdin, Stdout and Stderr. It panics if
+// any of those fields is unset; see the Session type documentation.
+func (m *Session) OpenConsole(opts module.ConsoleOptions) module.Console {
+	m.ConsoleOpened = true
+	m.ConsoleMode = opts.Mode
 
 	if m.Stdin == nil {
 		panic("mock.Session: Stdin not set")
@@ -73,7 +82,7 @@ func (m *Session) Console() (stdin io.Reader, stdout, stderr io.Writer) {
 		panic("mock.Session: Stderr not set")
 	}
 
-	return m.Stdin, m.Stdout, m.Stderr
+	return module.Console{Stdin: m.Stdin, Stdout: m.Stdout, Stderr: m.Stderr}
 }
 
 // RequestFile records the call in RequestFileCalled and the argument in RequestedFileName.
