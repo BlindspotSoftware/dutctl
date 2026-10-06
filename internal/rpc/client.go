@@ -5,9 +5,9 @@
 package rpc
 
 import (
-	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"time"
 
 	"connectrpc.com/connect"
@@ -19,7 +19,7 @@ import (
 // connect.WithInterceptors(NewVersionAdvisor(...)) — are appended after the
 // mandatory WithGRPC.
 func NewDeviceClient(addr string, opts ...connect.ClientOption) dutctlv1connect.DeviceServiceClient {
-	return dutctlv1connect.NewDeviceServiceClient(newH2CClient(), url(addr), clientOptions(opts)...)
+	return dutctlv1connect.NewDeviceServiceClient(newH2CClient(), baseURL(addr), clientOptions(opts)...)
 }
 
 // NewRelayClient returns a RelayService client for the server at addr, speaking
@@ -27,10 +27,15 @@ func NewDeviceClient(addr string, opts ...connect.ClientOption) dutctlv1connect.
 //
 //nolint:ireturn // returns the connect-generated RelayServiceClient interface by design
 func NewRelayClient(addr string, opts ...connect.ClientOption) dutctlv1connect.RelayServiceClient {
-	return dutctlv1connect.NewRelayServiceClient(newH2CClient(), url(addr), clientOptions(opts)...)
+	return dutctlv1connect.NewRelayServiceClient(newH2CClient(), baseURL(addr), clientOptions(opts)...)
 }
 
-func url(addr string) string { return fmt.Sprintf("http://%s", addr) }
+// baseURL returns the http:// URL of the agent or server at addr. It builds the
+// URL rather than prefixing addr, so the zone of an IPv6 address, as in
+// [fe80::1%eth0]:2024, is escaped and the URL parses.
+func baseURL(addr string) string {
+	return (&url.URL{Scheme: "http", Host: addr}).String()
+}
 
 func clientOptions(opts []connect.ClientOption) []connect.ClientOption {
 	return append([]connect.ClientOption{connect.WithGRPC()}, opts...)

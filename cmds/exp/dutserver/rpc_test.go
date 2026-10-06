@@ -5,6 +5,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
@@ -14,7 +15,49 @@ import (
 	"golang.org/x/mod/semver"
 
 	"github.com/BlindspotSoftware/dutctl/internal/buildinfo"
+
+	pb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1"
 )
+
+// TestRegisterAgentAddr verifies that Register stores an agent's address with
+// the default port if it names none, and rejects one without a host, at which
+// the server could not reach the agent.
+func TestRegisterAgentAddr(t *testing.T) {
+	tests := []struct {
+		addr     string
+		want     string
+		wantCode connect.Code
+	}{
+		{addr: "agent:2025", want: "agent:2025"},
+		{addr: "agent", want: "agent:2024"},
+		{addr: ":2024", wantCode: connect.CodeInvalidArgument},
+		{addr: "", wantCode: connect.CodeInvalidArgument},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.addr, func(t *testing.T) {
+			s := &rpcService{agents: make(map[string]*agent)}
+			req := connect.NewRequest(&pb.RegisterRequest{Address: tt.addr, Devices: []string{"dev"}})
+
+			_, err := s.Register(context.Background(), req)
+			if tt.wantCode != 0 {
+				if got := connect.CodeOf(err); got != tt.wantCode {
+					t.Fatalf("Register(%q) code = %v, want %v", tt.addr, got, tt.wantCode)
+				}
+
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("Register(%q) = %v, want nil", tt.addr, err)
+			}
+
+			if got := s.agents["dev"].address; got != tt.want {
+				t.Errorf("registered address = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
 
 // TestCheckMajorMismatch verifies that a major dutctl version gap is reported as a
 // CodeFailedPrecondition error, and that a compatible, empty, or unparsable peer

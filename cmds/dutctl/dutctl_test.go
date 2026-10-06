@@ -4,9 +4,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
+	"log/slog"
+	"runtime"
+	"strings"
 	"testing"
 
 	"connectrpc.com/connect"
@@ -371,6 +375,33 @@ func TestAsInterrupt(t *testing.T) {
 				t.Fatalf("asInterrupt = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestStartRejectsAddrWithoutHost verifies that start rejects a server address
+// it cannot complete, one without a host, as a malformed command line before it
+// dials.
+func TestStartRejectsAddrWithoutHost(t *testing.T) {
+	defer slog.SetDefault(slog.Default())
+
+	var stderr bytes.Buffer
+
+	code := make(chan int, 1)
+	exit := func(c int) {
+		code <- c
+
+		runtime.Goexit()
+	}
+
+	app := newApp(strings.NewReader(""), io.Discard, &stderr, exit, []string{"dutctl", "-s", ":2024", "list"})
+	go app.start()
+
+	if got := <-code; got != 1 {
+		t.Errorf("exit code = %d, want 1", got)
+	}
+
+	if want := `-s: ":2024" has no host to connect to`; !strings.Contains(stderr.String(), want) {
+		t.Errorf("stderr = %q, want it to contain %q", stderr.String(), want)
 	}
 }
 

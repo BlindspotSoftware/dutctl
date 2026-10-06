@@ -67,7 +67,7 @@ When dutctl is run without any positional arguments, it defaults to the list com
 
 // Usage strings for the command-line flags, shown in the OPTIONS section of dutctl -h.
 const (
-	serverAddrUsage   = `Address and port of the dutagent to connect to in the format: address:port`
+	serverAddrUsage   = `Address of the dutagent to connect to in the format: address[:port], the port defaults to ` + rpc.DefaultPort
 	outputFormatUsage = `Output format, text|json|yaml|oneline, default is text`
 	verboseUsage      = `Annotate output with connection/RPC context (metadata)`
 	noColorUsage      = `Disable colored output`
@@ -95,7 +95,7 @@ func newApp(stdin io.Reader, stdout, stderr io.Writer, exitFunc func(int), args 
 		app.printFlagDefaults()
 	}
 	// Flags
-	fs.StringVar(&app.serverAddr, "s", "localhost:2024", serverAddrUsage)
+	fs.StringVar(&app.serverAddr, "s", "localhost:"+rpc.DefaultPort, serverAddrUsage)
 	fs.StringVar(&app.outputFormat, "f", "", outputFormatUsage)
 	fs.BoolVar(&app.verbose, "v", false, verboseUsage)
 	fs.BoolVar(&app.noColor, "no-color", false, noColorUsage)
@@ -177,6 +177,15 @@ func (app *application) start() {
 		app.printVersion()
 		app.exit(nil)
 	}
+
+	// Complete the address before anything uses it, so the messages that name
+	// it show the port dutctl connects to.
+	addr, err := rpc.DialAddr(app.serverAddr)
+	if err != nil {
+		app.exit(fmt.Errorf("%w: -s: %w", errInvalidCmdline, err))
+	}
+
+	app.serverAddr = addr
 
 	app.setupRPCClient()
 	app.exit(app.dispatch())

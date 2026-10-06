@@ -32,11 +32,12 @@ import (
 )
 
 const (
-	addressInfo     = `Address and port to run the agent in the format: address:port`
+	addressInfo = `Address to run the agent on in the format: address[:port], the port defaults to ` + rpc.DefaultPort +
+		`; an empty address as in :port means all interfaces`
 	configPathInfo  = `Path to DUT configuration file`
 	checkConfigInfo = `Only validate the provided DUT configuration, not starting the service`
 	dryRunInfo      = `Only run the initialization phase of the modules, not start the (includes validation of the configuration)`
-	serverInfo      = `Optional DUT Server address and port to register with in the format: address:port`
+	serverInfo      = `Optional DUT Server to register with in the format: address[:port], the port defaults to ` + rpc.DefaultPort
 	versionFlagInfo = `Print version information and exit`
 	logLevelInfo    = `Log level: debug, info, warn, or error`
 	logJSONInfo     = `Emit logs as JSON instead of human-readable text`
@@ -49,7 +50,7 @@ func newAgent(stdout io.Writer, exitFunc func(int), args []string) *agent {
 	agt.exit = exitFunc
 
 	fs := flag.NewFlagSet(args[0], flag.ExitOnError)
-	fs.StringVar(&agt.address, "a", "localhost:2024", addressInfo)
+	fs.StringVar(&agt.address, "a", "localhost:"+rpc.DefaultPort, addressInfo)
 	fs.StringVar(&agt.configPath, "c", "dutctl.yaml", configPathInfo)
 	fs.BoolVar(&agt.checkConfig, "check-config", false, checkConfigInfo)
 	fs.BoolVar(&agt.dryRun, "dry-run", false, dryRunInfo)
@@ -133,6 +134,32 @@ func (agt *agent) cleanup(ctx context.Context, code exitCode) {
 	}
 
 	agt.exit(int(code))
+}
+
+// completeAddrs gives the agent's own address and the dutserver's
+// rpc.DefaultPort where they name no port. The agent does so at the start,
+// before the modules take their time to initialize, so a malformed address
+// fails at once, and so it registers the address it listens on.
+func (agt *agent) completeAddrs() error {
+	addr, err := rpc.ListenAddr(agt.address)
+	if err != nil {
+		return fmt.Errorf("-a: %w", err)
+	}
+
+	agt.address = addr
+
+	if agt.server == "" {
+		return nil
+	}
+
+	server, err := rpc.DialAddr(agt.server)
+	if err != nil {
+		return fmt.Errorf("-server: %w", err)
+	}
+
+	agt.server = server
+
+	return nil
 }
 
 func (agt *agent) loadConfig() error {
@@ -248,7 +275,13 @@ func (agt *agent) start() {
 		}
 	}()
 
-	err := agt.loadConfig()
+	err := agt.completeAddrs()
+	if err != nil {
+		slog.Error("invalid address", "err", err)
+		agt.cleanup(ctx, exit1)
+	}
+
+	err = agt.loadConfig()
 	if agt.checkConfig {
 		if err != nil {
 			slog.Error("bad configuration", "err", err)

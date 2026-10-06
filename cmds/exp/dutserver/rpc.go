@@ -543,9 +543,15 @@ func (s *rpcService) Register(
 	l := log.FromContext(ctx)
 	l.Info("request received")
 
-	addr := req.Msg.GetAddress()
-	if addr == "" {
+	if req.Msg.GetAddress() == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("agent address is not set"))
+	}
+
+	// The server dials the agent at the address it registers, so it needs a host;
+	// an agent listening on all interfaces registers none.
+	addr, err := rpc.DialAddr(req.Msg.GetAddress())
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("agent address: %w", err))
 	}
 
 	if len(req.Msg.GetDevices()) == 0 {
@@ -558,7 +564,7 @@ func (s *rpcService) Register(
 		}
 	}
 
-	err := s.addAgent(log.WithScope(ctx, "registry"), addr, req.Msg.GetDevices())
+	err = s.addAgent(log.WithScope(ctx, "registry"), addr, req.Msg.GetDevices())
 	if err != nil {
 		return nil, connect.NewError(connect.CodeAlreadyExists, fmt.Errorf("adding agent %q: %w", addr, err))
 	}
