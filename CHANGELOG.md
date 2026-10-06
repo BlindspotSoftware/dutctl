@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.0.0-alpha.6](https://github.com/BlindspotSoftware/dutctl/compare/v1.0.0-alpha.5...v1.0.0-alpha.6) (2026-10-06)
+
+
+### ⚠ BREAKING CHANGES
+
+* dutagent -a, dutctl -s and dutserver -s default to port 2024 instead of 1024. To keep the old port, give it explicitly, e.g. dutctl -s localhost:1024.
+
+### Features
+
+* change the default port to 2024 ([2b15e6e](https://github.com/BlindspotSoftware/dutctl/commit/2b15e6ebd2a2466285fedaf69768abbf13d17de1))
+* give an address without a port the default port 2024 ([80c38ff](https://github.com/BlindspotSoftware/dutctl/commit/80c38ff16dc6a4a392d83a3cd196c833dfe9ba26))
+
+
+### Other Work
+
+* correct the port comment in the example systemd unit ([3f6897c](https://github.com/BlindspotSoftware/dutctl/commit/3f6897c6897e4908138a096d9f37c3f29170d001))
+
 ## [1.0.0-alpha.5](https://github.com/BlindspotSoftware/dutctl/compare/v1.0.0-alpha.4...v1.0.0-alpha.5) (2026-10-04)
 
 
