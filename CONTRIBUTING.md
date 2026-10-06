@@ -8,6 +8,8 @@ If you discover a **security issue**, please bring it to our attention right awa
 
 Read our [Code of Conduct](CODE_OF_CONDUCT.md) to keep contributions approachable and respectable
 
+If you use AI tools for a contribution, read our [AI Usage Policy](AI_POLICY.md) first. It requires you to disclose that use.
+
 
 Use the table of contents icon on the top right corner of this document to get to a specific section of this guide quickly.
 
