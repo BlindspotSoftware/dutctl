@@ -49,7 +49,7 @@ func newAgent(stdout io.Writer, exitFunc func(int), args []string) *agent {
 	agt.exit = exitFunc
 
 	fs := flag.NewFlagSet(args[0], flag.ExitOnError)
-	fs.StringVar(&agt.address, "a", "localhost:1024", addressInfo)
+	fs.StringVar(&agt.address, "a", "localhost:2024", addressInfo)
 	fs.StringVar(&agt.configPath, "c", "dutctl.yaml", configPathInfo)
 	fs.BoolVar(&agt.checkConfig, "check-config", false, checkConfigInfo)
 	fs.BoolVar(&agt.dryRun, "dry-run", false, dryRunInfo)
