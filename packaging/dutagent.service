@@ -24,7 +24,7 @@ RestartSec=3s
 KillMode=mixed
 TimeoutStopSec=infinity
 ExecStart=/usr/bin/dutagent -a 0.0.0.0:2024 -c /etc/dutagent/config.yaml
-# The port 2024 is unused
+# 2024 is the default port of dutagent and dutctl, and not in common use
 #   see https://en.wikipedia.org/wiki/List_of_TCP_and_UDP_port_numbers
 WorkingDirectory=/var/lib/dutagent
 Environment=TMPDIR=/var/lib/dutagent/tmp
