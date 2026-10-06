@@ -65,6 +65,16 @@ func TestExitCodes(t *testing.T) {
 			want: 1,
 		},
 		{
+			name: "server address without host",
+			args: []string{"-check-config", "-c", filepath.Join("testdata", "valid_config.yaml"), "-server", ":2024"},
+			want: 1,
+		},
+		{
+			name: "malformed listen address",
+			args: []string{"-check-config", "-c", filepath.Join("testdata", "valid_config.yaml"), "-a", "a:b:c"},
+			want: 1,
+		},
+		{
 			name: "dry-run valid",
 			args: []string{"-dry-run", "-c", filepath.Join("testdata", "valid_config.yaml")},
 			want: 0,
@@ -83,6 +93,25 @@ func TestExitCodes(t *testing.T) {
 				t.Errorf("exit code: want %d, got %d", tt.want, got)
 			}
 		})
+	}
+}
+
+// completeAddrs gives both addresses the default port, so the agent listens on
+// and registers the completed address.
+func TestCompleteAddrs(t *testing.T) {
+	agt := &agent{address: "0.0.0.0", server: "dutserver"}
+
+	err := agt.completeAddrs()
+	if err != nil {
+		t.Fatalf("completeAddrs = %v, want nil", err)
+	}
+
+	if want := "0.0.0.0:2024"; agt.address != want {
+		t.Errorf("address = %q, want %q", agt.address, want)
+	}
+
+	if want := "dutserver:2024"; agt.server != want {
+		t.Errorf("server = %q, want %q", agt.server, want)
 	}
 }
 

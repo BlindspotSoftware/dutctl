@@ -9,6 +9,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -21,7 +22,8 @@ import (
 )
 
 const (
-	addressInfo  = `Server address and port in the format: address:port`
+	addressInfo = `Server address in the format: address[:port], the port defaults to ` + rpc.DefaultPort +
+		`; an empty address as in :port means all interfaces`
 	logLevelInfo = `Log level: debug, info, warn, or error`
 	logJSONInfo  = `Emit logs as JSON instead of human-readable text`
 )
@@ -32,7 +34,7 @@ func newServer(exitFunc func(int), args []string) *server {
 	svr.exit = exitFunc
 
 	f := flag.NewFlagSet(args[0], flag.ExitOnError)
-	f.StringVar(&svr.address, "s", "localhost:2024", addressInfo)
+	f.StringVar(&svr.address, "s", "localhost:"+rpc.DefaultPort, addressInfo)
 	f.StringVar(&svr.logLevel, "log", "info", logLevelInfo)
 	f.BoolVar(&svr.logJSON, "log-json", false, logJSONInfo)
 
@@ -101,6 +103,14 @@ func (svr *server) start() {
 	base := log.New(os.Stderr, log.ParseLevel(svr.logLevel), svr.logJSON)
 	slog.SetDefault(log.Scope(base, "server"))
 
+	addr, err := rpc.ListenAddr(svr.address)
+	if err != nil {
+		slog.Error("invalid address", "err", fmt.Errorf("-s: %w", err))
+		svr.cleanup(exit1)
+	}
+
+	svr.address = addr
+
 	// A signal (Ctrl-C / SIGTERM / SIGQUIT) cancels ctx, which drives a graceful
 	// shutdown: the RPC service drains in-flight requests before returning. This
 	// replaces an out-of-band signal handler, so shutdown runs on this goroutine
@@ -112,7 +122,7 @@ func (svr *server) start() {
 	// - Handle name conflicts, e.g., if the same device name is present on multiple registered agents.
 	// - The device names over all registered agents should be unique in the for they are maintained in the server.
 
-	err := svr.startRPCService(ctx)
+	err = svr.startRPCService(ctx)
 	if ctx.Err() != nil {
 		// A signal cancelled ctx: graceful shutdown. A non-nil err means the drain
 		// did not fully complete within the grace period, which we accept — the
