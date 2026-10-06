@@ -32,7 +32,7 @@ func newServer(exitFunc func(int), args []string) *server {
 	svr.exit = exitFunc
 
 	f := flag.NewFlagSet(args[0], flag.ExitOnError)
-	f.StringVar(&svr.address, "s", "localhost:1024", addressInfo)
+	f.StringVar(&svr.address, "s", "localhost:2024", addressInfo)
 	f.StringVar(&svr.logLevel, "log", "info", logLevelInfo)
 	f.BoolVar(&svr.logJSON, "log-json", false, logJSONInfo)
 

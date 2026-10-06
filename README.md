@@ -52,14 +52,14 @@ go install github.com/BlindspotSoftware/dutctl/cmds/dutagent@v1.0.0-alpha.5
 
 1. **Start the DUT Agent**
    ```bash
-   dutagent -a localhost:1024 -c ./contrib/dutagent-cfg-example.yaml
+   dutagent -a localhost:2024 -c ./contrib/dutagent-cfg-example.yaml
    ```
    Run the DUT Agent locally with an example configuration in a separate terminal session.
    This test configuration does not require a connected DUT.
 
 2. **Play around with the DUT Client**
    ```bash
-   # dutctl connect to localhost:1024 by default.
+   # dutctl connect to localhost:2024 by default.
    # Use 'list' to see the available devices that are managed be the agent:
    dutctl list
 

@@ -95,7 +95,7 @@ func newApp(stdin io.Reader, stdout, stderr io.Writer, exitFunc func(int), args 
 		app.printFlagDefaults()
 	}
 	// Flags
-	fs.StringVar(&app.serverAddr, "s", "localhost:1024", serverAddrUsage)
+	fs.StringVar(&app.serverAddr, "s", "localhost:2024", serverAddrUsage)
 	fs.StringVar(&app.outputFormat, "f", "", outputFormatUsage)
 	fs.BoolVar(&app.verbose, "v", false, verboseUsage)
 	fs.BoolVar(&app.noColor, "no-color", false, noColorUsage)

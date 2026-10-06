@@ -47,7 +47,7 @@ Open up four terminal sessions referred to as `T1`, `T2`, `T3`, `T4`,
 In `T1` start the DUT Server with default settings:
 
 ```bash
-# Start the DUT Server locally on default port (1024)
+# Start the DUT Server locally on default port (2024)
 ./dutserver
 ```
 
@@ -57,7 +57,7 @@ Start a first agent in `T3` using a basic example configuration with one device 
 
 ```bash
 # Configure the agent to connect to the server
-./dutagent -a localhost:1025 -c ./cmds/exp/contrib/config-1.yaml -server localhost:1024
+./dutagent -a localhost:2025 -c ./cmds/exp/contrib/config-1.yaml -server localhost:2024
 
 ```
 
@@ -65,7 +65,7 @@ In `T4` start a second agent with different port and another basic example confi
 
 ```bash
 # Configure the agent to connect to the server
-./dutagent -a localhost:1026 -c ./cmds/exp/contrib/config-2.yaml -server localhost:1024
+./dutagent -a localhost:2026 -c ./cmds/exp/contrib/config-2.yaml -server localhost:2024
 
 ```
 
@@ -74,11 +74,11 @@ In `T4` start a second agent with different port and another basic example confi
 Play around with the DUT Client in `T2`
 
 ```bash
-# List available devices using the default address localhost:1024 which is the DUT server
+# List available devices using the default address localhost:2024 which is the DUT server
 ./dutctl list
 
 # List the devices of a dedicated agent only
-./dutctl -s localhost:1025 list
+./dutctl -s localhost:2025 list
 
 # Run a interactive command on a remote device via the DUT server
 ./dutctl device2 repeat
