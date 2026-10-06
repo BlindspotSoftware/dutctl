@@ -8,8 +8,8 @@ devices:
         uses:
           - module: dummy-status
             passthrough: true
-      repeat:
-        desc: Repeat input
+      console:
+        desc: Echo input through a console
         uses:
-          - module: dummy-repeat
+          - module: dummy-console
             passthrough: true

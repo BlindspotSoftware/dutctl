@@ -4,5 +4,5 @@ device1:
     status:
       desc: "two modules, neither passthrough"
       uses:
-        - module: dummy-repeat
-        - module: dummy-repeat
+        - module: dummy-console
+        - module: dummy-console

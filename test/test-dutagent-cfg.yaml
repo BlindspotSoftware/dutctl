@@ -21,7 +21,15 @@ devices:
             passthrough: true
             with:
               port: "/home/oscar/ttyS2"
-              baudrate: 115200
+              baud: 115200
+      console:
+        desc: "Interactive host serial console"
+        uses:
+          - module: serial
+            args: ["-i"]
+            with:
+              port: "/home/oscar/ttyS2"
+              baud: 115200
       flash:
         desc: "Host SPI flash chip"
         uses:
@@ -90,10 +98,10 @@ devices:
             args:
               - foo
               - bar
-      dummy-repeat:
-        desc: "Repeat input"
+      dummy-console:
+        desc: "Echo input through a console"
         uses:
-          - module: dummy-repeat
+          - module: dummy-console
             passthrough: true
       dummy-file-transfer:
         desc: "Transfer a file through a two-module chain"
