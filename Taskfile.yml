@@ -151,76 +151,9 @@ tasks:
   # Manual testing
   #================
 
-  test:manual-prep:
-    desc: Prepare the RPI manually
-    deps:
-      - goreleaser:release-test
-    vars:
-      DUTCTL:
-        sh: ls ./bin/dutctl_linux_amd64_*/dutctl
-      REMOTE_PKG:
-        sh: ls ./bin/dutctl_*_arm64.deb
-      #CONFIG: ./test/test-dutagent-cfg.yaml
-      CONFIG: ./contrib/dutagent-cfg-example.yaml
-      DUMMY_SPI_FLASH_ROM: ./.firmwareci/dummy_binary.rom
-      TASKFILE: .firmwareci/Taskfile.yml
-      RPI: fwci-dutctl-tester.firmwareci.9e.network
-
-      DUTCTL_CONFIG_FILE: /etc/dutctl.yaml
+  test:manual:
+    desc: "Deploy this checkout's dutagent to the manual tester and check it with this checkout's dutctl (task test:manual -- serial file)"
     cmds:
-      - echo "{{.DUTCTL}}"
-      - echo "{{.REMOTE_PKG}}"
-      # Copy over and install the DEB package
-      - scp "{{.REMOTE_PKG}}" root@{{.RPI}}:/dutctl.deb
-      - ssh root@{{.RPI}} dpkg -i /dutctl.deb
-      # Copy over the testing config
-      - scp "{{.CONFIG}}" root@{{.RPI}}:{{.DUTCTL_CONFIG_FILE}}
-      - ssh root@{{.RPI}} chmod 644 {{.DUTCTL_CONFIG_FILE}}
-      # Start fake serial
-      - ssh root@{{.RPI}} bash -c "socat -x pty,rawer,icanon=0,nonblock,link=/home/oscar/ttyS1 pty,rawer,icanon=0,nonblock,link=/home/oscar/ttyS2 & disown"
-      # Systemd
-      - ssh root@{{.RPI}} systemctl daemon-reload
-      - ssh root@{{.RPI}} systemctl start dutagent.service
-
-  test:manual-unprep:
-    desc: UN-Prepare the RPI manually
-    vars:
-      DUTCTL:
-        sh: ls ./bin/dutctl_linux_amd64_*/dutctl
-      REMOTE_PKG:
-        sh: ls ./bin/dutctl_*_arm64.deb
-      CONFIG: ./test/test-dutagent-cfg.yaml
-      DUMMY_SPI_FLASH_ROM: ./.firmwareci/dummy_binary.rom
-      TASKFILE: .firmwareci/Taskfile.yml
-      RPI: fwci-dutctl-tester.firmwareci.9e.network
-
-      DUTCTL_CONFIG_FILE: /etc/dutctl.yaml
-    cmds:
-      # Debug
-      - echo "{{.DUTCTL}}"
-      - echo "{{.REMOTE_PKG}}"
-      # Cleanup - use 'defer' so that all commands get executed, even if some fail
-      - defer: ssh root@{{.RPI}} systemctl stop dutagent.service
-      - defer: ssh root@{{.RPI}} apt remove --assume-yes dutctl
-      - defer: ssh root@{{.RPI}} rm /etc/dutctl.yaml
-      - defer: ssh root@{{.RPI}} rm /dutctl.deb
-      - defer: ssh root@{{.RPI}} pkill socat
-
-  test:reload-config:
-    desc: Upload new dutctl config and restart the service
-    vars:
-      DUTCTL:
-        sh: ls ./bin/dutctl_linux_amd64_*/dutctl
-      REMOTE_PKG:
-        sh: ls ./bin/dutctl_*_arm64.deb
-      CONFIG: ./test/test-dutagent-cfg.yaml
-      DUMMY_SPI_FLASH_ROM: ./.firmwareci/dummy_binary.rom
-      TASKFILE: .firmwareci/Taskfile.yml
-      RPI: fwci-dutctl-tester.firmwareci.9e.network
-
-      DUTCTL_CONFIG_FILE: /etc/dutctl.yaml
-    cmds:
-      - scp "{{.CONFIG}}" root@{{.RPI}}:{{.DUTCTL_CONFIG_FILE}}
-      - ssh root@{{.RPI}} chmod 644 {{.DUTCTL_CONFIG_FILE}}
-      - ssh root@{{.RPI}} systemctl daemon-reload
-      - ssh root@{{.RPI}} systemctl restart dutagent.service
+      - test/manual/deploy.sh
+      - go build -o bin/dutctl ./cmds/dutctl
+      - DUTCTL=./bin/dutctl test/manual/run.sh {{.CLI_ARGS}}

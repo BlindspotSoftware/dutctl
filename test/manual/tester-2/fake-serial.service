@@ -1,0 +1,14 @@
+[Unit]
+Description=Virtual serial cable for manual dutagent testing (ttyS1 <-> ttyS2)
+Before=dutagent.service
+
+[Service]
+RuntimeDirectory=fake-serial
+RuntimeDirectoryMode=0755
+# ttyS1 is the DUT side (write boot output here), ttyS2 is what dutagent's serial module opens.
+ExecStart=/usr/bin/socat pty,link=/run/fake-serial/ttyS1,raw,echo=0,group=dialout,perm=0660 pty,link=/run/fake-serial/ttyS2,raw,echo=0,group=dialout,perm=0660
+Restart=always
+RestartSec=1
+
+[Install]
+WantedBy=multi-user.target

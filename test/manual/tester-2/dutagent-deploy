@@ -1,0 +1,34 @@
+#!/bin/sh
+# Install the dutagent build and config that test/manual/deploy.sh staged in
+# oscar's home, then restart the service. Runs as root through sudo.
+set -eu
+
+src=/home/oscar/dutagent-deploy
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+chmod 0755 "$tmp"
+
+# Read the staged files as oscar, so a symlink cannot make root copy a file oscar cannot read.
+runuser -u oscar -- cat "$src/dutagent" >"$tmp/dutagent"
+runuser -u oscar -- cat "$src/config.yaml" >"$tmp/config.yaml"
+chmod 0755 "$tmp/dutagent"
+chmod 0644 "$tmp/config.yaml"
+
+runuser -u dutagent -- "$tmp/dutagent" -check-config -c "$tmp/config.yaml"
+
+install -m 0755 "$tmp/dutagent" /usr/local/bin/dutagent
+install -m 0644 "$tmp/config.yaml" /etc/dutagent/config.yaml
+systemctl reset-failed dutagent 2>/dev/null || true
+systemctl restart dutagent
+
+i=0
+until ss -ltn | grep -q ':2024 '; do
+	i=$((i + 1))
+	if [ "$i" -ge 50 ]; then
+		journalctl -u dutagent -n 20 --no-pager
+		exit 1
+	fi
+	sleep 0.2
+done
+
+/usr/local/bin/dutagent -v
