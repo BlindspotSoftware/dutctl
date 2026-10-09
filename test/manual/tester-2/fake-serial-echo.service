@@ -1,0 +1,15 @@
+[Unit]
+Description=Echo everything sent to the fake DUT serial (ttyS1) back
+BindsTo=fake-serial.service
+After=fake-serial.service
+
+[Service]
+DynamicUser=yes
+SupplementaryGroups=dialout
+ExecStart=/usr/bin/socat /run/fake-serial/ttyS1,raw,echo=0 PIPE
+# fake-serial creates the link just after it starts; retry until it is there.
+Restart=always
+RestartSec=1
+
+[Install]
+WantedBy=fake-serial.service
