@@ -83,7 +83,7 @@ jobs:
   # Uses a matrix strategy to create separate job runs for each combination of commit and architecture
   per_commit_build_test:
     name: Build & Test  ${{ matrix.arch }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     needs: commit_list
     strategy:
       # Don't stop all tests if one commit/arch fails
@@ -109,7 +109,7 @@ jobs:
         run: GOARCH=${{ matrix.arch }} go build -v ./...
         
       - name: Unit test ${{ matrix.commit }} for ${{ matrix.arch }}
-        run: go test -race -v ./...
+        run: GOARCH=${{ matrix.arch }} go test -race -v ./...
 
   # License check runs once per workflow execution
   check-license-lines:
