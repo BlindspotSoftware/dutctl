@@ -1,0 +1,7 @@
+# Let the plugdev group switch USB port power through the sysfs "disable" file
+# of each port. uhubctl uses these files when they are writable; through libusb
+# alone the kernel powers a port again after about 3 s. The recover option of the
+# flash module needs the full power cut to reset a programmer that hangs.
+SUBSYSTEM=="usb", DRIVER=="hub", \
+  RUN+="/bin/sh -c 'chown -f root:plugdev $sys$devpath/*-port*/disable || true'", \
+  RUN+="/bin/sh -c 'chmod -f 0660 $sys$devpath/*-port*/disable || true'"

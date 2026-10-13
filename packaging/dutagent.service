@@ -59,6 +59,10 @@ SystemCallArchitectures=native
 ### Exec path are not restricted to allow usage of tools like dpcmd and custom scripts
 ReadOnlyPaths=/
 ReadWritePaths=/var/lib/dutagent /var/log/dutagent
+### ProtectKernelTunables makes /sys read-only. uhubctl writes the USB port
+### "disable" files (writable for plugdev, see dutagent-usb-ports.rules) to cut
+### port power for the recover option of the flash module.
+ReadWritePaths=-/sys/devices
 ## Allow GPIO access (Raspberry Pi)
 DeviceAllow=/dev/gpiomem rw
 DeviceAllow=/dev/mem rw
