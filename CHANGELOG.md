@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.0.0-alpha.6](https://github.com/BlindspotSoftware/dutctl/compare/v1.0.0-alpha.5...v1.0.0-alpha.6) (2026-10-15)
+
+
+### ⚠ BREAKING CHANGES
+
+* dutagent -a, dutctl -s and dutserver -s default to port 2024 instead of 1024. To keep the old port, give it explicitly, e.g. dutctl -s localhost:1024.
+
+### Features
+
+* change the default port to 2024 ([2b15e6e](https://github.com/BlindspotSoftware/dutctl/commit/2b15e6ebd2a2466285fedaf69768abbf13d17de1))
+* give an address without a port the default port 2024 ([80c38ff](https://github.com/BlindspotSoftware/dutctl/commit/80c38ff16dc6a4a392d83a3cd196c833dfe9ba26))
+
+
+### Other Work
+
+* bump golang.org/x/crypto from 0.57.0 to 0.58.0 ([10a528c](https://github.com/BlindspotSoftware/dutctl/commit/10a528cab30b8c83ba5e1a8595fec3068cf13ca4))
+* bump golang.org/x/mod from 0.41.0 to 0.42.0 ([d44805b](https://github.com/BlindspotSoftware/dutctl/commit/d44805b4a963ecc6f22bb08b9bdea2149e004eb4))
+* correct the port comment in the example systemd unit ([3f6897c](https://github.com/BlindspotSoftware/dutctl/commit/3f6897c6897e4908138a096d9f37c3f29170d001))
+
 ## [1.0.0-alpha.5](https://github.com/BlindspotSoftware/dutctl/compare/v1.0.0-alpha.4...v1.0.0-alpha.5) (2026-10-04)
 
 
