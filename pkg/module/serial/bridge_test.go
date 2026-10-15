@@ -280,6 +280,43 @@ func TestSerialRunInteractiveForwardsOutputVerbatim(t *testing.T) {
 	run.assertTornDown(t)
 }
 
+// A device configured with lfcrlf has its bare LFs shown as CR LF while its
+// CR LF pairs, also one split across reads, stay as they are; the user's input
+// is not mapped.
+func TestSerialRunInteractiveMapsOutput(t *testing.T) {
+	chunks := [][]byte{
+		[]byte("boot\n"),          // a bare LF ...
+		[]byte("ok\r"),            // ... a CR LF pair split across reads ...
+		[]byte("\nlogin: \x1b[A"), // ... and bytes the map leaves alone
+	}
+	run := newInteractiveRun(chunks...)
+	run.serial.imap = charMap{lfcrlf: true}
+
+	done := run.start(context.Background())
+
+	<-run.port.emptied
+
+	if _, err := run.input.Write([]byte("x\n")); err != nil {
+		t.Fatal(err)
+	}
+
+	_ = run.input.Close()
+
+	if err := <-done; err != nil {
+		t.Fatalf("Run = %v, want nil", err)
+	}
+
+	if got, want := run.stdout.String(), "boot\r\nok\r\nlogin: \x1b[A"; got != want {
+		t.Errorf("stdout = %q, want %q", got, want)
+	}
+
+	if got := string(run.port.writtenBytes()); got != "x\n" {
+		t.Errorf("port got %q, want the input unmapped %q", got, "x\n")
+	}
+
+	run.assertTornDown(t)
+}
+
 func TestSerialRunInteractiveForwardsInputVerbatim(t *testing.T) {
 	run := newInteractiveRun()
 
