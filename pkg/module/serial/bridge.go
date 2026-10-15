@@ -128,11 +128,11 @@ func writeAll(serialPort port, data []byte) error {
 	return nil
 }
 
-// forwardOutput copies the port's output, processed by incoming, to stdout, and
-// returns nil when ctx is done or when drain has elapsed since inputStopped
-// was closed. It returns a port read error as it is, and a stdout write error
-// as it is, so the caller can tell a gone session (io.ErrClosedPipe) from a
-// failure.
+// forwardOutput copies the port's output, processed by incoming, to stdout,
+// and returns when ctx is done or when drain has elapsed since inputStopped
+// was closed, with what incoming still held back written last. It returns a
+// port read error as it is, and a stdout write error as it is, so the caller
+// can tell a gone session (io.ErrClosedPipe) from a failure.
 //
 // The port's read timeout, after which Read returns (0, nil), is what makes
 // the loop re-check its end conditions.
@@ -149,7 +149,7 @@ func forwardOutput(
 	for {
 		select {
 		case <-ctx.Done():
-			return nil
+			return incoming.release(stdout)
 		case <-inputStopped:
 			// Keep forwarding for drain after the input ended, so the DUT's
 			// reply to the last input is still shown. The timer is started
@@ -158,18 +158,16 @@ func forwardOutput(
 			drained = time.After(drain)
 			inputStopped = nil
 		case <-drained:
-			return nil
+			return incoming.release(stdout)
 		default:
 		}
 
-		n, err := serialPort.Read(buf)
-		if n > 0 {
-			out := incoming.apply(buf[:n])
-			if len(out) > 0 {
-				_, werr := stdout.Write(out)
-				if werr != nil {
-					return werr
-				}
+		out, err := incoming.read(serialPort, buf)
+
+		if len(out) > 0 {
+			_, werr := stdout.Write(out)
+			if werr != nil {
+				return werr
 			}
 		}
 

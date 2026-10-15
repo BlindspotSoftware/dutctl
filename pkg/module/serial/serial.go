@@ -59,8 +59,14 @@ type Serial struct {
 	Port  string // Port is the path to the serial device on the dutagent.
 	Baud  int    // Baud is the baud rate of the serial device. If unset, DefaultBaudRate is used.
 	Delay string // Delay is the pause before each send (e.g. "200ms") to pace input. Default 50ms; "0s" disables.
+	// Imap names the character maps applied to what the device sends, in
+	// every mode, as picocom's --imap names them: lfcrlf for a device that
+	// ends its lines in a bare LF, for instance. Empty for a device that
+	// sends CR LF, which the Linux console, U-Boot and a getty do.
+	Imap []string
 
 	delay time.Duration // delay is the parsed Delay, applied before each send.
+	imap  charMap       // imap is the parsed Imap.
 
 	// drainTimeout overrides the post-send drain window; 0 uses sendDrain. It
 	// exists so tests can shorten the drain; production leaves it 0.
@@ -134,6 +140,12 @@ FLAGS (before the steps):
 	-i                     Interactive console. Takes no steps, and no -eol or
 	                       -keep-escapes: the bytes pass verbatim.
 
+The device's character maps (the imap configuration option, named as picocom
+names them: lfcrlf for a device that ends its lines in a bare LF, which would
+stair-step on a raw terminal) are applied to its output in every mode, before
+it is shown or matched. A device that sends CR LF, as the Linux console,
+U-Boot and a getty do, needs none.
+
 Terminal escape sequences (cursor moves, colour, queries) are stripped from the
 output before it is shown or matched, unless -keep-escapes is given. Expect
 matching uses a rolling window of the most recent 64 KiB of output, so a single
@@ -156,6 +168,11 @@ func (s *Serial) Help() string {
 	help.WriteString(abstract)
 	help.WriteString(usage)
 	fmt.Fprintf(&help, "Configured COM port is %q with baud rate %d.\n", s.Port, s.Baud)
+
+	if len(s.Imap) > 0 {
+		fmt.Fprintf(&help, "Character maps applied to the device's output: %s.\n", strings.Join(s.Imap, ", "))
+	}
+
 	help.WriteString(description)
 
 	return help.String()
@@ -184,6 +201,13 @@ func (s *Serial) Init(ctx context.Context) error {
 
 		s.delay = parsed
 	}
+
+	imap, err := parseCharMap(s.Imap)
+	if err != nil {
+		return fmt.Errorf("invalid imap: %w", err)
+	}
+
+	s.imap = imap
 
 	// Note: We don't open the port here to allow dutagent to start
 	// even if the serial device is not yet available (e.g., powered off).
@@ -282,13 +306,13 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 
 		con := session.OpenConsole(module.ConsoleOptions{Mode: module.ConsoleRaw})
 
-		return bridge(loopCtx, serialPort, newInbound(false), con, s.drainFor(), s.Port, s.Baud)
+		return bridge(loopCtx, serialPort, newInbound(s.imap, false), con, s.drainFor(), s.Port, s.Baud)
 	}
 
 	clientOut := newClientWriter(session)
 	clientOut.markerf("--- Connected to %s at %d baud ---\n", s.Port, s.Baud)
 
-	eng := newEngine(serialPort, newInbound(!cfg.keepEscapes), clientOut)
+	eng := newEngine(serialPort, newInbound(s.imap, !cfg.keepEscapes), clientOut)
 
 	// Monitor mode: no steps — stream the console until cancelled or -t elapses.
 	if len(cfg.steps) == 0 {
