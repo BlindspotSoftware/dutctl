@@ -24,8 +24,8 @@ const inputChunk = 256
 // verbatim both ways: the client terminal is raw, so what the user types,
 // Enter as CR and Ctrl-C included, is what the DUT's line discipline expects,
 // and what the DUT sends, escape sequences included, is what the user's
-// terminal interprets. Nothing is filtered or matched; a scripted run goes
-// through the engine instead.
+// terminal interprets, so incoming strips nothing. Nothing is matched; a scripted
+// run goes through the engine instead.
 //
 // The run ends normally, with nil, when ctx is done (the -t bound or a
 // cancellation, as in monitor mode), when the session is gone (the console's
@@ -36,7 +36,9 @@ const inputChunk = 256
 // The markers go to the console's Stderr, so a capture of Stdout holds the
 // DUT's bytes and nothing else, and they end in CR LF because the client
 // terminal is raw and would stair-step a bare LF.
-func bridge(ctx context.Context, serialPort port, con module.Console, drain time.Duration, name string, baud int) error {
+func bridge(
+	ctx context.Context, serialPort port, incoming *inbound, con module.Console, drain time.Duration, name string, baud int,
+) error {
 	_, _ = fmt.Fprintf(con.Stderr, "--- Connected to %s at %d baud ---\r\n", name, baud)
 
 	// The input pump runs on its own goroutine, since a Read on Stdin and a Read
@@ -52,7 +54,7 @@ func bridge(ctx context.Context, serialPort port, con module.Console, drain time
 		writeErr = forwardInput(con.Stdin, serialPort)
 	}()
 
-	err := forwardOutput(ctx, serialPort, con.Stdout, stopped, drain)
+	err := forwardOutput(ctx, serialPort, incoming, con.Stdout, stopped, drain)
 
 	// Teardown, on every path: end the input, which returns a Read parked on
 	// Stdin with io.EOF, and wait for the input pump to return. Only then may
@@ -126,14 +128,17 @@ func writeAll(serialPort port, data []byte) error {
 	return nil
 }
 
-// forwardOutput copies the port's output to stdout, verbatim, and returns nil
-// when ctx is done or when drain has elapsed since inputStopped was closed.
-// It returns a port read error as it is, and a stdout write error as it is,
-// so the caller can tell a gone session (io.ErrClosedPipe) from a failure.
+// forwardOutput copies the port's output, processed by incoming, to stdout, and
+// returns nil when ctx is done or when drain has elapsed since inputStopped
+// was closed. It returns a port read error as it is, and a stdout write error
+// as it is, so the caller can tell a gone session (io.ErrClosedPipe) from a
+// failure.
 //
 // The port's read timeout, after which Read returns (0, nil), is what makes
 // the loop re-check its end conditions.
-func forwardOutput(ctx context.Context, serialPort port, stdout io.Writer, inputStopped <-chan struct{}, drain time.Duration) error {
+func forwardOutput(
+	ctx context.Context, serialPort port, incoming *inbound, stdout io.Writer, inputStopped <-chan struct{}, drain time.Duration,
+) error {
 	buf := make([]byte, readChunk)
 
 	// drained fires once drain elapsed after the input ended; nil until then,
@@ -159,9 +164,12 @@ func forwardOutput(ctx context.Context, serialPort port, stdout io.Writer, input
 
 		n, err := serialPort.Read(buf)
 		if n > 0 {
-			_, werr := stdout.Write(buf[:n])
-			if werr != nil {
-				return werr
+			out := incoming.apply(buf[:n])
+			if len(out) > 0 {
+				_, werr := stdout.Write(out)
+				if werr != nil {
+					return werr
+				}
 			}
 		}
 
