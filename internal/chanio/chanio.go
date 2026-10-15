@@ -54,40 +54,33 @@ func (r *ChanReader) logger() *slog.Logger {
 	return slog.Default()
 }
 
-// Read reads up to len(bytes) bytes into bytes, drawing first from any buffered
-// remainder of a previous channel message and then from the channel. It returns
-// the number of bytes read and any error encountered.
+// Read reads up to len(bytes) bytes into bytes: from the remainder of an
+// earlier channel message while one is buffered, otherwise from the next
+// channel message. It returns the number of bytes read and any error
+// encountered.
 //
-// It returns io.EOF when the channel is closed or the done channel (if any) is
-// closed, and may return n > 0 together with io.EOF in the same call (a buffered
-// remainder delivered alongside the EOF). Bytes from a channel message that do
-// not fit are buffered for the next Read. Empty channel messages are skipped
-// rather than surfaced as (0, nil), so a request for a non-empty buffer never
-// returns (0, nil).
+// It returns io.EOF once nothing is buffered and the channel or the done
+// channel (if any) is closed. Bytes from a channel message that do not fit are
+// buffered and served by the next Read on their own, without waiting for
+// another message. Empty channel messages are skipped rather than surfaced as
+// (0, nil), so a request for a non-empty buffer never returns (0, nil); a
+// zero-length request returns (0, nil) at once.
 func (r *ChanReader) Read(bytes []byte) (int, error) {
 	r.logger().Debug("chan read", "want", len(bytes))
 
-	// If there's enough data in the buffer, use it and return early.
-	if len(r.buf) >= len(bytes) {
+	if len(bytes) == 0 {
+		return 0, nil
+	}
+
+	// A partial buffer is returned as it is, as io.Reader allows: waiting for
+	// the next message to fill bytes up would hold the tail of a message back
+	// until another one arrives, which for a console's input is the next key.
+	if len(r.buf) > 0 {
 		n := copy(bytes, r.buf)
-		r.buf = r.buf[n:] // Adjust the buffer
+		r.buf = r.buf[n:]
 		r.logger().Debug("chan read served from buffer", "n", n)
 
 		return n, nil
-	}
-
-	var nBuf int
-	// If the buffer is not empty but contains some data, start by filling bytes with it.
-	if len(r.buf) > 0 {
-		nBuf = copy(bytes, r.buf)
-		r.buf = r.buf[nBuf:] // Adjust the buffer
-
-		if nBuf == len(bytes) {
-			// If the buffer fulfilled the bytes, return early
-			r.logger().Debug("chan read served from buffer", "n", nBuf)
-
-			return nBuf, nil
-		}
 	}
 
 	// Read from the channel until there is at least one byte to return (or the
@@ -97,38 +90,35 @@ func (r *ChanReader) Read(bytes []byte) (int, error) {
 		select {
 		case <-r.done:
 			// The session was torn down: unblock a reader parked here (e.g. a
-			// module in io.ReadAll on stdin, which never closes) by reporting EOF
-			// with any buffered remainder. A nil done channel is never selected,
-			// preserving plain channel-read semantics.
-			r.logger().Debug("chan read EOF: done signalled", "buffered", nBuf)
+			// module in io.ReadAll on stdin, which never closes) by reporting
+			// EOF. A nil done channel is never selected, preserving plain
+			// channel-read semantics.
+			r.logger().Debug("chan read EOF: done signalled")
 
-			return nBuf, io.EOF
+			return 0, io.EOF
 		case chanBytes, ok := <-r.ch:
 			if !ok {
-				r.logger().Debug("chan read EOF: channel closed", "buffered", nBuf)
+				r.logger().Debug("chan read EOF: channel closed")
 
-				return nBuf, io.EOF // Return any remaining buffer content before EOF
+				return 0, io.EOF
 			}
 
-			// Fill the space left in bytes after the buffer copy with data from the
-			// channel. copy caps at that remaining space (len(bytes)-nBuf), so nChan
-			// is exactly how many channel bytes were consumed.
-			nChan := copy(bytes[nBuf:], chanBytes)
-
-			// Buffer whatever did not fit for the next Read.
-			if nChan < len(chanBytes) {
-				r.buf = append(r.buf, chanBytes[nChan:]...)
+			// copy caps at len(bytes), so taken is exactly how many of the
+			// message's bytes it took; the rest is buffered for the next Read.
+			taken := copy(bytes, chanBytes)
+			if taken < len(chanBytes) {
+				r.buf = append(r.buf, chanBytes[taken:]...)
 			}
 
-			if nBuf+nChan == 0 {
-				// Empty message and nothing buffered — wait for real data rather
-				// than returning (0, nil).
+			if taken == 0 {
+				// An empty message: wait for real data rather than returning
+				// (0, nil).
 				continue
 			}
 
-			r.logger().Debug("chan read complete", "from_buffer", nBuf, "from_channel", nChan)
+			r.logger().Debug("chan read complete", "n", taken)
 
-			return nBuf + nChan, nil
+			return taken, nil
 		}
 	}
 }
