@@ -162,14 +162,12 @@ func forwardOutput(
 		default:
 		}
 
-		n, err := serialPort.Read(buf)
-		if n > 0 {
-			out := incoming.apply(buf[:n])
-			if len(out) > 0 {
-				_, werr := stdout.Write(out)
-				if werr != nil {
-					return werr
-				}
+		out, err := incoming.read(serialPort, buf)
+
+		if len(out) > 0 {
+			_, werr := stdout.Write(out)
+			if werr != nil {
+				return werr
 			}
 		}
 

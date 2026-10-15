@@ -204,6 +204,35 @@ func TestSerialInitDelay(t *testing.T) {
 	}
 }
 
+func TestSerialInitImap(t *testing.T) {
+	tests := []struct {
+		name    string
+		imap    []string
+		want    charMap
+		wantErr bool
+	}{
+		{"none", nil, charMap{}, false},
+		{"one", []string{"lfcrlf"}, charMap{lfcrlf: true}, false},
+		{"several, any case", []string{"LFCRLF", "delbs"}, charMap{lfcrlf: true, delbs: true}, false},
+		{"unknown", []string{"lfcrlf", "crnl"}, charMap{}, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &Serial{Port: "/dev/fake", Imap: tt.imap}
+
+			err := s.Init(context.Background())
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("Init err = %v, wantErr %v", err, tt.wantErr)
+			}
+
+			if !tt.wantErr && s.imap != tt.want {
+				t.Errorf("imap = %+v, want %+v", s.imap, tt.want)
+			}
+		})
+	}
+}
+
 func TestSleepCtx(t *testing.T) {
 	if err := sleepCtx(context.Background(), 0); err != nil {
 		t.Errorf("sleepCtx(0) = %v, want nil", err)
