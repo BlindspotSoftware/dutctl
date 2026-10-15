@@ -30,6 +30,16 @@ devices:
             with:
               port: "/home/oscar/ttyS2"
               baud: 115200
+      boot:
+        desc: "A step, then the interactive host serial console, as a boot command is shaped"
+        uses:
+          - module: dummy-status
+            args: ["power-cycle"]
+          - module: serial
+            args: ["-i"]
+            with:
+              port: "/home/oscar/ttyS2"
+              baud: 115200
       flash:
         desc: "Host SPI flash chip"
         uses:
