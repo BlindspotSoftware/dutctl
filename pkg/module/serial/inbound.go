@@ -4,13 +4,92 @@
 
 package serial
 
+import (
+	"fmt"
+	"io"
+	"strings"
+)
+
+// charMap is a set of substitutions for single bytes the DUT sends, named as
+// picocom names them for its --imap option, which tio, minicom, PuTTY and
+// Tera Term offer under names of their own with the same meaning. A DUT that
+// ends its lines in a bare LF needs lfcrlf to display right on a raw
+// terminal, which does not return the cursor to the start of the line by
+// itself; the Linux console, U-Boot and a getty send CR LF, so most DUTs
+// need no map at all.
+type charMap struct {
+	crlf   bool // CR becomes LF
+	crcrlf bool // a CR that no LF follows becomes CR LF
+	igncr  bool // CR is dropped
+	lfcr   bool // LF becomes CR
+	lfcrlf bool // a LF that no CR precedes becomes CR LF
+	ignlf  bool // LF is dropped
+	bsdel  bool // BS becomes DEL
+	delbs  bool // DEL becomes BS
+}
+
+// charMapNames lists the names parseCharMap accepts, for messages.
+const charMapNames = "crlf, crcrlf, igncr, lfcr, lfcrlf, ignlf, bsdel or delbs"
+
+// parseCharMap builds a charMap from its names, case-insensitively; an empty
+// list is the empty map.
+//
+//nolint:cyclop // a flat name switch
+func parseCharMap(names []string) (charMap, error) {
+	var maps charMap
+
+	for _, name := range names {
+		switch strings.ToLower(name) {
+		case "crlf":
+			maps.crlf = true
+		case "crcrlf":
+			maps.crcrlf = true
+		case "igncr":
+			maps.igncr = true
+		case "lfcr":
+			maps.lfcr = true
+		case "lfcrlf":
+			maps.lfcrlf = true
+		case "ignlf":
+			maps.ignlf = true
+		case "bsdel":
+			maps.bsdel = true
+		case "delbs":
+			maps.delbs = true
+		default:
+			return charMap{}, fmt.Errorf("unknown character map %q: want %s", name, charMapNames)
+		}
+	}
+
+	return maps, nil
+}
+
+// The bytes the maps act on.
+const (
+	bsByte  = 0x08
+	crByte  = '\r'
+	lfByte  = '\n'
+	delByte = 0x7f
+)
+
 // inbound processes the bytes the port delivers before they reach the client,
-// the same way in every mode: the monitor and the scripted sequence strip the
-// terminal escape sequences, so output and expect patterns see the visible
-// text, while the interactive console passes them on for the user's terminal
-// to interpret. It is stateful, since a sequence may be split across reads,
-// so each run uses one of its own.
+// the same way in every mode: first the device's character map, then, for
+// the monitor and the scripted sequence, the escape filter, so output and
+// expect patterns see the visible text; the interactive console passes the
+// sequences on for the user's terminal to interpret. It is stateful, since a
+// sequence or a CR LF pair may be split across reads, so each run uses one of
+// its own.
 type inbound struct {
+	// maps is the device's character map.
+	maps charMap
+	// prevCR records that the last byte emitted was a CR, across chunks, so
+	// lfcrlf leaves the LF of a CR LF pair alone; a CR another map dropped
+	// does not count, so its LF is bare.
+	prevCR bool
+	// heldCR records a CR at the end of a chunk that crcrlf holds back until
+	// the next byte tells whether a LF follows; flush releases it on a pause.
+	heldCR bool
+
 	// strip removes terminal escape sequences; -keep-escapes turns it off,
 	// and the interactive console never strips.
 	strip bool
@@ -18,12 +97,64 @@ type inbound struct {
 	remainder []byte
 }
 
-func newInbound(strip bool) *inbound {
-	return &inbound{strip: strip}
+func newInbound(maps charMap, strip bool) *inbound {
+	return &inbound{maps: maps, strip: strip}
+}
+
+// read reads the port once into buf and returns what of it is to be shown,
+// with the port's error, if any. A read that timed out, (0, nil), is a pause
+// in the device's output and releases what the character map held back.
+func (in *inbound) read(serialPort port, buf []byte) ([]byte, error) {
+	n, err := serialPort.Read(buf)
+	if n == 0 && err == nil {
+		return in.flush(), nil
+	}
+
+	return in.apply(buf[:n]), err
 }
 
 // apply returns what of chunk is to be shown.
 func (in *inbound) apply(chunk []byte) []byte {
+	if in.maps != (charMap{}) || in.heldCR {
+		chunk = in.mapChars(chunk)
+	}
+
+	return in.stripSequences(chunk)
+}
+
+// flush returns what a pause in the input releases: a CR held back for
+// crcrlf, which no LF followed within the pause, as CR LF. The bytes take the
+// same way as mapped ones, through the escape filter, so a sequence pending
+// there ends on them as a terminal would end it.
+func (in *inbound) flush() []byte {
+	if !in.heldCR {
+		return nil
+	}
+
+	in.heldCR = false
+
+	released := []byte{crByte, lfByte}
+	in.noteTail(released)
+
+	return in.stripSequences(released)
+}
+
+// release writes what a pause releases to w, if anything: a loop calls it
+// when it ends, so a CR held back for crcrlf is not lost with the run.
+func (in *inbound) release(w io.Writer) error {
+	out := in.flush()
+	if len(out) == 0 {
+		return nil
+	}
+
+	_, err := w.Write(out)
+
+	return err
+}
+
+// stripSequences removes the terminal escape sequences from chunk while
+// stripping is on, reassembling a sequence split across reads.
+func (in *inbound) stripSequences(chunk []byte) []byte {
 	if !in.strip {
 		return chunk
 	}
@@ -45,6 +176,104 @@ func (in *inbound) apply(chunk []byte) []byte {
 	}
 
 	return out
+}
+
+// mapChars applies the character map to chunk.
+func (in *inbound) mapChars(chunk []byte) []byte {
+	out := make([]byte, 0, len(chunk)+len(chunk)/8+2) //nolint:mnd // room for a few added bytes
+
+	for idx, b := range chunk {
+		out = in.releaseCR(out, b)
+		in.noteTail(out)
+
+		switch b {
+		case crByte:
+			out = in.mapCR(out, chunk[idx+1:])
+		case lfByte:
+			out = in.mapLF(out)
+		case bsByte:
+			if in.maps.bsdel {
+				b = delByte
+			}
+
+			out = append(out, b)
+		case delByte:
+			if in.maps.delbs {
+				b = bsByte
+			}
+
+			out = append(out, b)
+		default:
+			out = append(out, b)
+		}
+	}
+
+	in.noteTail(out)
+
+	return out
+}
+
+// noteTail records whether the last byte emitted so far is a CR. While
+// nothing was emitted for this chunk yet, the previous chunk's tail stands.
+func (in *inbound) noteTail(out []byte) {
+	if len(out) > 0 {
+		in.prevCR = out[len(out)-1] == crByte
+	}
+}
+
+// releaseCR emits a CR held back at the end of the previous chunk now that
+// next, the byte after it, is known: as CR LF unless next is the LF.
+func (in *inbound) releaseCR(out []byte, next byte) []byte {
+	if !in.heldCR {
+		return out
+	}
+
+	in.heldCR = false
+
+	out = append(out, crByte)
+
+	if next != lfByte {
+		out = append(out, lfByte)
+	}
+
+	return out
+}
+
+// mapCR emits a CR as the map says; rest is what follows it in the chunk, so
+// crcrlf can tell whether a LF does. A CR at the end of the chunk is held
+// back for that until the next chunk or a pause.
+func (in *inbound) mapCR(out []byte, rest []byte) []byte {
+	switch {
+	case in.maps.igncr:
+		return out
+	case in.maps.crlf:
+		return append(out, lfByte)
+	case !in.maps.crcrlf:
+		return append(out, crByte)
+	case len(rest) == 0:
+		in.heldCR = true
+
+		return out
+	case rest[0] == lfByte:
+		return append(out, crByte)
+	default:
+		return append(out, crByte, lfByte)
+	}
+}
+
+// mapLF emits a LF as the map says; lfcrlf adds the CR only when the previous
+// byte was not one.
+func (in *inbound) mapLF(out []byte) []byte {
+	switch {
+	case in.maps.ignlf:
+		return out
+	case in.maps.lfcr:
+		return append(out, crByte)
+	case in.maps.lfcrlf && !in.prevCR:
+		return append(out, crByte, lfByte)
+	default:
+		return append(out, lfByte)
+	}
 }
 
 // escByte is the ASCII escape that begins ANSI/VT escape sequences.

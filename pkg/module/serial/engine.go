@@ -77,30 +77,37 @@ func (e *engine) readUntil(ctx context.Context, pattern *regexp.Regexp) error {
 		default:
 		}
 
-		n, err := e.p.Read(readBuf)
-		if n > 0 {
-			out := e.in.apply(readBuf[:n])
-			if len(out) > 0 {
-				// Tee: forward to the client, then feed the matcher (re-checked
-				// at the top of the next iteration).
-				_, werr := e.sink.Write(out)
-				if werr != nil {
-					return werr
-				}
-
-				e.buf = append(e.buf, out...)
-			}
-
-			continue
-		}
-
 		// go.bug.st returns (0, nil) on a read timeout — keep waiting and let
 		// the ctx check above enforce the overall deadline. Any real error
 		// (port closed / device gone) ends the step.
+		out, err := e.in.read(e.p, readBuf)
+
+		werr := e.tee(out)
+		if werr != nil {
+			return werr
+		}
+
 		if err != nil {
 			return err
 		}
 	}
+}
+
+// tee forwards out to the client, then feeds it to the matcher, which
+// readUntil re-checks at the top of its next iteration.
+func (e *engine) tee(out []byte) error {
+	if len(out) == 0 {
+		return nil
+	}
+
+	_, err := e.sink.Write(out)
+	if err != nil {
+		return err
+	}
+
+	e.buf = append(e.buf, out...)
+
+	return nil
 }
 
 // write sends payload to the port, looping over short writes, then resets the
@@ -132,28 +139,27 @@ func (e *engine) capBuffer() {
 }
 
 // pump reads from the port and forwards every byte to the sink until ctx is
-// done (a normal end for a watch/drain, so it returns nil). On a real read
-// error it returns the error, unless swallowReadErr is set — used by the
-// post-send drain, where the device may have rebooted from the final send and
-// the sequence has already completed successfully.
+// done (a normal end for a watch/drain, so it returns nil once what the
+// character map still held back is written). On a real read error it returns
+// the error, unless swallowReadErr is set — used by the post-send drain,
+// where the device may have rebooted from the final send and the sequence
+// has already completed successfully.
 func (e *engine) pump(ctx context.Context, swallowReadErr bool) error {
 	readBuf := make([]byte, readChunk)
 
 	for {
 		select {
 		case <-ctx.Done():
-			return nil
+			return e.in.release(e.sink)
 		default:
 		}
 
-		n, err := e.p.Read(readBuf)
-		if n > 0 {
-			out := e.in.apply(readBuf[:n])
-			if len(out) > 0 {
-				_, werr := e.sink.Write(out)
-				if werr != nil {
-					return werr
-				}
+		out, err := e.in.read(e.p, readBuf)
+
+		if len(out) > 0 {
+			_, werr := e.sink.Write(out)
+			if werr != nil {
+				return werr
 			}
 		}
 

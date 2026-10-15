@@ -64,7 +64,7 @@ func TestEngineReadUntilMatchesAcrossReads(t *testing.T) {
 		readErr: errExhausted,
 	}
 	sink := &bytes.Buffer{}
-	eng := newEngine(fp, newInbound(false), sink)
+	eng := newEngine(fp, newInbound(charMap{}, false), sink)
 
 	if err := eng.readUntil(context.Background(), regexp.MustCompile("bar")); err != nil {
 		t.Fatalf("readUntil: %v", err)
@@ -84,7 +84,7 @@ func TestEngineSequentialExpectsConsumeBuffer(t *testing.T) {
 	// through its match and the second must find the already-buffered tail
 	// WITHOUT needing another read.
 	fp := &fakePort{reads: [][]byte{[]byte("foobar baz")}, readErr: errExhausted}
-	eng := newEngine(fp, newInbound(false), &bytes.Buffer{})
+	eng := newEngine(fp, newInbound(charMap{}, false), &bytes.Buffer{})
 
 	if err := eng.readUntil(context.Background(), regexp.MustCompile("bar")); err != nil {
 		t.Fatalf("first expect: %v", err)
@@ -98,7 +98,7 @@ func TestEngineSequentialExpectsConsumeBuffer(t *testing.T) {
 func TestEngineReadUntilTimeout(t *testing.T) {
 	// One non-matching chunk, then perpetual (0, nil) timeouts.
 	fp := &fakePort{reads: [][]byte{[]byte("nope")}, readErr: nil}
-	eng := newEngine(fp, newInbound(false), &bytes.Buffer{})
+	eng := newEngine(fp, newInbound(charMap{}, false), &bytes.Buffer{})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
 	defer cancel()
@@ -111,7 +111,7 @@ func TestEngineReadUntilTimeout(t *testing.T) {
 
 func TestEngineReadUntilPortError(t *testing.T) {
 	fp := &fakePort{reads: nil, readErr: errExhausted}
-	eng := newEngine(fp, newInbound(false), &bytes.Buffer{})
+	eng := newEngine(fp, newInbound(charMap{}, false), &bytes.Buffer{})
 
 	err := eng.readUntil(context.Background(), regexp.MustCompile("x"))
 	if !errors.Is(err, errExhausted) {
@@ -121,7 +121,7 @@ func TestEngineReadUntilPortError(t *testing.T) {
 
 func TestEngineWriteLoopsAndResetsBuffer(t *testing.T) {
 	fp := &fakePort{}
-	eng := newEngine(fp, newInbound(false), &bytes.Buffer{})
+	eng := newEngine(fp, newInbound(charMap{}, false), &bytes.Buffer{})
 	eng.buf = []byte("stale data from a prior expect")
 
 	if err := eng.write([]byte("reboot\r")); err != nil {
@@ -138,7 +138,7 @@ func TestEngineWriteLoopsAndResetsBuffer(t *testing.T) {
 }
 
 func TestEngineCapBufferKeepsTail(t *testing.T) {
-	eng := newEngine(&fakePort{}, newInbound(false), &bytes.Buffer{})
+	eng := newEngine(&fakePort{}, newInbound(charMap{}, false), &bytes.Buffer{})
 	eng.buf = append(bytes.Repeat([]byte("a"), matchWindow+100), []byte("MARK")...)
 
 	eng.capBuffer()
@@ -155,7 +155,7 @@ func TestEngineCapBufferKeepsTail(t *testing.T) {
 func TestEngineMonitorForwardsUntilCtxDone(t *testing.T) {
 	fp := &fakePort{reads: [][]byte{[]byte("boot log line\n")}} // then quiet (0,nil)
 	sink := &bytes.Buffer{}
-	eng := newEngine(fp, newInbound(false), sink)
+	eng := newEngine(fp, newInbound(charMap{}, false), sink)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
 	defer cancel()
@@ -171,7 +171,7 @@ func TestEngineMonitorForwardsUntilCtxDone(t *testing.T) {
 
 func TestEngineMonitorReturnsReadError(t *testing.T) {
 	fp := &fakePort{reads: nil, readErr: errExhausted}
-	eng := newEngine(fp, newInbound(false), &bytes.Buffer{})
+	eng := newEngine(fp, newInbound(charMap{}, false), &bytes.Buffer{})
 
 	if err := eng.monitor(context.Background()); !errors.Is(err, errExhausted) {
 		t.Errorf("monitor err = %v, want errExhausted", err)
@@ -183,7 +183,7 @@ func TestEngineDrainForwardsBestEffort(t *testing.T) {
 	// errors (e.g. the device rebooted from the final send).
 	fp := &fakePort{reads: [][]byte{[]byte("Rebooting...\n")}, readErr: errExhausted}
 	sink := &bytes.Buffer{}
-	eng := newEngine(fp, newInbound(false), sink)
+	eng := newEngine(fp, newInbound(charMap{}, false), sink)
 
 	if err := eng.drain(context.Background(), 50*time.Millisecond); err != nil {
 		t.Fatalf("drain: %v", err)
@@ -243,7 +243,7 @@ func TestStripEscapes(t *testing.T) {
 }
 
 func TestInboundReassemblesSplitSequence(t *testing.T) {
-	in := newInbound(true)
+	in := newInbound(charMap{}, true)
 
 	out1 := in.apply([]byte("a\x1b[3")) // incomplete CSI, tail carried over
 	out2 := in.apply([]byte("2mb"))     // completes the sequence
@@ -254,7 +254,7 @@ func TestInboundReassemblesSplitSequence(t *testing.T) {
 }
 
 func TestInboundWithoutStripPassesThrough(t *testing.T) {
-	in := newInbound(false)
+	in := newInbound(charMap{}, false)
 
 	chunk := []byte("a\x1b[31mb")
 	if got := in.apply(chunk); string(got) != string(chunk) {
@@ -265,7 +265,7 @@ func TestInboundWithoutStripPassesThrough(t *testing.T) {
 func TestEngineReadUntilFiltersEscapes(t *testing.T) {
 	fp := &fakePort{reads: [][]byte{[]byte("\x1b[32mlogin:\x1b[0m ")}, readErr: errExhausted}
 	sink := &bytes.Buffer{}
-	eng := newEngine(fp, newInbound(true), sink)
+	eng := newEngine(fp, newInbound(charMap{}, true), sink)
 
 	if err := eng.readUntil(context.Background(), regexp.MustCompile("login:")); err != nil {
 		t.Fatalf("readUntil: %v", err)

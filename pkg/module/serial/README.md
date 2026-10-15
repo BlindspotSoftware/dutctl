@@ -80,7 +80,9 @@ are on the wire in both directions, and nothing is filtered or matched:
 
 `-i` takes no steps, and no `-eol` or `-keep-escapes`: those shape what a
 scripted `send` appends and what the output filter strips, while the bridge
-passes bytes verbatim. Giving them with `-i` is a usage error.
+passes bytes verbatim. Giving them with `-i` is a usage error. The device's
+`imap` [character maps](#character-maps) apply in every mode, the interactive
+one included.
 
 Like the monitor, an interactive session keeps the device busy for every other
 command until it ends.
@@ -108,6 +110,9 @@ value would otherwise look like a flag.
   the output before it is shown or matched, so they don't interfere with
   patterns. Pass `-keep-escapes` to keep them (for binary data or exact-byte
   capture).
+- The device's `imap` [character maps](#character-maps), if any, are applied
+  before the output is shown or matched: with `lfcrlf`, a pattern that spans
+  lines sees `\r\n`.
 - Expect matching uses a rolling window of the most recent **64 KiB** of
   output, so a single pattern cannot span more than that.
 - Match on distinctive markers/prompts rather than `^`/`$` anchors — the rolling
@@ -150,5 +155,34 @@ example.
 | port   | string | Path to the serial device on the dutagent (e.g. `/dev/ttyUSB0`)     |
 | baud   | int    | Baud rate of the serial connection (default: 115200)                |
 | delay  | string | Pause before each send, e.g. `200ms` (default: 50ms; `0s` disables) |
+| imap   | list   | Character maps applied to the device's output, see below (default: none) |
+
+### Character maps
+
+`imap` names substitutions for single bytes the device sends, applied in every
+mode before the output is shown or matched. The names are picocom's (`--imap`);
+tio, minicom, PuTTY and Tera Term offer the same substitutions under names of
+their own.
+
+| Name     | Effect                                   |
+|----------|------------------------------------------|
+| `lfcrlf` | a LF that no CR precedes becomes CR LF   |
+| `crcrlf` | a CR that no LF follows becomes CR LF    |
+| `crlf`   | CR becomes LF                            |
+| `lfcr`   | LF becomes CR                            |
+| `igncr`  | CR is dropped                            |
+| `ignlf`  | LF is dropped                            |
+| `delbs`  | DEL becomes BS                           |
+| `bsdel`  | BS becomes DEL                           |
+
+Most devices need none: the Linux console, U-Boot and a getty end their lines
+in CR LF, which a raw terminal shows right as it is. A device that ends its
+lines in a bare LF stair-steps on the raw terminal of an interactive session,
+since the terminal does not return the cursor to the start of the line by
+itself; `imap: [lfcrlf]` fixes that. Unlike picocom's, the two maps that add a
+byte leave an existing CR LF pair alone, also one split across reads, so a
+capture of the output stays byte-exact for such a device; `crcrlf` holds a
+CR at the end of a read back until the next byte or a pause tells whether a
+LF follows. What you type is never mapped: Enter sends CR.
 
 [RE2]: https://golang.org/s/re2syntax
