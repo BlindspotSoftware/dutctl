@@ -282,13 +282,13 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 
 		con := session.OpenConsole(module.ConsoleOptions{Mode: module.ConsoleRaw})
 
-		return bridge(loopCtx, serialPort, con, s.drainFor(), s.Port, s.Baud)
+		return bridge(loopCtx, serialPort, newInbound(false), con, s.drainFor(), s.Port, s.Baud)
 	}
 
 	clientOut := newClientWriter(session)
 	clientOut.markerf("--- Connected to %s at %d baud ---\n", s.Port, s.Baud)
 
-	eng := newEngine(serialPort, clientOut, !cfg.keepEscapes)
+	eng := newEngine(serialPort, newInbound(!cfg.keepEscapes), clientOut)
 
 	// Monitor mode: no steps — stream the console until cancelled or -t elapses.
 	if len(cfg.steps) == 0 {
