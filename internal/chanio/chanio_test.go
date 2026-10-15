@@ -107,12 +107,14 @@ func TestChanReader_Read(t *testing.T) {
 			wantErr:    nil,
 		},
 		{
-			name:       "partial buffer, partial channel",
+			// A partial buffer is served on its own: the channel is not read to
+			// fill the request up, which would wait for a message to arrive.
+			name:       "partial buffer is served alone",
 			bufferInit: []byte("he"),
 			channelIn:  [][]byte{[]byte("llo")},
 			readSize:   5,
-			want:       []byte("hello"),
-			wantN:      5,
+			want:       []byte("he"),
+			wantN:      2,
 			wantErr:    nil,
 		},
 		{
@@ -223,11 +225,11 @@ func TestChanReaderWithReadAll(t *testing.T) {
 	}
 }
 
-// TestChanReader_ReadStraddleOverflow is a regression test: when a single Read
-// is served partly from the internal buffer and partly from the channel, and
-// the channel chunk is larger than the space left in the destination, the
-// overflow must be buffered for the next Read, never dropped.
-func TestChanReader_ReadStraddleOverflow(t *testing.T) {
+// TestChanReader_ReadServesBufferFirst pins two things about bytes buffered
+// from an earlier, larger message: a Read returns them on their own, without
+// waiting for another message, and a message that overflows the destination
+// is buffered for the next Read, never dropped.
+func TestChanReader_ReadServesBufferFirst(t *testing.T) {
 	ch := make(chan []byte, 1)
 	ch <- []byte("llobig") // the channel delivers 6 bytes in one chunk
 	close(ch)
@@ -237,34 +239,100 @@ func TestChanReader_ReadStraddleOverflow(t *testing.T) {
 		buf: []byte("he"), // 2 bytes already buffered
 	}
 
-	// First Read into a 5-byte slice: 2 bytes from the buffer leave room for 3
-	// channel bytes ("llo"); the remaining 3 ("big") overflow and must be kept.
 	p := make([]byte, 5)
 
+	// The buffered bytes come alone: the channel is not consulted while the
+	// buffer has bytes, although the request has room for more.
 	n, err := r.Read(p)
+	if err != nil || string(p[:n]) != "he" {
+		t.Fatalf("first Read() = %q, %v; want %q, nil (the buffered bytes on their own)", p[:n], err, "he")
+	}
+
+	// A 4-byte request takes 4 bytes of the 6-byte message; the overflow is
+	// buffered ...
+	n, err = r.Read(p[:4])
+	if err != nil || string(p[:n]) != "llob" {
+		t.Fatalf("second Read() = %q, %v; want %q, nil", p[:n], err, "llob")
+	}
+
+	// ... and served next, alone, before the EOF of the closed channel.
+	n, err = r.Read(p)
+	if err != nil || string(p[:n]) != "ig" {
+		t.Fatalf("third Read() = %q, %v; want %q, nil (the overflow, not dropped)", p[:n], err, "ig")
+	}
+
+	if n, err = r.Read(p); n != 0 || !errors.Is(err, io.EOF) {
+		t.Errorf("fourth Read() = %d, %v; want 0, io.EOF", n, err)
+	}
+}
+
+// A zero-length request returns at once with nothing, as io.Reader asks; it
+// neither waits for a message nor takes one.
+func TestChanReader_ZeroLengthRead(t *testing.T) {
+	ch := make(chan []byte, 1)
+	ch <- []byte("data")
+
+	r, err := NewChanReader(ch, nil, nil)
 	if err != nil {
-		t.Fatalf("first Read() error = %v", err)
+		t.Fatal(err)
 	}
 
-	if got := string(p[:n]); got != "hello" {
-		t.Fatalf("first Read() = %q, want %q", got, "hello")
+	if n, err := r.Read(nil); n != 0 || err != nil {
+		t.Fatalf("Read(nil) = %d, %v; want 0, nil", n, err)
 	}
 
-	// Draining the rest must yield the buffered overflow, so no byte is lost.
-	rest, err := io.ReadAll(r)
+	p := make([]byte, 8)
+
+	if n, err := r.Read(p); err != nil || string(p[:n]) != "data" {
+		t.Errorf("Read after a zero-length one = %q, %v; want the message untouched", p[:n], err)
+	}
+}
+
+// TestChanReader_LeftoverDoesNotWait: the tail of a message the previous Read
+// could not take is returned by the next Read at once, although no further
+// message arrives. For a console that is the difference between the end of a
+// paste showing up now and showing up at the next keystroke.
+func TestChanReader_LeftoverDoesNotWait(t *testing.T) {
+	ch := make(chan []byte) // unbuffered and never fed after the one message
+
+	r, err := NewChanReader(ch, nil, nil)
 	if err != nil {
-		t.Fatalf("ReadAll() error = %v", err)
+		t.Fatal(err)
 	}
 
-	if got := "hello" + string(rest); got != "hellobig" {
-		t.Errorf("total read = %q, want %q (bytes dropped when a read straddled buffer and channel)", got, "hellobig")
+	go func() { ch <- []byte("0123456789") }()
+
+	p := make([]byte, 6)
+
+	n, err := r.Read(p)
+	if err != nil || string(p[:n]) != "012345" {
+		t.Fatalf("first Read() = %q, %v; want %q, nil", p[:n], err, "012345")
+	}
+
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+
+		n, err = r.Read(p)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("second Read() waited for another message instead of returning the leftover")
+	}
+
+	if err != nil || string(p[:n]) != "6789" {
+		t.Errorf("second Read() = %q, %v; want %q, nil", p[:n], err, "6789")
 	}
 }
 
 // TestChanReaderDoneUnblocksRead verifies that closing the done channel unblocks
 // a Read that is waiting on a source channel which is never fed or closed,
-// returning io.EOF (with any buffered remainder). This is what unwedges a module
-// parked reading stdin when its session is torn down.
+// returning io.EOF; a buffered remainder is served by the Read before, never
+// together with the EOF. This is what unwedges a module parked reading stdin
+// when its session is torn down.
 func TestChanReaderDoneUnblocksRead(t *testing.T) {
 	ch := make(chan []byte)     // never fed, never closed
 	done := make(chan struct{}) //nolint:varnamelen // done is the conventional name
