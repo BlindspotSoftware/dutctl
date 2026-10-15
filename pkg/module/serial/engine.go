@@ -214,6 +214,13 @@ const (
 	csiFinalHi = 0x7e
 )
 
+// nF escape sequences (ECMA-35), "ESC ( B" for instance: after the ESC come
+// intermediate bytes 0x20–0x2f, then a single final byte 0x30–0x7e.
+const (
+	nfFinalLo = 0x30
+	nfFinalHi = 0x7e
+)
+
 // clean strips terminal escape sequences from a read chunk (unless filtering is
 // disabled), reassembling sequences split across reads via remainder.
 func (e *engine) clean(chunk []byte) []byte {
@@ -229,10 +236,11 @@ func (e *engine) clean(chunk []byte) []byte {
 	out := stripEscapes(chunk, &e.remainder)
 
 	if len(e.remainder) > maxRemainder {
-		// An unterminated sequence this long is almost certainly junk; stop
-		// carrying it so the buffer stays bounded. A terminator arriving in a
-		// later chunk may then leak as a stray byte — acceptable for such
-		// pathological input; preceding visible text is never lost.
+		// A control string this long with no terminator and no escape in it is
+		// almost certainly junk; stop carrying it so the buffer stays bounded.
+		// What was read after its start is dropped with it, and a terminator
+		// arriving later leaks as a stray byte — acceptable for such
+		// pathological input; the visible text before it is never lost.
 		e.remainder = nil
 	}
 
@@ -270,19 +278,50 @@ func stripEscapes(data []byte, remainder *[]byte) []byte {
 
 // seqEnd returns the index of the last byte of the escape sequence starting at
 // the ESC byte data[escIdx], or -1 if the sequence is not complete within data.
+// A control byte after the ESC cannot continue a sequence: a terminal executes
+// it and forgets the ESC, so the sequence is the lone ESC and the control byte
+// is re-scanned as data.
 func seqEnd(data []byte, escIdx int) int {
 	if escIdx+1 >= len(data) {
 		return -1 // lone ESC at end; the sequence may span reads
 	}
 
 	switch {
+	case data[escIdx+1] < csiInterLo:
+		return escIdx
 	case isStringSeqIntroducer(data[escIdx+1]):
 		return stringSeqEnd(data, escIdx)
 	case data[escIdx+1] == '[':
 		return csiEnd(data, escIdx)
+	case data[escIdx+1] >= csiInterLo && data[escIdx+1] <= csiInterHi:
+		return nfEnd(data, escIdx)
 	default:
 		return escIdx + 1 // two-byte escape, e.g. "ESC c"
 	}
+}
+
+// nfEnd returns the index of the final byte of the nF escape sequence starting
+// at data[escIdx] (ESC followed by an intermediate byte), or -1 if it is not
+// complete within data. Charset designations such as "ESC ( B", which a getty
+// and the Linux console send, are of this shape; taken for a two-byte escape
+// their final byte would leak into the output.
+func nfEnd(data []byte, escIdx int) int {
+	pos := escIdx + 1
+	for pos < len(data) && data[pos] >= csiInterLo && data[pos] <= csiInterHi {
+		pos++ // intermediate bytes
+	}
+
+	if pos >= len(data) {
+		return -1 // final byte not yet read
+	}
+
+	if data[pos] < nfFinalLo || data[pos] > nfFinalHi {
+		// Not a final byte: the sequence is aborted, as a terminal aborts it.
+		// Drop what was read of it and re-scan this byte, like csiEnd.
+		return pos - 1
+	}
+
+	return pos
 }
 
 // isStringSeqIntroducer reports whether b (the byte after ESC) begins an ANSI
@@ -321,7 +360,9 @@ func csiEnd(data []byte, escIdx int) int {
 
 // stringSeqEnd returns the index of the last byte of the ANSI string sequence
 // starting at data[escIdx], or -1 if it is not terminated within data. It ends
-// at ST ("ESC \" or 0x9c); an OSC may also end at BEL.
+// at ST ("ESC \" or 0x9c); an OSC may also end at BEL. Any other ESC ends the
+// string as well, as it does in a terminal, and begins a sequence of its own:
+// the string ends before it, and the ESC is re-scanned.
 func stringSeqEnd(data []byte, escIdx int) int {
 	osc := data[escIdx+1] == ']'
 
@@ -339,6 +380,8 @@ func stringSeqEnd(data []byte, escIdx int) int {
 			if data[pos+1] == '\\' {
 				return pos + 1 // "ESC \" = ST
 			}
+
+			return pos - 1
 		}
 	}
 
