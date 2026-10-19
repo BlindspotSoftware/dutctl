@@ -1,6 +1,6 @@
 ---
 name: serial module
-description: Verify serial console access through the serial module.
+description: Verify serial console access through the serial module, scripted and interactive.
 
 defaults:
   transport_oscar: &transport_oscar
@@ -45,5 +45,101 @@ stages:
             ]
           expect:
             - regex: "Hello World!"
+        options:
+          timeout: 15s
+
+  # The interactive console (serial -i) is driven through pipes here, so no
+  # terminal is involved: a pipe at its end ends the input, the session drains
+  # the far end's reply and ends by itself. What the stages pin is the byte
+  # path through the real client, the packaged agent and the real port driver:
+  # nothing added, nothing stripped, in either direction, and the markers on
+  # standard error only. The fake serial's far end is ttyS1: what the console
+  # sends comes out of it, and what is written into it reaches the console.
+  - name: Interactive console, client to DUT
+    steps:
+      - cmd: shell
+        name: Wait for the scripted stage's feeder to finish
+        transport: *transport_oscar
+        parameters:
+          # The bracket keeps pgrep from matching the shell that runs this very
+          # command, whose command line holds the pattern.
+          command: "for i in $(seq 1 40); do pgrep -f '[H]ello World' >/dev/null || exit 0; sleep 0.5; done; echo 'feeder still running'; exit 1"
+        options:
+          timeout: 30s
+
+      - cmd: shell
+        name: Capture the bytes the DUT receives
+        transport: *transport_oscar
+        parameters:
+          # head returns once the five bytes of "ping\r" arrived, so the capture
+          # never lingers into the next stage.
+          command: "( timeout 20 head -c 5 [[attributes.FakeSerialInput]] > /home/oscar/console.in ) >/dev/null 2>&1 & disown"
+
+      - cmd: shell
+        name: Send a line through the interactive console
+        transport:
+          proto: local
+        parameters:
+          command: "printf 'ping\\r' | [[input.DUTCTL]] -s [[attributes.DutagentEndpoint]] [[attributes.DeviceName]] console 2>&1"
+          expect:
+            - regex: "Connected to /home/oscar/ttyS2 at 115200 baud"
+            - regex: "Connection closed"
+        options:
+          timeout: 15s
+
+      - cmd: shell
+        name: The DUT got the bytes as typed, CR included
+        transport: *transport_oscar
+        parameters:
+          command: "for i in $(seq 1 50); do [ \"$(stat -c %s /home/oscar/console.in)\" -ge 5 ] && break; sleep 0.2; done; od -An -tx1 -v /home/oscar/console.in"
+          expect:
+            - regex: "70 69 6e 67 0d"
+        options:
+          timeout: 15s
+
+  - name: Interactive console, DUT to client
+    steps:
+      - cmd: shell
+        name: Let the DUT answer the first byte it receives
+        transport: *transport_oscar
+        parameters:
+          # The reply holds a CR LF and an escape sequence: both must reach the
+          # client's standard output untouched.
+          command: "( timeout 20 bash -c 'read -r -n1 < [[attributes.FakeSerialInput]]; printf \"BOOT\\r\\n\\033[1mok\\033[0m\\r\\n\" > [[attributes.FakeSerialInput]]' ) >/dev/null 2>&1 & disown"
+
+      - cmd: shell
+        name: Standard output holds exactly the DUT's bytes
+        transport:
+          proto: local
+        parameters:
+          # The input stays open long enough for the reply, then ends; the
+          # markers go to standard error, which is dropped here.
+          command: "( printf 'x'; sleep 4 ) | [[input.DUTCTL]] -s [[attributes.DutagentEndpoint]] [[attributes.DeviceName]] console 2>/dev/null | od -An -tx1 -v"
+          expect:
+            # od wraps its lines, so the bytes are matched across whitespace.
+            - regex: "(?s)^\\s*42 4f 4f 54 0d 0a 1b 5b 31 6d 6f 6b 1b 5b 30 6d\\s+0d 0a\\s*$"
+        options:
+          timeout: 15s
+
+  # A command that runs a step before the console is how a user watches a DUT
+  # boot: a device runs one command at a time, so the reset and the console
+  # must be one command. The step's output, the console's marker and the DUT's
+  # reply have to come out in that order.
+  - name: Interactive console after a step, in one command
+    steps:
+      - cmd: shell
+        name: Let the DUT answer the first byte it receives
+        transport: *transport_oscar
+        parameters:
+          command: "( timeout 20 bash -c 'read -r -n1 < [[attributes.FakeSerialInput]]; printf \"U-Boot\\r\\n\" > [[attributes.FakeSerialInput]]' ) >/dev/null 2>&1 & disown"
+
+      - cmd: shell
+        name: Step output, then the console, then the DUT
+        transport:
+          proto: local
+        parameters:
+          command: "( printf 'x'; sleep 4 ) | [[input.DUTCTL]] -s [[attributes.DutagentEndpoint]] [[attributes.DeviceName]] boot 2>&1"
+          expect:
+            - regex: "(?s)Hello from dummy status module.*Arg 0: power-cycle.*Connected to /home/oscar/ttyS2.*U-Boot.*Connection closed"
         options:
           timeout: 15s

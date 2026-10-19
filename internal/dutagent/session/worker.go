@@ -12,6 +12,7 @@ import (
 
 	"github.com/BlindspotSoftware/dutctl/internal/chanio"
 	"github.com/BlindspotSoftware/dutctl/internal/log"
+	"github.com/BlindspotSoftware/dutctl/pkg/module"
 
 	pb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1"
 )
@@ -21,13 +22,46 @@ import (
 // treating it as an internal fault.
 var ErrBadFileTransfer = errors.New("bad file transfer")
 
+// response frames the event for the client: a ConsoleOpen with the console's
+// id and mode, or a ConsoleClose.
+func (e consoleEvent) response() *pb.RunResponse {
+	if !e.open {
+		return &pb.RunResponse{Msg: &pb.RunResponse_ConsoleClose{ConsoleClose: &pb.ConsoleClose{}}}
+	}
+
+	return &pb.RunResponse{
+		Msg: &pb.RunResponse_ConsoleOpen{ConsoleOpen: &pb.ConsoleOpen{Id: e.console.id, Mode: wireConsoleMode(e.console.mode)}},
+	}
+}
+
+// wireConsoleMode is the wire form of mode.
+func wireConsoleMode(mode module.ConsoleMode) pb.ConsoleMode {
+	if mode == module.ConsoleRaw {
+		return pb.ConsoleMode_CONSOLE_MODE_RAW
+	}
+
+	return pb.ConsoleMode_CONSOLE_MODE_LINE
+}
+
 // toClientWorker sends messages from the module session to the client.
 // It loops until ctx is cancelled (returning nil) or a stream send fails
 // (returning that error).
 //
+// It is the one sender on the stream, so the order it receives in is the order
+// the client sees: a console's open event, which OpenConsole hands over before
+// it returns the console to the module, precedes the console's first output,
+// and the close event, handed over once the console's channels are ended,
+// follows its last. It reads output only from the open console; a console that
+// ended has no reader any more, and a writer still blocked on it fails.
+//
 //nolint:cyclop, funlen
 func toClientWorker(ctx context.Context, stream Stream, s *backend) error {
 	l := log.FromContext(ctx)
+
+	// current is the console whose output the worker forwards: the one the
+	// last event opened, none after a close. The events arrive in order, a
+	// close before the next open, so a close is always the current one's.
+	var current *console
 
 	for {
 		select {
@@ -42,18 +76,28 @@ func toClientWorker(ctx context.Context, stream Stream, s *backend) error {
 			if err != nil {
 				return err
 			}
-		case bytes := <-s.stdoutCh:
+		case event := <-s.consoleCh:
+			current = nil
+			if event.open {
+				current = event.console
+			}
+
+			err := stream.Send(event.response())
+			if err != nil {
+				return err
+			}
+		case bytes := <-current.stdout():
 			res := &pb.RunResponse{
-				Msg: &pb.RunResponse_Console{Console: &pb.Console{Data: &pb.Console_Stdout{Stdout: bytes}}},
+				Msg: &pb.RunResponse_ConsoleOutput{ConsoleOutput: &pb.ConsoleOutput{Data: &pb.ConsoleOutput_Stdout{Stdout: bytes}}},
 			}
 
 			err := stream.Send(res)
 			if err != nil {
 				return err
 			}
-		case bytes := <-s.stderrCh:
+		case bytes := <-current.stderr():
 			res := &pb.RunResponse{
-				Msg: &pb.RunResponse_Console{Console: &pb.Console{Data: &pb.Console_Stderr{Stderr: bytes}}},
+				Msg: &pb.RunResponse_ConsoleOutput{ConsoleOutput: &pb.ConsoleOutput{Data: &pb.ConsoleOutput_Stderr{Stderr: bytes}}},
 			}
 
 			err := stream.Send(res)
@@ -75,7 +119,7 @@ func toClientWorker(ctx context.Context, stream Stream, s *backend) error {
 			if err != nil {
 				return err
 			}
-		case file := <-s.fileCh:
+		case file := <-s.fileDownCh:
 			// The channel is fed and closed by SendFile right after the
 			// rendezvous, so this read always terminates: pass a nil done.
 			r, err := chanio.NewChanReader(file, nil, l)
@@ -189,28 +233,12 @@ func fromClientWorker(ctx context.Context, stream Stream, s *backend) error {
 
 			reqMsg := r.req.GetMsg()
 			switch msg := reqMsg.(type) {
-			case *pb.RunRequest_Console:
-				msgConsoleData := msg.Console.GetData()
-				switch consoleMsg := msgConsoleData.(type) {
-				case *pb.Console_Stdin:
-					stdin := consoleMsg.Stdin
-					if stdin == nil {
-						l.Warn("ignoring nil stdin message")
-
-						continue
-					}
-
-					l.Debug("received stdin from client", "bytes", len(stdin))
-
-					select {
-					case <-ctx.Done():
-						return nil
-					case s.stdinCh <- stdin:
-					}
-
-				default:
-					l.Warn("unexpected console message", "type", fmt.Sprintf("%T", consoleMsg))
+			case *pb.RunRequest_ConsoleInput:
+				if !deliverConsoleInput(ctx, s, msg.ConsoleInput) {
+					return nil
 				}
+			case *pb.RunRequest_ConsoleControl:
+				handleConsoleControl(ctx, s, msg.ConsoleControl)
 			case *pb.RunRequest_File:
 				fileMsg := msg.File
 				if fileMsg == nil {
@@ -244,7 +272,7 @@ func fromClientWorker(ctx context.Context, stream Stream, s *backend) error {
 				// wg.Wait, the broker) forever. The buffered content send and
 				// close below never block once the rendezvous succeeds.
 				select {
-				case s.fileCh <- file:
+				case s.fileUpCh <- file:
 				case <-ctx.Done():
 					return nil
 				}
@@ -258,5 +286,68 @@ func fromClientWorker(ctx context.Context, stream Stream, s *backend) error {
 				l.Warn("unexpected message type", "type", fmt.Sprintf("%T", msg))
 			}
 		}
+	}
+}
+
+// deliverConsoleInput hands the user's input to the open console it is marked
+// for, and discards it when no console is open or it is marked for another:
+// input is never queued for a later console, and the worker never parks on it,
+// so a file transfer behind it stays live. It reports false once ctx is done.
+func deliverConsoleInput(ctx context.Context, s *backend, input *pb.ConsoleInput) bool {
+	l := log.FromContext(ctx)
+
+	target := s.consoleFor(input.GetId())
+	if target == nil {
+		l.Debug("dropping console input: no console open for it", "console", input.GetId(), "bytes", len(input.GetData()))
+
+		return true
+	}
+
+	data := input.GetData()
+	if len(data) == 0 {
+		return true
+	}
+
+	l.Debug("received stdin from client", "bytes", len(data))
+
+	// An input that ended takes precedence over a reader still parked on the
+	// channel: checked first, since a select with both ready picks at random.
+	select {
+	case <-target.eof:
+		l.Debug("dropping console input: the console's input ended", "bytes", len(data))
+
+		return true
+	default:
+	}
+
+	select {
+	case <-ctx.Done():
+		return false
+	case <-target.eof:
+		l.Debug("dropping console input: the console's input ended", "bytes", len(data))
+	case target.stdinCh <- data:
+	}
+
+	return true
+}
+
+// handleConsoleControl applies a console event from the client to the open
+// console it is marked for; an event for any other console is dropped.
+func handleConsoleControl(ctx context.Context, s *backend, ctl *pb.ConsoleControl) {
+	l := log.FromContext(ctx)
+
+	target := s.consoleFor(ctl.GetId())
+	if target == nil {
+		l.Debug("dropping console control: no console open for it", "console", ctl.GetId())
+
+		return
+	}
+
+	switch ctl.GetControl().(type) {
+	case *pb.ConsoleControl_Eof:
+		l.Debug("console input ended by the client")
+		target.endInput()
+	default:
+		l.Warn("unexpected console control", "type", fmt.Sprintf("%T", ctl.GetControl()))
 	}
 }

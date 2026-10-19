@@ -6,5 +6,5 @@ device1:
       uses:
         - module: dummy-status
           passthrough: true
-        - module: dummy-repeat
+        - module: dummy-console
         - module: dummy-ft

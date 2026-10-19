@@ -449,8 +449,10 @@ func requestKind(req *pb.RunRequest) string {
 	switch {
 	case req.GetCommand() != nil:
 		return "command"
-	case req.GetConsole() != nil:
-		return "console"
+	case req.GetConsoleInput() != nil:
+		return "console-input"
+	case req.GetConsoleControl() != nil:
+		return "console-control"
 	case req.GetFile() != nil:
 		return "file"
 	default:
@@ -464,8 +466,12 @@ func responseKind(res *pb.RunResponse) string {
 	switch {
 	case res.GetPrint() != nil:
 		return "print"
-	case res.GetConsole() != nil:
-		return "console"
+	case res.GetConsoleOutput() != nil:
+		return "console-output"
+	case res.GetConsoleOpen() != nil:
+		return "console-open"
+	case res.GetConsoleClose() != nil:
+		return "console-close"
 	case res.GetFileRequest() != nil:
 		return "file-request"
 	case res.GetFile() != nil:

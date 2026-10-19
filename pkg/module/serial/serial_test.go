@@ -124,6 +124,37 @@ func TestSerialRunBadArgs(t *testing.T) {
 	}
 }
 
+func TestSerialRunInteractiveRejectsScriptArgs(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{"steps", []string{"-i", "expect", "x"}},
+		{"eol", []string{"-i", "-eol", "lf"}},
+		{"keep-escapes", []string{"-i", "-keep-escapes"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// A usage error is found before the port is opened or a console
+			// is requested, so the mock session needs no console streams.
+			s := &Serial{
+				Port: "/dev/fake",
+				Baud: 115200,
+				open: func(_ string, _ int) (port, error) {
+					t.Error("port opened despite a usage error")
+
+					return &fakePort{}, nil
+				},
+			}
+
+			if err := s.Run(context.Background(), &mock.Session{}, tt.args...); err == nil {
+				t.Errorf("Run(%q) = nil error, want usage error", tt.args)
+			}
+		})
+	}
+}
+
 func TestSerialInit(t *testing.T) {
 	t.Run("missing port", func(t *testing.T) {
 		s := &Serial{}
@@ -168,6 +199,35 @@ func TestSerialInitDelay(t *testing.T) {
 
 			if !tt.wantErr && s.delay != tt.want {
 				t.Errorf("delay = %v, want %v", s.delay, tt.want)
+			}
+		})
+	}
+}
+
+func TestSerialInitImap(t *testing.T) {
+	tests := []struct {
+		name    string
+		imap    []string
+		want    charMap
+		wantErr bool
+	}{
+		{"none", nil, charMap{}, false},
+		{"one", []string{"lfcrlf"}, charMap{lfcrlf: true}, false},
+		{"several, any case", []string{"LFCRLF", "delbs"}, charMap{lfcrlf: true, delbs: true}, false},
+		{"unknown", []string{"lfcrlf", "crnl"}, charMap{}, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &Serial{Port: "/dev/fake", Imap: tt.imap}
+
+			err := s.Init(context.Background())
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("Init err = %v, wantErr %v", err, tt.wantErr)
+			}
+
+			if !tt.wantErr && s.imap != tt.want {
+				t.Errorf("imap = %+v, want %+v", s.imap, tt.want)
 			}
 		})
 	}
