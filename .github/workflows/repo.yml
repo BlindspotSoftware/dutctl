@@ -46,3 +46,33 @@ jobs:
           if echo $log | grep -q 'message must be signed off'; then
             echo "nosignoff=true" >> $GITHUB_OUTPUT
           fi
+
+      # A commit that changes a decision record, any Markdown file in
+      # docs/decisions/ other than README.md and template.md, must be
+      # a docs commit that changes nothing outside docs/decisions/, see
+      # "Documentation commits" in CONTRIBUTING.md. Runs also when commitlint
+      # failed, so that both results show at once.
+      - name: Check that ADRs come in docs commits of their own
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          status=0
+          commits=$(git rev-list --reverse --no-merges "origin/$BASE_REF..$HEAD_SHA")
+          for c in $commits; do
+            files=$(git diff-tree --no-commit-id --name-only -r "$c")
+            records=$(grep -E '^docs/decisions/[^/]+\.md$' <<< "$files" | grep -v -x -e docs/decisions/README.md -e docs/decisions/template.md || true)
+            [ -n "$records" ] || continue
+            subject=$(git log -1 --format=%s "$c")
+            if ! grep -q '^docs: ' <<< "$subject"; then
+              echo "::error::${c:0:12} \"$subject\" changes an ADR, so it must be a docs commit"
+              status=1
+            fi
+            others=$(grep -v '^docs/decisions/' <<< "$files" | tr '\n' ' ' || true)
+            if [ -n "$others" ]; then
+              echo "::error::${c:0:12} \"$subject\" changes an ADR, so it must not change files outside docs/decisions/: $others"
+              status=1
+            fi
+          done
+          exit $status

@@ -129,7 +129,7 @@ A `docs` commit of its own is for documentation that does not belong to a code c
 - improving doc comments without changing code
 - changing project documents such as this guide or the README
 
-Decision records (ADRs) always go into a `docs` commit of their own, even when the same pull request implements the decision. That commit changes nothing outside [`docs/decisions/`](docs/decisions/README.md). This way the changelog shows each decision under Documentation, and an ADR can be reviewed, or moved to another pull request, apart from the code.
+Decision records (ADRs) always go into a `docs` commit of their own, even when the same pull request implements the decision. That commit changes nothing outside [`docs/decisions/`](docs/decisions/README.md); CI checks this for every commit of a pull request. This way the changelog shows each decision under Documentation, and an ADR can be reviewed, or moved to another pull request, apart from the code.
 
 #### Local linting minimizes overhead before creating a PR
 

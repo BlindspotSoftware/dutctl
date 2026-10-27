@@ -50,8 +50,8 @@ keep every contract need no ADR.
    Link other ADRs, documentation and code, but not pull requests or issues:
    an ADR explains its decision on its own.
 4. Commit the ADR as a `docs:` commit of its own that changes nothing outside
-   this folder, even when the same pull request implements the decision. The
-   reasons are in
+   this folder, even when the same pull request implements the decision. CI
+   checks this; the reasons are in
    [CONTRIBUTING.md](../../CONTRIBUTING.md#documentation-commits).
 5. Open a pull request. An ADR that comes with the change that implements it
    goes into the same pull request with the status `accepted`. An ADR that
