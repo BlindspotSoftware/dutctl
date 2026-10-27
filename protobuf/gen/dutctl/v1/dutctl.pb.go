@@ -1054,7 +1054,7 @@ func (x *LockResponse) GetLock() *LockState {
 type UnlockRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Device        string                 `protobuf:"bytes,1,opt,name=device,proto3" json:"device,omitempty"`
-	Force         bool                   `protobuf:"varint,2,opt,name=force,proto3" json:"force,omitempty"` // Release the lock regardless of owner.
+	Force         bool                   `protobuf:"varint,2,opt,name=force,proto3" json:"force,omitempty"` // Release the lock taken with LockRequest regardless of owner; a running command keeps its device locked.
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
