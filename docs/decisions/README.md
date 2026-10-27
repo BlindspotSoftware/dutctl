@@ -22,10 +22,10 @@ grep -H '^status:' docs/decisions/[0-9]*.md
 
 Write an ADR for a change that:
 
-- changes a primary public interface: the agent configuration grammar or the
-  RPC protocol (see [Public Interfaces](../../README.md#public-interfaces));
-- changes the module contract in `pkg/module` or a rule that every module must
-  follow;
+- changes a primary public interface: the agent configuration grammar, the
+  RPC protocol or the module API in `pkg/module` (see
+  [Public Interfaces](../../README.md#public-interfaces));
+- changes a rule that every module must follow;
 - sets or changes how runs, devices, locks, cancellation or shutdown behave;
 - adds a dependency or tool that would be hard to replace;
 - sets a convention for the whole code base, such as for logging, errors or

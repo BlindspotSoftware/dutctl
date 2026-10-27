@@ -99,6 +99,9 @@ The project's public interfaces fall into two tiers:
 2) RPC communication protocol for interacting with agents:
    - See the [Protobuf definitions](./protobuf/dutctl/v1/dutctl.proto)
 
+3) Module API for extending the DUT Agent with your own modules:
+   - See the [module guide](./docs/module_guide.md) and the Go package [`pkg/module`](./pkg/module)
+
 **Secondary — best effort.** These interfaces are kept stable where possible, but are not covered by the strict
 compatibility promise:
 
