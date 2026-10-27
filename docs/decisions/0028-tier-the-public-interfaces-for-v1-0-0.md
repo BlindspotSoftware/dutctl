@@ -74,5 +74,7 @@ rules, but no CI job runs them yet.
   1.0.0-alpha.N pre-releases.
 - [ADR-0023](0023-reject-rpcs-from-another-major-version.md): the agent rejects a client
   of another major version.
+- [ADR-0033](0033-add-the-module-api-to-the-primary-public-interfaces.md): adds the
+  module API in `pkg/module` to the primary tier.
 
 Recorded retroactively in October 2026.
