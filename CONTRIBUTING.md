@@ -6,7 +6,7 @@ The following is a set of guidelines for contributing to the dutctl project, whi
 
 If you discover a **security issue**, please bring it to our attention right away! Please refer to our [Security Policy](SECURITY.md) for information about reporting vulnerabilities.
 
-Read our [Code of Conduct](CODE_OF_CONDUCT.md) to keep contributions approachable and respectable
+Read our [Code of Conduct](CODE_OF_CONDUCT.md) to keep contributions approachable and respectable.
 
 If you use AI tools for a contribution, read our [AI Usage Policy](AI_POLICY.md) first. It requires you to disclose that use.
 
@@ -53,12 +53,12 @@ Unsure where to begin contributing to dutctl? You can start by looking through t
 2. **Clone the repository**: `git clone https://github.com/BlindspotSoftware/dutctl.git`
 3. **Install dependencies**: `go mod download`
 4. **Set up (optional) development tools**:
-   - Install golangci-lint (see Code Quality section below)
+   - Install golangci-lint (see [Run golangci-lint locally](#run-golangci-lint-locally) below)
    - Set up commit hooks for conventional commits (see Conventional Commits section below)
 
 ### Developer Certificate of Origin
 
-The [Developer Certificate of Origin (DCO)](https://developercertificate.org/) is a lightweight way for contributors to certify that they wrote or otherwise have the right to submit the code they are contributing to the .
+The [Developer Certificate of Origin (DCO)](https://developercertificate.org/) is a lightweight way for contributors to certify that they wrote or otherwise have the right to submit the code they are contributing to the project.
 
 By adding a _Signed-off-by_ line to commit messages, you adhere to these requirements:
 ```
@@ -75,30 +75,53 @@ This project uses [Conventional Commits](https://www.conventionalcommits.org/) f
 
 Commit messages should follow this pattern:
 ```
-<type>(<optional scope>): <description>
+<type>: <description>
 
 [optional body]
 
 [optional footer(s)]
 ```
 
+This project uses no scopes: commitlint rejects a header such as `fix(serial): ...`.
+
 Where type is one of the following:
-- **build**: Tooling, etc.
-- **chore**: Housekeeping, dependency management, go.mod etc.
-- **ci**: Continuous integration, workflows, etc.
+- **build**: Build and packaging setup, such as the GoReleaser configuration and `packaging/`
+- **chore**: Housekeeping: dependency updates, release commits and repository settings such as `.gitignore`
+- **ci**: Continuous integration: workflows, the firmware CI setup and the linter settings in `.golangci.yml`
 - **docs**: Readme, doc comments
 - **feat**: Source code changes introducing new functionality
 - **fix**: Bug fixes, no new functionality
 - **refactor**: Source code changes without changing behavior
 - **revert**: Revert a commit
-- **test**: Add tests, increase coverage, which were not committed initially with a fix or feat commit
+- **test**: Tests that are not part of a `feat`, `fix` or `refactor` commit, such as more coverage or a fix for a flaky test
+
+The type decides where the changelog lists a commit: `feat` under Features, `fix` under Bug Fixes, `docs` under Documentation, and `build`, `chore`, `refactor` and `test` under Other Work. `ci` and `revert` commits are left out.
+
+#### Breaking changes
+
+A change is breaking when users have to adapt to it, for example to a renamed configuration key, a changed command-line flag or a changed protocol message (see [Public Interfaces](README.md#public-interfaces)). Mark it with a `!` after the type, and describe it in a `BREAKING CHANGE:` footer: what changed and what users have to do.
+
+```
+feat!: change the default port to 2024
+
+The firmware CI runs dutagent on port 2024, so dutctl with its defaults
+could not reach it.
+
+BREAKING CHANGE: dutagent -a, dutctl -s and dutserver -s default to port 2024
+instead of 1024. To keep the old port, give it explicitly, e.g.
+dutctl -s localhost:1024.
+
+Signed-off-by: Random J Developer <random@developer.example.org>
+```
+
+The `!` makes the break visible at a glance, for example in `git log --oneline`, and the footer text goes into the changelog under BREAKING CHANGES.
 
 #### Local linting minimizes overhead before creating a PR
 
 If you want to enable commitlint locally, check out https://commitlint.js.org/guides/local-setup.html
 
 > [!TIP]
-> You can skip the husky part and just use GitHub hooks out of the box:
+> You can skip the husky part and just use Git hooks out of the box:
 
 Rename `.git/hooks/commit-msg.sample` into `.git/hooks/commit-msg` and put in
 ```
