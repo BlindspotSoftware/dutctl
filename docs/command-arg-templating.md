@@ -23,18 +23,24 @@ devices:
       power-cycle:
         desc: "Power cycle the device"
         uses:
-          - module: gpio-switch
-            args: ["power-pin", "off"]
+          - module: pdu
+            with:
+              host: http://10.0.0.5
+              outlet: 1
+            args: ["off"]
           - module: time-wait
-            args: ["2000"]
-          - module: gpio-switch
-            args: ["power-pin", "on"]
+            args: ["2s"]
+          - module: pdu
+            with:
+              host: http://10.0.0.5
+              outlet: 1
+            args: ["on"]
 ```
 
 Usage:
 
 ```bash
-dutctl run my-device power-cycle
+dutctl my-device power-cycle
 ```
 
 No runtime arguments needed - all values are configured in the YAML.
@@ -57,10 +63,10 @@ devices:
 Usage:
 
 ```bash
-dutctl run my-device run-command ls -la /tmp
+dutctl my-device run-command "ls -la /tmp"
 ```
 
-The passthrough module receives: `["ls", "-la", "/tmp"]`
+The passthrough module receives: `["ls -la /tmp"]`. The shell module expects the whole command as one argument, hence the quotes.
 
 All runtime arguments go to the passthrough module - you cannot have multiple passthrough modules in one command.
 
@@ -77,15 +83,19 @@ flash-firmware:
     - name: backup-path
       desc: "Backup location"
   uses:
-    - module: shell
-      args: ["flashrom", "-r", "${backup-path}"]
-    - module: file
-      args: ["${firmware-file}", "/tmp/fw.bin"]
     - module: flash
-      args: ["/tmp/fw.bin"]
+      with:
+        tool: flashrom
+        programmer: dediprog
+      args: ["read", "${backup-path}"]
+    - module: flash
+      with:
+        tool: flashrom
+        programmer: dediprog
+      args: ["write", "${firmware-file}"]
 ```
 
-Usage: `dutctl run device flash-firmware fw.bin /backup/old.bin`
+Usage: `dutctl device flash-firmware fw.bin /backup/old.bin`
 
 Templates can be embedded in strings (`/configs/${name}.yaml`) and mixed with static values (`["${file}", "static", "${other}"]`).
 
@@ -105,17 +115,20 @@ flash-verify:
       desc: "Path to firmware binary"
   uses:
     - module: file
-      args: ["${firmware-path}", "/tmp/fw.bin"]
-    - module: flash
-      args: ["/tmp/fw.bin"]
-    - module: time-wait
-      args: ["500"]
+      with:
+        operation: upload
+        destination: /tmp/fw.bin
+      args: ["${firmware-path}"]
     - module: shell
-      args: ["flashrom", "-v", "/tmp/fw.bin"]
+      args: ["flashrom -p dediprog -w /tmp/fw.bin"]
+    - module: time-wait
+      args: ["500ms"]
+    - module: shell
+      args: ["flashrom -p dediprog -v /tmp/fw.bin"]
 ```
 
 ```bash
-dutctl run device flash-verify /path/to/firmware.bin
+dutctl device flash-verify /path/to/firmware.bin
 ```
 
 ### GPIO Control with Parameters
@@ -124,19 +137,15 @@ dutctl run device flash-verify /path/to/firmware.bin
 gpio-pulse:
   desc: "Pulse GPIO pin"
   args:
-    - name: pin-name
-      desc: "GPIO pin identifier"
     - name: duration
-      desc: "Pulse duration in milliseconds"
+      desc: "Pulse duration, such as 100ms"
   uses:
-    - module: gpio-switch
-      args: ["${pin-name}", "on"]
-    - module: time-wait
+    - module: gpio-button
+      with:
+        pin: 17
       args: ["${duration}"]
-    - module: gpio-switch
-      args: ["${pin-name}", "off"]
 ```
 
 ```bash
-dutctl run device gpio-pulse reset-button 100
+dutctl device gpio-pulse 100ms
 ```
