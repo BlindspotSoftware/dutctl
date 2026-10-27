@@ -119,9 +119,10 @@ message File {
 // LockRequest is sent by the client to acquire or extend a lock on a device.
 // The lock owner identity is carried in an HTTP header, not in this message.
 //
-// Locks are advisory: any caller may force-release another's lock
-// (UnlockRequest.force), so callers are expected to reserve a device only as
-// long as needed and to release it when done.
+// Locks coordinate callers who cooperate; they are no security boundary.
+// Callers name themselves in that header, and any caller may force-release
+// another's lock (UnlockRequest.force). Callers are expected to reserve a
+// device only as long as needed and to release it when done.
 message LockRequest {
   string device = 1;
   int64 duration_seconds = 2; // 0 applies the agent's default duration; otherwise the lock expires after this many seconds.

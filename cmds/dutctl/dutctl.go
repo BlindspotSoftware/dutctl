@@ -54,7 +54,8 @@ information for the command.
 The lock command reserves a device for the current user for an optional duration
 (e.g. 30m, 2h); when omitted, the agent applies a default. The unlock command
 releases it; add the force keyword to release a lock held by another user.
-Locks are advisory, so reserve a device only as long as you need it.
+Locks coordinate users who cooperate; they are no security boundary. Reserve a
+device only as long as you need it.
 
 A device runs one command at a time: while a command runs, starting another on
 the device is rejected, even your own from another terminal. To run several
