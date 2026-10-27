@@ -31,16 +31,16 @@ request input, file transfer, etc.).
 
 ## Registration
 
-New modules go under `pkg/modules'. 
+New modules go under `pkg/module`.
 
 To register a module for use in _dutagent_, modules must call `module.Register()` and provide its name and a
 constructor. By convention, this is done in the module's `init()` function. E.g.:
 
 ```go
 func init() {
-  module.Register(module.Info{
+  module.Register(module.Record{
     ID:  "reset",
-    New: func() module.Module { return new(power.Reset) },
+    New: func() module.Module { return &Reset{} },
   })
 }
 ```
