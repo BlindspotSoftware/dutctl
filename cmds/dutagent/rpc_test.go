@@ -4,14 +4,19 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
 	"connectrpc.com/connect"
 	"github.com/BlindspotSoftware/dutctl/internal/auth"
 	"github.com/BlindspotSoftware/dutctl/internal/dutagent/locker"
+	"github.com/BlindspotSoftware/dutctl/internal/dutagent/session"
 	"github.com/BlindspotSoftware/dutctl/pkg/dut"
 
 	pb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1"
@@ -315,5 +320,52 @@ func TestLockRPCWhileShuttingDown(t *testing.T) {
 
 	if _, err := svc.Lock(userCtx("alice"), lockReq("devA", 120)); err != nil {
 		t.Errorf("owner extending the reservation: %v", err)
+	}
+}
+
+// The summary of a run tells an operator whether the agent is at fault: a run
+// that was cancelled, that the agent refused because of the request or the
+// device's state, or that the client broke off with a protocol error is a
+// warning, and only a failure is an error.
+func TestLogRunSummary(t *testing.T) {
+	aborted, abort := context.WithCancelCause(context.Background())
+	abort(errAbortedByShutdown)
+
+	tests := []struct {
+		name      string
+		err       error
+		wantLevel slog.Level
+		wantMsg   string
+	}{
+		{"success", nil, slog.LevelInfo, "request finished successfully"},
+		{"cancelled by the client", connect.NewError(connect.CodeCanceled, context.Canceled), slog.LevelWarn, "request cancelled"},
+		{"deadline passed", connect.NewError(connect.CodeDeadlineExceeded, context.DeadlineExceeded), slog.LevelWarn, "request cancelled"},
+		{"aborted by the agent stopping", cancelError(aborted), slog.LevelWarn, "request cancelled"},
+		{"first message not a command", connect.NewError(connect.CodeInvalidArgument, errors.New("first run request must contain a command")), slog.LevelWarn, "request refused"},
+		{"unknown device", connect.NewError(connect.CodeNotFound, dut.ErrDeviceNotFound), slog.LevelWarn, "request refused"},
+		{"arguments that do not resolve", connect.NewError(connect.CodeInvalidArgument, dut.ErrNoReceiverForArgs), slog.LevelWarn, "request refused"},
+		{
+			"client breaks the file protocol",
+			brokerError(fmt.Errorf("%w: received file-message without a former request", session.ErrBadFileTransfer)),
+			slog.LevelWarn, "request ended by a client protocol error",
+		},
+		{"device held by another user", connect.NewError(connect.CodeFailedPrecondition, locker.ErrWrongOwner), slog.LevelWarn, "request refused"},
+		{"agent shutting down", connect.NewError(connect.CodeFailedPrecondition, locker.ErrShuttingDown), slog.LevelWarn, "request refused"},
+		{"module failed", moduleError(errors.New("flash tool exited with code 1")), slog.LevelError, "request finished with error"},
+		{"broken stream", brokerError(errors.New("connection reset")), slog.LevelError, "request finished with error"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+
+			logRunSummary(slog.New(slog.NewTextHandler(&buf, nil)), tt.err)
+
+			out := buf.String()
+			if strings.Count(out, "\n") != 1 || !strings.Contains(out, "level="+tt.wantLevel.String()) ||
+				!strings.Contains(out, tt.wantMsg) {
+				t.Errorf("log = %q, want one %v line %q", out, tt.wantLevel, tt.wantMsg)
+			}
+		})
 	}
 }
