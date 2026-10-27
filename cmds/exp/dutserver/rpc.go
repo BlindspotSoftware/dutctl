@@ -21,6 +21,7 @@ import (
 	"github.com/BlindspotSoftware/dutctl/pkg/headers"
 	"github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1/dutctlv1connect"
 
+	relaypb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/relay/v1alpha1"
 	pb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1"
 )
 
@@ -537,8 +538,8 @@ func checkMajorMismatch(peer string) error {
 // applied registration is never left behind.
 func (s *rpcService) Register(
 	ctx context.Context,
-	req *connect.Request[pb.RegisterRequest],
-) (*connect.Response[pb.RegisterResponse], error) {
+	req *connect.Request[relaypb.RegisterRequest],
+) (*connect.Response[relaypb.RegisterResponse], error) {
 	ctx = log.With(log.WithScope(ctx, "rpc"), "rpc", "Register")
 	l := log.FromContext(ctx)
 	l.Info("request received")
@@ -569,7 +570,7 @@ func (s *rpcService) Register(
 		return nil, connect.NewError(connect.CodeAlreadyExists, fmt.Errorf("adding agent %q: %w", addr, err))
 	}
 
-	res := connect.NewResponse(&pb.RegisterResponse{})
+	res := connect.NewResponse(&relaypb.RegisterResponse{})
 
 	l.Info("request finished")
 

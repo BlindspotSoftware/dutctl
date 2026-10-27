@@ -16,7 +16,7 @@ import (
 
 	"github.com/BlindspotSoftware/dutctl/internal/buildinfo"
 
-	pb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1"
+	relaypb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/relay/v1alpha1"
 )
 
 // TestRegisterAgentAddr verifies that Register stores an agent's address with
@@ -37,7 +37,7 @@ func TestRegisterAgentAddr(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.addr, func(t *testing.T) {
 			s := &rpcService{agents: make(map[string]*agent)}
-			req := connect.NewRequest(&pb.RegisterRequest{Address: tt.addr, Devices: []string{"dev"}})
+			req := connect.NewRequest(&relaypb.RegisterRequest{Address: tt.addr, Devices: []string{"dev"}})
 
 			_, err := s.Register(context.Background(), req)
 			if tt.wantCode != 0 {

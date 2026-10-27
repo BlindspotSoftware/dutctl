@@ -38,7 +38,8 @@ REST API to observe the fleet of DUTs.
 # Communication Design
 
 The distributed entities of the DUT Control system communicate via Remote Procedure Calls (RPCs), which are defined in
-`protobuf/dutctl/v1/dutctl.proto`. The communication is always initiated by the client, and there are three calls 
+`protobuf/dutctl/v1/dutctl.proto`; agents register with a DUT Server through the experimental relay protocol in
+`protobuf/dutctl/relay/v1alpha1/relay.proto`. The communication is always initiated by the client, and there are three calls 
 defined in the RPC service that a client can issue to the agent: 
 1) List, to list the available connected devices 
 2) Commands, to learn about the available commands of a given device

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/relay/v1alpha1/relayv1alpha1connect"
 	"github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1/dutctlv1connect"
 )
 
@@ -26,8 +27,8 @@ func NewDeviceClient(addr string, opts ...connect.ClientOption) dutctlv1connect.
 // gRPC over HTTP/2 cleartext (h2c).
 //
 //nolint:ireturn // returns the connect-generated RelayServiceClient interface by design
-func NewRelayClient(addr string, opts ...connect.ClientOption) dutctlv1connect.RelayServiceClient {
-	return dutctlv1connect.NewRelayServiceClient(newH2CClient(), baseURL(addr), clientOptions(opts)...)
+func NewRelayClient(addr string, opts ...connect.ClientOption) relayv1alpha1connect.RelayServiceClient {
+	return relayv1alpha1connect.NewRelayServiceClient(newH2CClient(), baseURL(addr), clientOptions(opts)...)
 }
 
 // baseURL returns the http:// URL of the agent or server at addr. It builds the

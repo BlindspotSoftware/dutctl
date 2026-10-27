@@ -18,6 +18,7 @@ import (
 
 	"github.com/BlindspotSoftware/dutctl/internal/log"
 	"github.com/BlindspotSoftware/dutctl/internal/rpc"
+	"github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/relay/v1alpha1/relayv1alpha1connect"
 	"github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1/dutctlv1connect"
 )
 
@@ -87,7 +88,7 @@ func (svr *server) startRPCService(ctx context.Context) error {
 	mux.Handle(path, handler)
 	// Register the RPC service handler used by dut agents to register themselves
 	// and their devices with the server.
-	path, handler = dutctlv1connect.NewRelayServiceHandler(service)
+	path, handler = relayv1alpha1connect.NewRelayServiceHandler(service)
 	mux.Handle(path, handler)
 
 	slog.Info("rpc service listening", "addr", svr.address)
