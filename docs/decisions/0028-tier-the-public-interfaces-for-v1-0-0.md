@@ -76,5 +76,8 @@ rules, but no CI job runs them yet.
   of another major version.
 - [ADR-0033](0033-add-the-module-api-to-the-primary-public-interfaces.md): adds the
   module API in `pkg/module` to the primary tier.
+- [ADR-0034](0034-version-the-relay-protocol-as-alpha.md): moves the relay
+  service out of `dutctl.v1`, the package of the RPC protocol, into an alpha
+  package.
 
 Recorded retroactively in October 2026.
