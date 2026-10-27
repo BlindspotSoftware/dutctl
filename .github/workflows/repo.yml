@@ -76,3 +76,67 @@ jobs:
             fi
           done
           exit $status
+
+  decision-records:
+    name: Decision records
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # Every Markdown file in docs/decisions/ other than README.md and
+      # template.md is a decision record. Check that each is named
+      # NNNN-title-in-kebab-case.md with a number of its own, so that ADR-NNNN
+      # names one record, and that its front matter has a status from
+      # docs/decisions/README.md; a superseded record must name another record
+      # that exists. A pull request is checked as merged into main when it was
+      # opened or last pushed to, and a re-run checks that same merge, so a
+      # number that another pull request had taken by then fails here too.
+      - name: Check names, numbers and statuses of the decision records
+        run: |
+          cd docs/decisions
+          status=0
+          error() { echo "::error file=docs/decisions/$1::$1 $2"; status=1; }
+          declare -A taken
+          records=()
+          for f in *.md; do
+            case $f in README.md | template.md) continue ;; esac
+            [ -e "$f" ] || continue
+            if [[ ! $f =~ ^[0-9]{4}(-[a-z0-9]+)+\.md$ ]]; then
+              error "$f" "must be named NNNN-title-in-kebab-case.md, in lower case"
+              continue
+            fi
+            n=${f:0:4}
+            if [ -n "${taken[$n]}" ]; then
+              error "$f" "has the same number as ${taken[$n]}"
+            else
+              taken[$n]=$f
+            fi
+            records+=("$f")
+          done
+          for f in "${records[@]}"; do
+            # Print the status in the front matter, which runs from the --- on
+            # line 1 to the next ---, ignoring trailing blanks and CRs. Fail if
+            # there is no front matter.
+            if ! s=$(awk '{ sub(/[ \t\r]+$/, "") }
+                          NR == 1 { if ($0 != "---") exit 1; next }
+                          $0 == "---" { closed = 1; print s; exit }
+                          sub(/^status:[ \t]+/, "") { s = $0 }
+                          END { if (!closed) exit 1 }' "$f"); then
+              error "$f" "must start with front matter between two --- lines"
+              continue
+            fi
+            case $s in
+              proposed | accepted | rejected | deprecated) ;;
+              "superseded by ADR-"[0-9][0-9][0-9][0-9])
+                by=${s#"superseded by ADR-"}
+                if [ "$by" = "${f:0:4}" ]; then
+                  error "$f" "cannot be superseded by itself"
+                elif [ -z "${taken[$by]}" ]; then
+                  error "$f" "is superseded by ADR-$by, which does not exist"
+                fi
+                ;;
+              "") error "$f" "has no status in its front matter" ;;
+              *) error "$f" "has the status '$s'; use proposed, accepted, rejected, deprecated or superseded by ADR-NNNN" ;;
+            esac
+          done
+          exit $status
