@@ -941,9 +941,10 @@ func (x *File) GetContent() []byte {
 // LockRequest is sent by the client to acquire or extend a lock on a device.
 // The lock owner identity is carried in an HTTP header, not in this message.
 //
-// Locks are advisory: any caller may force-release another's lock
-// (UnlockRequest.force), so callers are expected to reserve a device only as
-// long as needed and to release it when done.
+// Locks coordinate callers who cooperate; they are no security boundary.
+// Callers name themselves in that header, and any caller may force-release
+// another's lock (UnlockRequest.force). Callers are expected to reserve a
+// device only as long as needed and to release it when done.
 type LockRequest struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	Device          string                 `protobuf:"bytes,1,opt,name=device,proto3" json:"device,omitempty"`
