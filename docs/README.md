@@ -12,6 +12,9 @@ In a future release, there will be DUT Server, which abstracts the DUT Client to
 usability in larger systems. From the DUT Client side, there is no difference between talking to a DUT Agent or the DUT
 Server in terms of controlling the hardware.
 
+Why the system is built this way, and which options were weighed, is recorded in the
+[decision records](./decisions/README.md).
+
 ## Device-Under-Test (DUT)
 The machine or hardware you want to operate.
 
