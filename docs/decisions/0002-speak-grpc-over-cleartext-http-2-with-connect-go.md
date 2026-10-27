@@ -69,6 +69,8 @@ the proto: `buf lint`, then `buf generate`. No CI job runs buf yet.
   protocol serves.
 - [ADR-0023](0023-reject-rpcs-from-another-major-version.md): the version header on every
   call.
+- [ADR-0034](0034-version-the-relay-protocol-as-alpha.md): the relay service
+  in a package of its own, `dutctl.relay.v1alpha1`.
 - Later changes:
   - 2026-06: servers and clients set up h2c through the `Protocols` setting of
     `net/http` instead of `golang.org/x/net/http2`, whose h2c package is
