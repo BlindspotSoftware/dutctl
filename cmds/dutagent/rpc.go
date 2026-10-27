@@ -14,6 +14,7 @@ import (
 	"connectrpc.com/connect"
 	"github.com/BlindspotSoftware/dutctl/internal/auth"
 	"github.com/BlindspotSoftware/dutctl/internal/dutagent/locker"
+	"github.com/BlindspotSoftware/dutctl/internal/dutagent/session"
 	"github.com/BlindspotSoftware/dutctl/internal/keyword"
 	"github.com/BlindspotSoftware/dutctl/internal/log"
 	"github.com/BlindspotSoftware/dutctl/internal/rpc"
@@ -366,7 +367,17 @@ func (a *rpcService) Run(
 	l.Info("request received")
 
 	err = a.run(ctx, rpc.NewRunStream(stream), user)
+	logRunSummary(l, err)
 
+	return err
+}
+
+// logRunSummary logs how a Run ended, at a level that tells an operator
+// whether the agent is at fault: a run that was cancelled, that the agent
+// refused because of the request or the device's state, or that the client
+// broke off with a protocol error is a warning, and only a failure, such as a
+// failed module or a broken stream, is an error.
+func logRunSummary(l *slog.Logger, err error) {
 	switch code := connect.CodeOf(err); {
 	case err == nil:
 		l.Info("request finished successfully")
@@ -374,9 +385,15 @@ func (a *rpcService) Run(
 		// Ended from outside, by its client or by the agent stopping: expected,
 		// not a fault.
 		l.Warn("request cancelled", "err", err)
+	case errors.Is(err, session.ErrBadFileTransfer):
+		// The client broke the file transfer protocol while its command ran:
+		// the client's fault, but not a refusal, as the modules had started.
+		l.Warn("request ended by a client protocol error", "err", err)
+	case code == connect.CodeInvalidArgument, code == connect.CodeNotFound, code == connect.CodeFailedPrecondition:
+		// Refused because of the request or the device's state: the client
+		// must change the request or wait, and the agent has nothing to fix.
+		l.Warn("request refused", "err", err)
 	default:
 		l.Error("request finished with error", "err", err)
 	}
-
-	return err
 }
