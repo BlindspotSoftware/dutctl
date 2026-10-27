@@ -84,8 +84,10 @@ An accepted ADR keeps its reasoning as it was when the decision was taken. To
 change a decision, write a new ADR that supersedes the old one. When the new ADR
 lands as accepted, the same pull request sets the old ADR's status to
 `superseded by ADR-NNNN` and adds a link to the new one under More information.
-Older ADRs do not link to proposals. Apart from that, an accepted ADR only gets
-fixes of typos and links.
+A new ADR that only adds to an earlier decision, without reversing any of it,
+leaves the earlier ADR accepted: the earlier ADR links the new one under More
+information, and the new one says what it adds. Older ADRs do not link to
+proposals. Apart from that, an accepted ADR only gets fixes of typos and links.
 
 ## Records written after the fact
 
