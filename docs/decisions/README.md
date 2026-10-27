@@ -43,7 +43,8 @@ keep every contract need no ADR.
    Design Proposals discussions. The ADR records the outcome; it does not
    replace the discussion.
 2. Copy [template.md](template.md) to `NNNN-title-in-kebab-case.md`, where
-   `NNNN` is the next free four-digit number.
+   `NNNN` is the next free four-digit number. CI checks the file name and that
+   no other ADR has the number.
 3. Fill it in and keep it short. The title is an imperative phrase that names
    the decision, such as "Stop the agent in stages". List only options that
    were actually weighed, and remove optional sections that would stay empty.
@@ -70,6 +71,9 @@ keep every contract need no ADR.
 | `rejected`               | Weighed and declined; kept to show why.         |
 | `deprecated`             | No longer in force, and nothing replaces it.    |
 | `superseded by ADR-NNNN` | Replaced by a later ADR, linked from this one.  |
+
+CI checks that every ADR has one of these statuses, and that a superseded ADR
+names another ADR that exists.
 
 The `date` is the day the decision was taken or, for a proposal, the day it was
 proposed. It stays when the status changes, also when a proposal is accepted.
