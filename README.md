@@ -98,6 +98,8 @@ The project's public interfaces fall into two tiers:
 
 2) RPC communication protocol for interacting with agents:
    - See the [Protobuf definitions](./protobuf/dutctl/v1/dutctl.proto)
+   - Not covered: the experimental [relay protocol](./protobuf/dutctl/relay/v1alpha1/relay.proto), with which agents
+     register with a DUT Server, and the Go code generated from it
 
 3) Module API for extending the DUT Agent with your own modules:
    - See the [module guide](./docs/module_guide.md) and the Go package [`pkg/module`](./pkg/module)

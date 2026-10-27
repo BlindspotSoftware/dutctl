@@ -28,7 +28,7 @@ import (
 	"github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1/dutctlv1connect"
 	"gopkg.in/yaml.v3"
 
-	pb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1"
+	relaypb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/relay/v1alpha1"
 )
 
 const (
@@ -219,7 +219,7 @@ func (agt *agent) registerWithServer(ctx context.Context) error {
 	slog.Info("registering with server", "server", agt.server)
 
 	client := rpc.NewRelayClient(agt.server)
-	req := connect.NewRequest(&pb.RegisterRequest{
+	req := connect.NewRequest(&relaypb.RegisterRequest{
 		Devices: agt.config.Devices.Names(),
 		Address: agt.address,
 	})

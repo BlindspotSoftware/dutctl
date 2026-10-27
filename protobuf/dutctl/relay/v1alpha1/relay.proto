@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+// The relay protocol is experimental, like the relay server itself. It may
+// still change incompatibly, so it lives in an alpha package, apart from
+// dutctl.v1, which becomes stable with v1.0.0.
+package dutctl.relay.v1alpha1;
+
+option go_package = "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/relay/v1alpha1;relayv1alpha1";
+
+// RelayService defines the service for forwarding communication via relay server.
+// NOTE: This is an experimental service and may change in the future.
+service RelayService {
+  rpc Register(RegisterRequest) returns (RegisterResponse) {}
+}
+
+// RegisterRequest is sent by a device agent to register with the relay server.
+// NOTE: This is an experimental service and may change in the future.
+message RegisterRequest {
+  repeated string devices = 1; // List of devices the agent is connected to.
+  string address = 2; // Address of the agent sending the request.
+}
+
+// RegisterResponse is sent by the relay server in response to a successful RegisterRequest.
+// NOTE: This is an experimental service and may change in the future.
+message RegisterResponse {}
