@@ -88,7 +88,7 @@ Where type is one of the following:
 - **build**: Build and packaging setup, such as the GoReleaser configuration and `packaging/`
 - **chore**: Housekeeping: dependency updates, release commits and repository settings such as `.gitignore`
 - **ci**: Continuous integration: workflows, the firmware CI setup and the linter settings in `.golangci.yml`
-- **docs**: Readme, doc comments
+- **docs**: Readme, doc comments, decision records, see [Documentation commits](#documentation-commits)
 - **feat**: Source code changes introducing new functionality
 - **fix**: Bug fixes, no new functionality
 - **refactor**: Source code changes without changing behavior
@@ -115,6 +115,21 @@ Signed-off-by: Random J Developer <random@developer.example.org>
 ```
 
 The `!` makes the break visible at a glance, for example in `git log --oneline`, and the footer text goes into the changelog under BREAKING CHANGES.
+
+#### Documentation commits
+
+Document your change in the commit that makes it; don't split the documentation off into a separate `docs` commit. A `feat`, `fix` or `refactor` commit brings the doc comments and the README and `docs/` updates it needs, just as it brings its tests. Code and documentation are then reviewed, released and reverted together, and the changelog lists the change once instead of a second time under Documentation.
+
+A `docs` commit of its own is for documentation that does not belong to a code change in the same pull request, for example:
+
+- fixing typos, wording or broken links
+- updating documentation that an earlier change left outdated
+- documenting existing behavior that was never written down, such as a module's README or a guide
+- restructuring the documentation or adding an overview
+- improving doc comments without changing code
+- changing project documents such as this guide or the README
+
+Decision records (ADRs) always go into a `docs` commit of their own, even when the same pull request implements the decision. That commit changes nothing outside [`docs/decisions/`](docs/decisions/README.md). This way the changelog shows each decision under Documentation, and an ADR can be reviewed, or moved to another pull request, apart from the code.
 
 #### Local linting minimizes overhead before creating a PR
 
