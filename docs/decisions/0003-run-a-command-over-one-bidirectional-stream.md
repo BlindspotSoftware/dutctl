@@ -58,6 +58,8 @@ did not request, both fail with `InvalidArgument`.
 - [ADR-0002](0002-speak-grpc-over-cleartext-http-2-with-connect-go.md): the RPC layer under the stream.
 - [ADR-0007](0007-route-module-input-and-output-through-a-session.md): how a module's I/O
   reaches the stream.
+- [ADR-0035](0035-frame-consoles-in-line-or-raw-mode.md): the messages that
+  frame a console on the stream, added in 2026.
 - [ADR-0014](0014-let-the-agent-access-client-files-the-user-did-not-name.md): which paths
   on the client a file transfer may use.
 - Later changes:
