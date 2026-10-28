@@ -1,5 +1,48 @@
 # Changelog
 
+## [1.0.0-alpha.6](https://github.com/BlindspotSoftware/dutctl/compare/v1.0.0-alpha.5...v1.0.0-alpha.6) (2026-10-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* the wire path of the Register call changes, so an agent and a dutserver from before and after this change cannot register with each other. Update both together.
+* dutagent -a, dutctl -s and dutserver -s default to port 2024 instead of 1024. To keep the old port, give it explicitly, e.g. dutctl -s localhost:1024.
+
+### Features
+
+* change the default port to 2024 ([2b15e6e](https://github.com/BlindspotSoftware/dutctl/commit/2b15e6ebd2a2466285fedaf69768abbf13d17de1))
+* give an address without a port the default port 2024 ([80c38ff](https://github.com/BlindspotSoftware/dutctl/commit/80c38ff16dc6a4a392d83a3cd196c833dfe9ba26))
+
+
+### Bug Fixes
+
+* log a refused run as a warning, not an error ([87460da](https://github.com/BlindspotSoftware/dutctl/commit/87460dac6e2e3219f3281d3cd757c37865758af2))
+
+
+### Documentation
+
+* add an AI usage policy ([ddfbcb8](https://github.com/BlindspotSoftware/dutctl/commit/ddfbcb8a93e08dfe6d2e65013a4c3c124716e7ff))
+* align the commit message guide with commitlint and release-please ([93d3ee6](https://github.com/BlindspotSoftware/dutctl/commit/93d3ee6ee6fd4a0df24f057fb308f7c687568b3d))
+* align the configuration reference with the parser ([a049418](https://github.com/BlindspotSoftware/dutctl/commit/a049418c4452cb04677e9114de4cff6b7db125a2))
+* fix the module registration example ([7fccec4](https://github.com/BlindspotSoftware/dutctl/commit/7fccec4b8fda7be364512c74234f2a6c18c70d8d))
+* link the decision records from the system overview ([02def91](https://github.com/BlindspotSoftware/dutctl/commit/02def91e9fea7c046fa9488be2b86f00d359ce6f))
+* list the module API as a primary public interface ([ff67ade](https://github.com/BlindspotSoftware/dutctl/commit/ff67adeb784e987efa83307394598a266c1dc048))
+* make the command argument examples work ([c44813d](https://github.com/BlindspotSoftware/dutctl/commit/c44813d830ce43cad8d3622e40182d94f77cf7c9))
+* record architecture decisions in docs/decisions ([218e60d](https://github.com/BlindspotSoftware/dutctl/commit/218e60d92ca34ac6531fc39ac36fc5e8c36f41bc))
+* record the module API as a primary public interface ([ddeb20a](https://github.com/BlindspotSoftware/dutctl/commit/ddeb20a5a821f2fcf49dd5f520e3a4d3179b0a8d))
+* record why the relay protocol is versioned as alpha ([0d42f91](https://github.com/BlindspotSoftware/dutctl/commit/0d42f919006c89eee45a2d61f27996414ae417b5))
+* say in the protocol which lock a forced unlock releases ([b1b1444](https://github.com/BlindspotSoftware/dutctl/commit/b1b1444e3137514d571666831d900b2f4987886b))
+* say when documentation gets a commit of its own ([7f70029](https://github.com/BlindspotSoftware/dutctl/commit/7f700290f8556f2915c53e6c21477792e68e42a5))
+* stop calling device locks advisory ([e184f85](https://github.com/BlindspotSoftware/dutctl/commit/e184f85a8a1be7c372d07a57a9af8b8969e8cec6))
+
+
+### Other Work
+
+* bump golang.org/x/crypto from 0.57.0 to 0.58.0 ([10a528c](https://github.com/BlindspotSoftware/dutctl/commit/10a528cab30b8c83ba5e1a8595fec3068cf13ca4))
+* bump golang.org/x/mod from 0.41.0 to 0.42.0 ([d44805b](https://github.com/BlindspotSoftware/dutctl/commit/d44805b4a963ecc6f22bb08b9bdea2149e004eb4))
+* correct the port comment in the example systemd unit ([3f6897c](https://github.com/BlindspotSoftware/dutctl/commit/3f6897c6897e4908138a096d9f37c3f29170d001))
+* move the relay service into its own alpha package ([18d15ba](https://github.com/BlindspotSoftware/dutctl/commit/18d15ba5dfe2e53b811a82665d7063f634606a46))
+
 ## [1.0.0-alpha.5](https://github.com/BlindspotSoftware/dutctl/compare/v1.0.0-alpha.4...v1.0.0-alpha.5) (2026-10-04)
 
 
