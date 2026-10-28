@@ -156,23 +156,16 @@ func TestBrokerParentCancelClosesSession(t *testing.T) {
 	}
 }
 
-// Forwarding a stdin message should land in session.stdinCh.
-func TestBrokerStdinForwarding(t *testing.T) {
+// Input the client sends while no console is open is dropped, not queued: the
+// stream ends right after it, and the broker stops cleanly rather than parking
+// its upstream worker on input nobody reads.
+func TestBrokerInputWithoutConsoleDropped(t *testing.T) {
 	b := &Broker{}
-	stdinPayload := []byte("user input")
-	req := &pb.RunRequest{Msg: &pb.RunRequest_Console{Console: &pb.Console{Data: &pb.Console_Stdin{Stdin: stdinPayload}}}}
+	req := &pb.RunRequest{Msg: &pb.RunRequest_ConsoleInput{ConsoleInput: &pb.ConsoleInput{Data: []byte("user input")}}}
 	stream := &testStream{recvReqs: []*pb.RunRequest{req}} // EOF after the request
 	sess, _ := start(t, b, stream)
 
-	internal := sess.(*backend)
-	select {
-	case data := <-internal.stdinCh:
-		if string(data) != string(stdinPayload) {
-			t.Fatalf("stdin mismatch: got %q want %q", string(data), string(stdinPayload))
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for the forwarded stdin payload")
-	}
+	awaitClosed(t, sess)
 
 	if err := b.Stop(); err != nil {
 		t.Fatalf("Stop: unexpected error: %v", err)
@@ -296,10 +289,10 @@ func TestBrokerSessionCallsUnblockAfterTeardown(t *testing.T) {
 		sess.Printf("%s", "dropped")
 		sess.Println("dropped")
 
-		stdin, stdout, stderr := sess.Console()
-		_, stdoutErr = stdout.Write([]byte("x"))
-		_, stderrErr = stderr.Write([]byte("x"))
-		_, stdinErr = io.ReadAll(stdin)
+		con := sess.OpenConsole(module.ConsoleOptions{Mode: module.ConsoleRaw})
+		_, stdoutErr = con.Stdout.Write([]byte("x"))
+		_, stderrErr = con.Stderr.Write([]byte("x"))
+		_, stdinErr = io.ReadAll(con.Stdin)
 		_, reqErr = sess.RequestFile("f")
 		sendFileErr = sess.SendFile("f", strings.NewReader("data"))
 	}()

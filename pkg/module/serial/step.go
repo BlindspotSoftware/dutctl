@@ -5,6 +5,7 @@
 package serial
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -54,10 +55,12 @@ func truncate(text string, limit int) string {
 }
 
 // scriptConfig is the parsed result of a serial module invocation: the global
-// flags plus the ordered step sequence.
+// flags plus the ordered step sequence, or the interactive mode, which has no
+// steps.
 type scriptConfig struct {
 	timeout     time.Duration
 	keepEscapes bool
+	interactive bool
 	steps       []step
 }
 
@@ -74,15 +77,26 @@ func parseArgs(args []string) (scriptConfig, error) {
 		timeout     time.Duration
 		eolName     string
 		keepEscapes bool
+		interactive bool
 	)
 
 	fs.DurationVar(&timeout, "t", 0, "global timeout for the whole run (e.g. 30s, 3m); 0 = no timeout")
 	fs.StringVar(&eolName, "eol", defaultEOL, "line ending appended by 'send': cr|lf|crlf|none")
 	fs.BoolVar(&keepEscapes, "keep-escapes", false, "keep terminal escape sequences in the output instead of stripping them")
+	fs.BoolVar(&interactive, "i", false, "interactive console: bridge the port to the client's terminal")
 
 	err := fs.Parse(args)
 	if err != nil {
 		return scriptConfig{}, fmt.Errorf("failed to parse arguments: %w", err)
+	}
+
+	if interactive {
+		err = checkInteractive(fs)
+		if err != nil {
+			return scriptConfig{}, err
+		}
+
+		return scriptConfig{timeout: timeout, interactive: true}, nil
 	}
 
 	eol, err := resolveEOL(eolName)
@@ -96,6 +110,32 @@ func parseArgs(args []string) (scriptConfig, error) {
 	}
 
 	return scriptConfig{timeout: timeout, keepEscapes: keepEscapes, steps: steps}, nil
+}
+
+// checkInteractive rejects what -i cannot be combined with: steps, and the
+// flags that set scripted-mode policy. -eol shapes what 'send' appends and
+// -keep-escapes what the output filter strips; the bridge passes bytes
+// verbatim, so an explicitly given value, even the default, would be ignored
+// without a word, and the user is told instead. fs.Visit sees only the flags
+// that were set on the command line.
+func checkInteractive(fs *flag.FlagSet) error {
+	if fs.NArg() > 0 {
+		return errors.New("interactive mode (-i) takes no steps")
+	}
+
+	var clash string
+
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "eol" || f.Name == "keep-escapes" {
+			clash = f.Name
+		}
+	})
+
+	if clash != "" {
+		return fmt.Errorf("interactive mode (-i) takes no -%s: it applies to scripted steps only", clash)
+	}
+
+	return nil
 }
 
 // resolveEOL maps the -eol flag value to the bytes appended by a 'send' step.

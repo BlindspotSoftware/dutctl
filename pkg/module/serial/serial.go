@@ -3,7 +3,8 @@
 // license that can be found in the LICENSE file.
 
 // Package serial provides a dutagent module that runs a scripted send/expect
-// sequence against a DUT's serial port.
+// sequence against a DUT's serial port, or bridges the port to the user's
+// terminal as an interactive console.
 package serial
 
 import (
@@ -39,25 +40,33 @@ const readTimeout = 100 * time.Millisecond
 const defaultDelay = 50 * time.Millisecond
 
 // sendDrain is how long the module keeps reading after a sequence whose last
-// step is a send, so the DUT's reply to that final input is visible before the
-// connection closes.
+// step is a send, or after the user's input ended in interactive mode, so the
+// DUT's reply to that final input is visible before the connection closes.
 const sendDrain = time.Second
 
 // portOpener opens a serial device. It is the injection point that lets tests
 // substitute a fake port for the real hardware.
 type portOpener func(name string, baud int) (port, error)
 
-// Serial observes the DUT's serial output and runs a scripted sequence of
-// send/expect steps against the serial port.
+// Serial observes the DUT's serial output, runs a scripted sequence of
+// send/expect steps against the serial port, or bridges the port to the
+// user's terminal.
 //
-// The module is non-interactive: all input is supplied up front as arguments,
-// which makes it suitable for scripts and automated callers.
+// In monitor and scripted mode all input is supplied up front as arguments,
+// which makes the module suitable for scripts and automated callers. With -i
+// it opens an interactive console instead and passes bytes verbatim both ways.
 type Serial struct {
 	Port  string // Port is the path to the serial device on the dutagent.
 	Baud  int    // Baud is the baud rate of the serial device. If unset, DefaultBaudRate is used.
 	Delay string // Delay is the pause before each send (e.g. "200ms") to pace input. Default 50ms; "0s" disables.
+	// Imap names the character maps applied to what the device sends, in
+	// every mode, as picocom's --imap names them: lfcrlf for a device that
+	// ends its lines in a bare LF, for instance. Empty for a device that
+	// sends CR LF, which the Linux console, U-Boot and a getty do.
+	Imap []string
 
 	delay time.Duration // delay is the parsed Delay, applied before each send.
+	imap  charMap       // imap is the parsed Imap.
 
 	// drainTimeout overrides the post-send drain window; 0 uses sendDrain. It
 	// exists so tests can shorten the drain; production leaves it 0.
@@ -71,28 +80,39 @@ type Serial struct {
 // Ensure implementing the Module interface.
 var _ module.Module = &Serial{}
 
-const abstract = `Scripted serial connection to the DUT
+const abstract = `Scripted or interactive serial connection to the DUT
 `
 
 const usage = `
 ARGUMENTS:
 	[-t <duration>] [-eol cr|lf|crlf|none] [-keep-escapes]                 (monitor: stream output)
 	[-t <duration>] [-eol cr|lf|crlf|none] [-keep-escapes] [--] <step>...  (run a step sequence)
+	[-t <duration>] -i                                                     (interactive console)
 
 	step := expect <regex> | send <data> | send-raw <data>
 
 `
 
 const description = `
-The serial module automates interaction with the DUT's serial console. All
-input is provided up front as arguments, so it suits scripts and automated
-callers.
+The serial module automates interaction with the DUT's serial console, or
+opens it as an interactive console. In monitor and scripted mode all input is
+provided up front as arguments, so they suit scripts and automated callers.
 
 With no steps it runs in MONITOR mode: it streams the serial output to the
 client until the session is cancelled, or until -t elapses (a success). With
 one or more steps it runs them in order (see below). Serial output is forwarded
 to the client in monitor mode, while waiting for an expect, and (if the last
 step is a send) for a moment afterwards so its reply is visible.
+
+With -i it runs in INTERACTIVE mode: your terminal is connected to the port,
+with the bytes passed exactly as they are in both directions. Your terminal
+interprets what the DUT sends, so screen-oriented programs work, and what you
+type reaches the DUT as typed: Enter sends CR, Ctrl-C reaches the DUT. End
+the session with Ctrl-A x on the client; Ctrl-A e toggles a local echo for
+DUTs that do not echo, and Ctrl-A pressed twice sends one to the DUT. Piped
+input ends the session shortly after its end, and -t bounds the run. The
+connection markers go to stderr, so a redirected stdout holds the DUT's bytes
+only.
 
 STEPS (executed in order; the run fails on the first expect that times out):
 	expect <regex>   Wait until the serial output matches the RE2 regular
@@ -117,6 +137,14 @@ FLAGS (before the steps):
 	                       which is what serial consoles expect on Enter.
 	-keep-escapes          Keep terminal escape sequences (cursor moves, colour,
 	                       queries) instead of stripping them from the output.
+	-i                     Interactive console. Takes no steps, and no -eol or
+	                       -keep-escapes: the bytes pass verbatim.
+
+The device's character maps (the imap configuration option, named as picocom
+names them: lfcrlf for a device that ends its lines in a bare LF, which would
+stair-step on a raw terminal) are applied to its output in every mode, before
+it is shown or matched. A device that sends CR LF, as the Linux console,
+U-Boot and a getty do, needs none.
 
 Terminal escape sequences (cursor moves, colour, queries) are stripped from the
 output before it is shown or matched, unless -keep-escapes is given. Expect
@@ -127,6 +155,7 @@ right after a send can match your own input rather than the device's reply.
 
 EXAMPLES:
 	monitor the console:            (no arguments)
+	interactive console:            -i
 	wait for a boot marker:         -- expect 'Welcome to'
 	login then run a command:       -- expect 'login:' send root expect '# ' send reboot
 	send Ctrl-C then expect shell:  -- send-raw '\x03' expect '$ '
@@ -139,6 +168,11 @@ func (s *Serial) Help() string {
 	help.WriteString(abstract)
 	help.WriteString(usage)
 	fmt.Fprintf(&help, "Configured COM port is %q with baud rate %d.\n", s.Port, s.Baud)
+
+	if len(s.Imap) > 0 {
+		fmt.Fprintf(&help, "Character maps applied to the device's output: %s.\n", strings.Join(s.Imap, ", "))
+	}
+
 	help.WriteString(description)
 
 	return help.String()
@@ -167,6 +201,13 @@ func (s *Serial) Init(ctx context.Context) error {
 
 		s.delay = parsed
 	}
+
+	imap, err := parseCharMap(s.Imap)
+	if err != nil {
+		return fmt.Errorf("invalid imap: %w", err)
+	}
+
+	s.imap = imap
 
 	// Note: We don't open the port here to allow dutagent to start
 	// even if the serial device is not yet available (e.g., powered off).
@@ -202,12 +243,15 @@ func defaultOpenPort(name string, baud int) (port, error) {
 	return serialPort, nil
 }
 
-// Run opens the configured serial port and either streams its output or
-// executes a step sequence. With no steps it runs in monitor mode, streaming
-// until the session is cancelled or -t elapses (both a success). With steps it
-// sends and expects in order, failing on the first expect that times out.
+// Run opens the configured serial port and either streams its output,
+// executes a step sequence, or bridges the port to the user's terminal. With
+// no steps it runs in monitor mode, streaming until the session is cancelled
+// or -t elapses (both a success). With steps it sends and expects in order,
+// failing on the first expect that times out. With -i it opens a raw console
+// and passes bytes verbatim until the session ends, -t elapses, or the user's
+// input ended (all a success).
 //
-//nolint:cyclop,funlen // monitor/sequence dispatch with pacing and drain; the branch count is inherent
+//nolint:cyclop,funlen // monitor/sequence/interactive dispatch with pacing and drain; the branch count is inherent
 func (s *Serial) Run(ctx context.Context, session module.Session, args ...string) error {
 	// The logger carried on ctx is already scoped to this module by the agent
 	// (scope "module", with module/device/command attributes), so the module
@@ -241,9 +285,6 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 
 	l.Info(fmt.Sprintf("connected to %s at %d baud", s.Port, s.Baud))
 
-	clientOut := newClientWriter(session)
-	clientOut.markerf("--- Connected to %s at %d baud ---\n", s.Port, s.Baud)
-
 	// loopCtx carries the per-sequence deadline (-t). The original ctx is kept
 	// for the post-send drain so the drain gets its own full window.
 	loopCtx := ctx
@@ -257,7 +298,21 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 		defer cancel()
 	}
 
-	eng := newEngine(serialPort, clientOut, !cfg.keepEscapes)
+	// Interactive mode: a raw console bridged to the port. Its markers go to
+	// the console's stderr; the Print markers of the other modes would land on
+	// the client's stdout among the DUT's bytes.
+	if cfg.interactive {
+		l.Debug("interactive mode; bridging the port to the client's console")
+
+		con := session.OpenConsole(module.ConsoleOptions{Mode: module.ConsoleRaw})
+
+		return bridge(loopCtx, serialPort, newInbound(s.imap, false), con, s.drainFor(), s.Port, s.Baud)
+	}
+
+	clientOut := newClientWriter(session)
+	clientOut.markerf("--- Connected to %s at %d baud ---\n", s.Port, s.Baud)
+
+	eng := newEngine(serialPort, newInbound(s.imap, !cfg.keepEscapes), clientOut)
 
 	// Monitor mode: no steps — stream the console until cancelled or -t elapses.
 	if len(cfg.steps) == 0 {
@@ -303,12 +358,7 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 	// If the sequence ended on a send, drain briefly so the DUT's reply to the
 	// final input is visible. Uses the original ctx (its own window).
 	if cfg.steps[total-1].kind != stepExpect {
-		drainFor := sendDrain
-		if s.drainTimeout > 0 {
-			drainFor = s.drainTimeout
-		}
-
-		err = eng.drain(ctx, drainFor)
+		err = eng.drain(ctx, s.drainFor())
 		if err != nil {
 			return fmt.Errorf("draining after final send: %w", err)
 		}
@@ -317,6 +367,16 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 	clientOut.markerf("--- Script completed ---\n")
 
 	return nil
+}
+
+// drainFor returns how long output is still forwarded after the last input:
+// sendDrain, unless a test shortened it.
+func (s *Serial) drainFor() time.Duration {
+	if s.drainTimeout > 0 {
+		return s.drainTimeout
+	}
+
+	return sendDrain
 }
 
 // sleepCtx pauses for d, returning ctx.Err() if ctx is done first. A

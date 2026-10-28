@@ -71,6 +71,9 @@ drive the broker and the session through a fake stream, and the tests in
 - Code: [internal/dutagent/session](../../internal/dutagent/session),
   [internal/chanio](../../internal/chanio), and the `Session` contract in
   [pkg/module/module.go](../../pkg/module/module.go).
+- [ADR-0035](0035-frame-consoles-in-line-or-raw-mode.md): consoles framed by
+  messages of their own, each with channels of its own; `OpenConsole`
+  replaces `Console()`.
 - Later changes:
   - 2025-12: `Start` returned the session together with an error channel
     that closed once both workers had ended, and a worker that ended stopped

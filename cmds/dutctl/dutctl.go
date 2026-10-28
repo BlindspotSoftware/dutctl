@@ -63,6 +63,15 @@ steps together, have them configured as one command. A forced unlock releases a
 reservation but does not end a running command: the device stays busy until the
 command returns.
 
+A command may open a console: its module then reads what you type. For a line
+console the terminal stays as it is, Enter sends the line and Ctrl-C ends the
+run. For a raw console, a serial port for instance, dutctl switches a terminal
+to raw mode: every key goes to the device as typed, Ctrl-C included. Ctrl-A x
+ends such a session, Ctrl-A twice sends a literal Ctrl-A, and Ctrl-A e
+toggles local echo for a device that does not echo. Piped input is forwarded
+as it is read, and its end is passed on. A raw console needs the text output
+format.
+
 When dutctl is run without any positional arguments, it defaults to the list command.
 `
 
@@ -79,9 +88,7 @@ const (
 func newApp(stdin io.Reader, stdout, stderr io.Writer, exitFunc func(int), args []string) *application {
 	var app application
 
-	app.stdout = stdout
 	app.stderr = stderr
-	app.stdin = stdin
 	app.exitFunc = exitFunc
 
 	fs := flag.NewFlagSet(args[0], flag.ExitOnError)
@@ -109,6 +116,12 @@ func newApp(stdin io.Reader, stdout, stderr io.Writer, exitFunc func(int), args 
 	fs.Parse(args[1:])
 	app.args = fs.Args()
 
+	// The console a module may open owns the streams: it switches a terminal
+	// to raw mode for a raw console, and it wraps the client's own text so
+	// that lines stay at column 0 while raw. The probes for colour run on the
+	// bare streams, before the wrapping.
+	app.console = newConsole(stdin, stdout, stderr, output.IsText(app.outputFormat))
+
 	// Setup diagnostic logging. The handler writes to stderr only and is
 	// installed as the process default so any package can log via package-level
 	// slog. An invalid --log value was already rejected by fs.Parse above.
@@ -116,26 +129,29 @@ func newApp(stdin io.Reader, stdout, stderr io.Writer, exitFunc func(int), args 
 	// Color is suppressed unless -no-color is unset AND the target stream is a
 	// terminal, so redirected/piped output stays free of ANSI escapes. The log
 	// handler is gated on stderr; the formatter's content on stdout.
-	app.logHandler = newCLIHandler(stderr, mode, !app.noColor && isTerminal(stderr))
+	app.logHandler = newCLIHandler(app.console.errText, mode, !app.noColor && isTTY(stderr))
 	slog.SetDefault(slog.New(app.logHandler))
 
 	// Setup output formatter
 	app.formatter = output.New(output.Config{
-		Stdout:  stdout,
-		Stderr:  stderr,
+		Stdout:  app.console.outText,
+		Stderr:  app.console.errText,
 		Format:  app.outputFormat,
 		Verbose: app.verbose,
-		NoColor: app.noColor || !isTerminal(stdout),
+		NoColor: app.noColor || !isTTY(stdout),
 	})
 
 	return &app
 }
 
 type application struct {
-	stdin    io.Reader
-	stdout   io.Writer
+	// stderr is the process's standard error, for the usage text; everything
+	// else goes through the console or the formatter.
 	stderr   io.Writer
 	exitFunc func(int)
+	// console is the client's end of the console a module may open during a
+	// run. It owns the standard streams.
+	console *console
 
 	// flags
 	serverAddr        string
@@ -203,7 +219,7 @@ func (app *application) dispatch() error {
 	// summary) instead of being killed. Every RPC path shares it — unary calls
 	// wrap it in a per-call timeout, while Run uses it directly, since a stream
 	// has no overall deadline.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	defer stop()
 
 	return asInterrupt(ctx, app.route(ctx))
