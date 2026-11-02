@@ -79,6 +79,21 @@ type Button struct {
 	Pin       Pin    // Raw BCM2835/BCM2711 pin number
 	ActiveLow bool   // If set, the idle state is high, and low when pressed. Default is false
 	Backend   string // For future use. Name of the backend to use. Default and fallback is "devmem"
+	Label     string // Optional string tag to describe the button's purpose or connected item, e.g. "Host reset line"
+}
+
+// label returns a description of b using as much information as available. Fallback is just the pin number.
+func (b *Button) label() string {
+	return pinLabel(b.Label, b.Pin)
+}
+
+// pinLabel is "<label> (GPIO <pin>)", or "GPIO <pin>" without a label.
+func pinLabel(label string, pin Pin) string {
+	if label == "" {
+		return fmt.Sprintf("GPIO %d", pin)
+	}
+
+	return fmt.Sprintf("%s (GPIO %d)", label, pin)
 }
 
 // Ensure implementing the Module interface.
@@ -183,7 +198,7 @@ func (b *Button) Run(ctx context.Context, s module.Session, args ...string) erro
 	}
 
 	log.FromContext(ctx).Info(fmt.Sprintf("button press for %s (pin %d)", duration, b.Pin))
-	s.Printf("Button pressed for %s\n", duration)
+	s.Printf("%s: pressed for %s\n", b.label(), duration)
 
 	return nil
 }
@@ -227,8 +242,16 @@ type Switch struct {
 	ActiveLow bool
 	// For future use. Name of the backend to use. Default is "devmem"
 	Backend string
+	// Label is an optional string tag to describe the switches purpose or connected item.
+	// E.g "Host reset line" or "Green status LED".
+	Label string
 
 	state switchState
+}
+
+// label returns a description of s using as much information as available. Fallback is just the pin number.
+func (s *Switch) label() string {
+	return pinLabel(s.Label, s.Pin)
 }
 
 // Ensure implementing the Module interface.
@@ -313,9 +336,9 @@ func (s *Switch) Run(ctx context.Context, sesh module.Session, args ...string) e
 		l.Info(fmt.Sprintf("switch on (pin %d)", s.Pin))
 
 		if s.state == on {
-			sesh.Println("Already on")
+			sesh.Printf("%s: already on\n", s.label())
 		} else {
-			sesh.Println("Turned on")
+			sesh.Printf("%s: turned on\n", s.label())
 		}
 
 		s.state = on
@@ -330,9 +353,9 @@ func (s *Switch) Run(ctx context.Context, sesh module.Session, args ...string) e
 		l.Info(fmt.Sprintf("switch off (pin %d)", s.Pin))
 
 		if s.state == off {
-			sesh.Println("Already off")
+			sesh.Printf("%s: already off\n", s.label())
 		} else {
-			sesh.Println("Turned off")
+			sesh.Printf("%s: turned off\n", s.label())
 		}
 
 		s.state = off
@@ -345,11 +368,11 @@ func (s *Switch) Run(ctx context.Context, sesh module.Session, args ...string) e
 		}
 
 		if s.state == on {
-			sesh.Println("Turned off")
+			sesh.Printf("%s: turned off\n", s.label())
 
 			s.state = off
 		} else {
-			sesh.Println("Turned on")
+			sesh.Printf("%s: turned on\n", s.label())
 
 			s.state = on
 		}

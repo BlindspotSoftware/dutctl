@@ -35,6 +35,7 @@ See [gpio-example-cfg.yml](./gpio-example-cfg.yml) for examples.
 | pin       | int    | Raw BCM2835/BCM2711 pin number                                          |
 | activelow | bool   | If true, the idle state is high, and low when pressed. Default is false |
 | backend   | string | For future use. Name of the backend to use. Default is "devmem"         |
+| label     | string | Optional tag for the button's purpose or connected item, e.g. "Host reset line". Messages then read "Host reset line (GPIO 9): pressed for 500ms" instead of "GPIO 9: pressed for 500ms". |
 
 # Switch
 
@@ -60,3 +61,4 @@ See [gpio-example-cfg.yml](./gpio-example-cfg.yml) for examples.
 | initial   | string | Initial state of the switch: "on" or "off" (case insensitive). Default and fallback is "off". |
 | activelow | bool   | If true, the switch is active low (switch on means gpio pin low). Default is false.           |
 | backend   | string | For future use. Name of the backend to use. Default is "devmem"                               |
+| label     | string | Optional tag for the switch's purpose or connected item, e.g. "Green status LED". Messages then read "Green status LED (GPIO 17): turned on" instead of "GPIO 17: turned on". |

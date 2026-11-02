@@ -143,6 +143,7 @@ gpio-pulse:
     - module: gpio-button
       with:
         pin: 17
+        label: Pulse line
       args: ["${duration}"]
 ```
 

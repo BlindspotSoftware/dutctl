@@ -227,6 +227,29 @@ func TestButtonRun(t *testing.T) {
 	}
 }
 
+func TestButtonMessageNamesTheButton(t *testing.T) {
+	tests := []struct {
+		button Button
+		want   string
+	}{
+		{Button{Pin: 9, Label: "Power button"}, "Power button (GPIO 9): pressed for 10ms\n"},
+		{Button{Pin: 10}, "GPIO 10: pressed for 10ms\n"},
+	}
+
+	for _, tt := range tests {
+		tt.button.gpio = &MockGpio{}
+		sesh := &mock.Session{}
+
+		if err := tt.button.Run(context.Background(), sesh, "10ms"); err != nil {
+			t.Fatalf("%s: %v", tt.button.label(), err)
+		}
+
+		if sesh.PrintText != tt.want {
+			t.Errorf("%s printed %q, want %q", tt.button.label(), sesh.PrintText, tt.want)
+		}
+	}
+}
+
 func TestButtonHelp(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -667,6 +690,33 @@ func TestSwitchRun(t *testing.T) {
 				t.Errorf("expected output to end with a newline, got %q", sesh.PrintText)
 			}
 		})
+	}
+}
+
+func TestSwitchMessagesNameTheSwitch(t *testing.T) {
+	tests := []struct {
+		swtch Switch
+		arg   string
+		want  string
+	}{
+		{Switch{Pin: 17, Label: "PSU 1 socket", state: on}, "on", "PSU 1 socket (GPIO 17): already on\n"},
+		{Switch{Pin: 17, Label: "PSU 1 socket", state: on}, "off", "PSU 1 socket (GPIO 17): turned off\n"},
+		{Switch{Pin: 26, state: off}, "on", "GPIO 26: turned on\n"},
+		{Switch{Pin: 26, state: off}, "off", "GPIO 26: already off\n"},
+		{Switch{Pin: 26, state: on}, "toggle", "GPIO 26: turned off\n"},
+	}
+
+	for _, tt := range tests {
+		tt.swtch.gpio = &MockGpio{}
+		sesh := &mock.Session{}
+
+		if err := tt.swtch.Run(context.Background(), sesh, tt.arg); err != nil {
+			t.Fatalf("%s %s: %v", tt.swtch.label(), tt.arg, err)
+		}
+
+		if sesh.PrintText != tt.want {
+			t.Errorf("%s %s printed %q, want %q", tt.swtch.label(), tt.arg, sesh.PrintText, tt.want)
+		}
 	}
 }
 
