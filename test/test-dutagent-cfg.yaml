@@ -11,6 +11,7 @@ devices:
             passthrough: true
             with:
               pin: 26
+              label: DUT power
               initial: off
               # GPIO pin 26, physical pin 37
               # https://pinout.xyz/pinout/pin26_gpio7/

@@ -10,6 +10,7 @@ devices:
             passthrough: true
             with:
               pin: 9
+              label: Big red button
       reset:
         desc: Reset the rocket
         uses:
@@ -17,6 +18,7 @@ devices:
             passthrough: true
             with:
               pin: 10
+              label: Reset line
               activelow: true
       light:
         desc: Turn on the light
@@ -25,4 +27,5 @@ devices:
             passthrough: true
             with:
               pin: 11
+              label: Light
               initial: 'on'
