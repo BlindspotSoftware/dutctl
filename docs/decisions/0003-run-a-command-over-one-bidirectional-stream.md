@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded by ADR-0039
 date: 2024-08-13
 ---
 
@@ -51,6 +51,8 @@ did not request, both fail with `InvalidArgument`.
 
 ## More information
 
+- Superseded by [ADR-0039](0039-transfer-files-in-chunks-over-the-run-stream.md),
+  which moves files in chunks and carries over the rest of this decision.
 - [docs/README.md](../README.md#communication-design): the message scenarios on
   the Run stream.
 - [protobuf/dutctl/v1/dutctl.proto](../../protobuf/dutctl/v1/dutctl.proto):
