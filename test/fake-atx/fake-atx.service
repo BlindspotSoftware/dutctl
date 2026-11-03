@@ -1,0 +1,20 @@
+# Install on the tester: fake_atx.py to /usr/local/bin/, this file to
+# /etc/systemd/system/, then `systemctl daemon-reload` and
+# `systemctl enable --now fake-atx`.
+[Unit]
+Description=Fake ATX board for the tester's PiKVM (GPIO 5, 6 and 13)
+
+[Service]
+User=oscar
+# lgpio creates its notification pipes in the working directory. Without the
+# pinned factory, gpiozero falls back to sysfs, which this kernel refuses.
+RuntimeDirectory=fake-atx
+WorkingDirectory=/run/fake-atx
+Environment=GPIOZERO_PIN_FACTORY=lgpio
+ExecStart=/usr/bin/python3 /usr/local/bin/fake_atx.py
+# A stopped or crashed board must not leave the power LED line high.
+ExecStopPost=/usr/bin/pinctrl set 13 ip pd
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
