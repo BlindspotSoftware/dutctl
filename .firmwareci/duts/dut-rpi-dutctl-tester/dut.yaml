@@ -16,8 +16,8 @@ attributes:
   PduHost: "gpdu-2p-fwci-ductl-tester.firmwareci.9e.network"
   PduOutlet: "0"
   # PiKVM wired to the tester. Its ATX board closes GPIO 5 (power switch) and
-  # 6 (reset switch) and reads GPIO 13 (power LED), where the fake-atx service
-  # plays the mainboard, so the tests must leave these pins alone.
+  # 6 (reset switch) and reads GPIO 13 (power LED), where test/fake-atx/ plays
+  # the mainboard, so the tests must leave these pins alone.
   PikvmHost: "https://pikvm30.firmwareci.9e.network"
   PackageName: "dutctl"
   ConfigFile: "/etc/dutctl.yaml"
