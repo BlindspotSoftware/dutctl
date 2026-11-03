@@ -1431,6 +1431,7 @@ type FileChunk struct {
 	ChunkData     []byte                 `protobuf:"bytes,3,opt,name=chunk_data,json=chunkData,proto3" json:"chunk_data,omitempty"`        // File data chunk (max 1MB)
 	ChunkOffset   int64                  `protobuf:"varint,4,opt,name=chunk_offset,json=chunkOffset,proto3" json:"chunk_offset,omitempty"` // Byte offset in the file
 	IsFinal       bool                   `protobuf:"varint,5,opt,name=is_final,json=isFinal,proto3" json:"is_final,omitempty"`             // Whether this is the last chunk
+	Sha256        []byte                 `protobuf:"bytes,6,opt,name=sha256,proto3" json:"sha256,omitempty"`                               // Raw 32-byte SHA-256 of the whole file, on the final chunk only. Empty only from peers predating this field.
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1498,6 +1499,13 @@ func (x *FileChunk) GetIsFinal() bool {
 		return x.IsFinal
 	}
 	return false
+}
+
+func (x *FileChunk) GetSha256() []byte {
+	if x != nil {
+		return x.Sha256
+	}
+	return nil
 }
 
 // FileTransferRequest starts a file transfer. The agent sends it to request an
@@ -1910,7 +1918,7 @@ const file_dutctl_v1_dutctl_proto_rawDesc = "" +
 	"\fFileMetadata\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x12\n" +
 	"\x04size\x18\x02 \x01(\x03R\x04size\x12\x12\n" +
-	"\x04name\x18\x03 \x01(\tR\x04name\"\xac\x01\n" +
+	"\x04name\x18\x03 \x01(\tR\x04name\"\xc4\x01\n" +
 	"\tFileChunk\x12\x1f\n" +
 	"\vtransfer_id\x18\x01 \x01(\tR\n" +
 	"transferId\x12!\n" +
@@ -1918,7 +1926,8 @@ const file_dutctl_v1_dutctl_proto_rawDesc = "" +
 	"\n" +
 	"chunk_data\x18\x03 \x01(\fR\tchunkData\x12!\n" +
 	"\fchunk_offset\x18\x04 \x01(\x03R\vchunkOffset\x12\x19\n" +
-	"\bis_final\x18\x05 \x01(\bR\aisFinal\"\x89\x02\n" +
+	"\bis_final\x18\x05 \x01(\bR\aisFinal\x12\x16\n" +
+	"\x06sha256\x18\x06 \x01(\fR\x06sha256\"\x89\x02\n" +
 	"\x13FileTransferRequest\x12\x1f\n" +
 	"\vtransfer_id\x18\x01 \x01(\tR\n" +
 	"transferId\x123\n" +

@@ -22,6 +22,11 @@ import (
 // treating it as an internal fault.
 var ErrBadFileTransfer = errors.New("bad file transfer")
 
+// ErrFileCorrupt marks an upload that does not match the digest the client sent
+// with it: the transport damaged it. Distinct from ErrBadFileTransfer, which is
+// the client misbehaving, so the RPC layer can map the two differently.
+var ErrFileCorrupt = errors.New("file corrupted in transit")
+
 // response frames the event for the client: a ConsoleOpen with the console's
 // id and mode, or a ConsoleClose.
 func (e consoleEvent) response() *pb.RunResponse {
@@ -525,8 +530,9 @@ func fromClientWorker(ctx context.Context, stream Stream, s *backend) error {
 					// An unknown transfer ID is a benign race: the agent may have
 					// dropped the upload while chunks were still in flight. A broken
 					// chunk sequence is not: it is a protocol violation the client
-					// cannot recover from, so it terminates the run.
-					if errors.Is(registerErr, ErrBadFileTransfer) {
+					// cannot recover from, so it terminates the run. So does a file
+					// the transport damaged.
+					if errors.Is(registerErr, ErrBadFileTransfer) || errors.Is(registerErr, ErrFileCorrupt) {
 						return registerErr
 					}
 

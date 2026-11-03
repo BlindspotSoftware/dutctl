@@ -99,6 +99,12 @@ type Module interface {
 // opaquely (no sentinel to match) and typically means the client declined the file
 // or the transfer stream failed.
 //
+// Transfers are checksummed by the framework, and one damaged in transit fails
+// the run. The reader RequestFile returns delivers a file as it arrives, so a
+// damaged one makes it fail at the end instead of returning io.EOF: a module
+// that acts on a file only after reading it to io.EOF never acts on damaged
+// content.
+//
 // OpenConsole, Print, RequestFile and SendFile must be called only from the module's
 // Run goroutine.
 type Session interface {

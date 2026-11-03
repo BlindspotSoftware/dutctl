@@ -113,7 +113,9 @@ anywhere.
 
 Files move in chunks of up to 1 MiB, so neither side holds a whole file in memory, and other messages keep flowing
 during a transfer. A transfer has an ID that the agent assigns, and its chunks are numbered from 0; the last one is
-marked final. Transfers can happen multiple times and can be mixed with Print messages, consoles and each other.
+marked final and carries the SHA-256 of the whole file. The receiver checks it before the file counts, and a mismatch
+fails the run: TCP and HTTP/2 check their framing, not the content. Transfers can happen multiple times and can be
+mixed with Print messages, consoles and each other.
 Note that while a console is open, a file transfer waits behind the module's reading of the console input.
 
 **File download to the client**: A module sends a file with `SendFile`. The agent announces the download with a

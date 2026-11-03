@@ -8,12 +8,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"log/slog"
 	"strconv"
 	"sync"
 	"sync/atomic"
 
+	"github.com/BlindspotSoftware/dutctl/internal/digest"
 	"github.com/BlindspotSoftware/dutctl/internal/log"
 
 	pb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1"
@@ -46,7 +48,8 @@ type uploadState struct {
 	lastChunk   int32 // last received chunk number, for sequence validation
 	file        *io.PipeWriter
 	reader      *io.PipeReader
-	requestSent bool // whether the initial FileTransferRequest has been announced
+	requestSent bool      // whether the initial FileTransferRequest has been announced
+	sum         hash.Hash // digests the chunks as they arrive
 	mu          sync.Mutex
 
 	// done is closed once the transfer is released, freeing the context watcher.
@@ -83,7 +86,8 @@ type downloadState struct {
 	closer      io.Closer // optional closer for the reader (e.g. *os.File)
 	closed      bool
 	chunkNumber int32
-	offset      int64 // bytes already sent; the next chunk's chunk_offset
+	offset      int64     // bytes already sent; the next chunk's chunk_offset
+	sum         hash.Hash // digests the chunks as they are read
 
 	// done is closed once the transfer is released, freeing the context watcher.
 	done chan struct{}
@@ -246,6 +250,7 @@ func (s *backend) RequestFile(ctx context.Context, name string) (io.Reader, erro
 		file:      writer,
 		reader:    reader,
 		lastChunk: -1,
+		sum:       digest.New(),
 		done:      make(chan struct{}),
 	}
 
@@ -354,6 +359,7 @@ func (s *backend) SendFile(ctx context.Context, name string, size int64, r io.Re
 		},
 		reader:      r,
 		chunkNumber: 0,
+		sum:         digest.New(),
 		done:        make(chan struct{}),
 	}
 
@@ -422,12 +428,18 @@ func (s *backend) getNextChunk(transferID string) (*pb.FileChunk, bool, error) {
 		return nil, false, err
 	}
 
+	state.sum.Write(chunkData)
+
 	chunk := &pb.FileChunk{
 		TransferId:  transferID,
 		ChunkNumber: state.chunkNumber,
 		ChunkData:   chunkData,
 		ChunkOffset: state.offset,
 		IsFinal:     isFinal,
+	}
+
+	if isFinal {
+		chunk.Sha256 = state.sum.Sum(nil)
 	}
 
 	state.chunkNumber++
@@ -463,15 +475,34 @@ func (s *backend) registerUploadChunk(transferID string, chunk *pb.FileChunk) er
 	}
 
 	state.lastChunk = chunk.GetChunkNumber()
+	state.sum.Write(chunk.GetChunkData())
 
 	_, err := state.file.Write(chunk.GetChunkData())
 	if err != nil {
 		return err
 	}
 
-	if chunk.GetIsFinal() {
-		state.file.Close()
+	if !chunk.GetIsFinal() {
+		return nil
 	}
+
+	// Verified before the module's reader reports io.EOF: a module that reads
+	// the file to its end gets the error instead, and never acts on damaged
+	// content.
+	want, got := chunk.GetSha256(), state.sum.Sum(nil)
+	path := state.metadata.GetPath()
+
+	switch {
+	case digest.Missing(want):
+		log.Scope(s.logger(), scopeSessionUpstream).Warn("client sent no checksum, file not verified", "name", path)
+	case !digest.Match(got, want):
+		err := fmt.Errorf("%w: %q: want %s, got %s", ErrFileCorrupt, path, digest.Hex(want), digest.Hex(got))
+		state.file.CloseWithError(err)
+
+		return err
+	}
+
+	state.file.Close()
 
 	return nil
 }

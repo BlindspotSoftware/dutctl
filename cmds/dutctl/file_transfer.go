@@ -7,12 +7,14 @@ package main
 import (
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
 
+	"github.com/BlindspotSoftware/dutctl/internal/digest"
 	"github.com/BlindspotSoftware/dutctl/internal/output"
 
 	pb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1"
@@ -60,6 +62,11 @@ type clientFileTransferState struct {
 	file *os.File
 	// bytes counts what has moved so far, for the transfer report. Guarded by mu.
 	bytes int
+	// sum digests the chunks as they move. Only one goroutine writes it: the
+	// upload sender, or the receive loop for a download.
+	sum hash.Hash
+	// sentSum is an upload's digest, for the report. Guarded by mu.
+	sentSum []byte
 
 	// ackCh carries the agent's per-chunk acknowledgment to the upload sender.
 	// Buffered to one: the protocol keeps a single chunk outstanding, so the
@@ -102,6 +109,7 @@ func (m *clientFileTransferManager) registerTransfer(transferID, path, direction
 		transferID: transferID,
 		path:       path,
 		direction:  direction,
+		sum:        digest.New(),
 		ackCh:      make(chan int32, 1),
 		abort:      make(chan struct{}),
 	}
@@ -176,12 +184,14 @@ func (m *clientFileTransferManager) dropTransfer(transferID string, err error, s
 	return err
 }
 
-// sendChunkToAgent sends a file chunk to the agent.
+// sendChunkToAgent sends a file chunk to the agent. sum is the digest of the
+// whole file, sent with the final chunk only.
 func (m *clientFileTransferManager) sendChunkToAgent(
 	transferID string,
 	chunkNum int32,
 	data []byte,
 	isFinal bool,
+	sum []byte,
 	stream chunkStream,
 ) error {
 	chunk := &pb.RunRequest{
@@ -192,6 +202,7 @@ func (m *clientFileTransferManager) sendChunkToAgent(
 				ChunkData:   data,
 				ChunkOffset: int64(chunkNum) * int64(clientChunkSize),
 				IsFinal:     isFinal,
+				Sha256:      sum,
 			},
 		},
 	}
@@ -301,11 +312,19 @@ func (m *clientFileTransferManager) sendUploadInChunks(
 				return
 			}
 
+			state.sum.Write(chunkData[:bytesRead])
+
+			var sum []byte
+			if isFinal {
+				sum = state.sum.Sum(nil)
+			}
+
 			state.mu.Lock()
 			state.bytes += bytesRead
+			state.sentSum = sum
 			state.mu.Unlock()
 
-			chunkErr := m.sendChunkToAgent(transferID, chunkNum, chunkData[:bytesRead], isFinal, stream)
+			chunkErr := m.sendChunkToAgent(transferID, chunkNum, chunkData[:bytesRead], isFinal, sum, stream)
 			if chunkErr != nil {
 				slog.Warn("error sending file chunk", "err", chunkErr)
 				m.removeTransfer(transferID)
@@ -441,6 +460,7 @@ func (m *clientFileTransferManager) handleFileChunk(chunk *pb.FileChunk, stream 
 		return m.dropTransfer(transferID, fmt.Errorf("writing %q: %w", state.path, err), stream)
 	}
 
+	state.sum.Write(chunk.GetChunkData())
 	state.expectedChunkNum++
 	state.bytes += len(chunk.GetChunkData())
 
@@ -448,12 +468,24 @@ func (m *clientFileTransferManager) handleFileChunk(chunk *pb.FileChunk, stream 
 		return nil
 	}
 
-	return m.finishDownload(state, stream)
+	return m.finishDownload(state, chunk.GetSha256(), stream)
 }
 
-// finishDownload moves a complete download to its destination, reports it, and
-// confirms it to the agent.
-func (m *clientFileTransferManager) finishDownload(state *clientFileTransferState, stream chunkStream) error {
+// finishDownload verifies a complete download against want, the digest the
+// agent sent, moves it to its destination, reports it, and confirms it to the
+// agent.
+func (m *clientFileTransferManager) finishDownload(state *clientFileTransferState, want []byte, stream chunkStream) error {
+	sum := state.sum.Sum(nil)
+
+	// Verified before the rename: damaged bytes must not replace the destination.
+	switch {
+	case digest.Missing(want):
+		slog.Warn("agent sent no checksum, file not verified", "path", state.path)
+	case !digest.Match(sum, want):
+		return m.dropTransfer(state.transferID, fmt.Errorf("received file %q: %w: want %s, got %s (%d bytes)",
+			state.path, digest.ErrMismatch, digest.Hex(want), digest.Hex(sum), state.bytes), stream)
+	}
+
 	state.mu.Lock()
 	file := state.file
 	state.file = nil // from here on, removeTransfer must not delete it
@@ -472,7 +504,7 @@ func (m *clientFileTransferManager) finishDownload(state *clientFileTransferStat
 	}
 
 	m.removeTransfer(state.transferID)
-	m.report(output.FileTransfer{Direction: "received", Path: state.path, Bytes: state.bytes})
+	m.report(output.FileTransfer{Direction: "received", Path: state.path, Bytes: state.bytes, SHA256: digest.Hex(sum)})
 
 	err = m.sendTransferComplete(state.transferID, stream)
 	if err != nil {
@@ -538,8 +570,8 @@ func (m *clientFileTransferManager) reportUpload(state *clientFileTransferState)
 	}
 
 	state.mu.Lock()
-	sent := state.bytes
+	sent, sum := state.bytes, state.sentSum
 	state.mu.Unlock()
 
-	m.report(output.FileTransfer{Direction: "sent", Path: state.path, Bytes: sent})
+	m.report(output.FileTransfer{Direction: "sent", Path: state.path, Bytes: sent, SHA256: digest.Hex(sum)})
 }

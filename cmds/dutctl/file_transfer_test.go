@@ -5,6 +5,7 @@
 package main
 
 import (
+	"crypto/sha256"
 	"errors"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/BlindspotSoftware/dutctl/internal/digest"
 	"github.com/BlindspotSoftware/dutctl/internal/output"
 
 	pb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1"
@@ -212,7 +214,11 @@ func TestHandleFileChunk_DownloadHappyPath(t *testing.T) {
 		t.Fatalf("chunk 0: %v", err)
 	}
 
-	if err := m.handleFileChunk(downloadChunk("t1", 1, content[10:], true), stream); err != nil {
+	sum := sha256.Sum256(content)
+	final := downloadChunk("t1", 1, content[10:], true)
+	final.Sha256 = sum[:]
+
+	if err := m.handleFileChunk(final, stream); err != nil {
 		t.Fatalf("chunk 1 (final): %v", err)
 	}
 
@@ -236,7 +242,7 @@ func TestHandleFileChunk_DownloadHappyPath(t *testing.T) {
 		t.Errorf("transfer not removed after completion")
 	}
 
-	wantReport := output.FileTransfer{Direction: "received", Path: dest, Bytes: len(content)}
+	wantReport := output.FileTransfer{Direction: "received", Path: dest, Bytes: len(content), SHA256: digest.Hex(sum[:])}
 	if got := reported.all(); len(got) != 1 || got[0] != wantReport {
 		t.Errorf("reports = %+v, want [%+v]", got, wantReport)
 	}
@@ -285,6 +291,48 @@ func TestHandleFileChunk_BrokenDownloadKeepsOldFile(t *testing.T) {
 
 	if got := reported.all(); len(got) != 0 {
 		t.Errorf("a failed download was reported: %+v", got)
+	}
+}
+
+// A download that does not match the agent's digest was damaged on the way: it
+// fails the run and leaves the destination as it was.
+func TestHandleFileChunk_CorruptDownloadKeepsOldFile(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "image.bin")
+
+	if err := os.WriteFile(dest, []byte("last good image"), 0o600); err != nil {
+		t.Fatalf("writing old file: %v", err)
+	}
+
+	m, reported := newTestManager()
+	stream := &recordingStream{}
+
+	announceDownload(t, m, "t1", dest, stream)
+
+	sent := sha256.Sum256([]byte("what the agent read"))
+	final := downloadChunk("t1", 0, []byte("what arrived"), true)
+	final.Sha256 = sent[:]
+
+	if err := m.handleFileChunk(final, stream); !errors.Is(err, digest.ErrMismatch) {
+		t.Errorf("handleFileChunk err = %v, want digest.ErrMismatch", err)
+	}
+
+	if !hasStatus(stream.responses(), pb.FileTransferResponse_STATUS_TRANSFER_REJECTED) {
+		t.Errorf("expected a TRANSFER_REJECTED, got %v", statuses(stream.responses()))
+	}
+
+	if got, _ := os.ReadFile(dest); string(got) != "last good image" {
+		t.Errorf("destination = %q, want the old content", got)
+	}
+
+	if left := leftovers(t, dir, "image.bin"); len(left) != 0 {
+		t.Errorf("temporary files left behind: %v", left)
+	}
+
+	if got := reported.all(); len(got) != 0 {
+		t.Errorf("a corrupted download was reported: %+v", got)
 	}
 }
 
@@ -429,7 +477,12 @@ func TestHandleUploadRequest_StreamsFile(t *testing.T) {
 
 	waitFor(t, func() bool { return m.getTransfer("u1") == nil })
 
-	wantReport := output.FileTransfer{Direction: "sent", Path: src, Bytes: len(content)}
+	sum := sha256.Sum256(content)
+	if got := stream.chunks()[len(stream.chunks())-1].GetSha256(); !digest.Match(got, sum[:]) {
+		t.Errorf("final chunk digest = %s, want %s", digest.Hex(got), digest.Hex(sum[:]))
+	}
+
+	wantReport := output.FileTransfer{Direction: "sent", Path: src, Bytes: len(content), SHA256: digest.Hex(sum[:])}
 	if got := reported.all(); len(got) != 1 || got[0] != wantReport {
 		t.Errorf("reports = %+v, want [%+v]", got, wantReport)
 	}
