@@ -111,6 +111,11 @@ type Module interface {
 // opaquely (no sentinel to match) and typically means the client declined the file
 // or the transfer stream failed.
 //
+// Transfers are checksummed by the framework, and one damaged in transit fails
+// the run. RequestFile writes a file to w as it arrives, so w can hold damaged
+// content until RequestFile returns: a module that acts on the file only once
+// RequestFile returned nil never acts on damaged content.
+//
 // OpenConsole and Print must be called only from the module's Run goroutine.
 // RequestFile and SendFile may also be called from a goroutine that Run starts
 // and waits for before it returns.

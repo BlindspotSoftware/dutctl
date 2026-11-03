@@ -7,6 +7,7 @@ package session
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"io"
 	"slices"
@@ -16,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/BlindspotSoftware/dutctl/internal/digest"
 	"github.com/BlindspotSoftware/dutctl/pkg/module"
 
 	pb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1"
@@ -365,8 +367,9 @@ func awaitStatus(t *testing.T, s *scriptedStream, want pb.FileTransferResponse_S
 }
 
 // TestDownloadHappyPath covers the agent's download state machine end to end:
-// announce, stream every chunk in order, mark the last one final, and return
-// from SendFile only once the client confirms completion.
+// announce, stream every chunk in order, mark the last one final with the
+// file's digest, and return from SendFile only once the client confirms
+// completion.
 func TestDownloadHappyPath(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -377,6 +380,8 @@ func TestDownloadHappyPath(t *testing.T) {
 	for i := range content {
 		content[i] = byte(i % 251)
 	}
+
+	sum := sha256.Sum256(content)
 
 	stream := newScriptedStream()
 	defer close(stream.stop)
@@ -418,6 +423,16 @@ func TestDownloadHappyPath(t *testing.T) {
 
 		if c.GetFileSize() != wantSize {
 			t.Errorf("chunk %d file size = %d, want %d", i, c.GetFileSize(), wantSize)
+		}
+
+		// The digest of the whole file goes on the final chunk only.
+		var wantSum []byte
+		if c.GetIsFinal() {
+			wantSum = sum[:]
+		}
+
+		if !bytes.Equal(c.GetSha256(), wantSum) {
+			t.Errorf("chunk %d digest = %s, want %s", i, digest.Hex(c.GetSha256()), digest.Hex(wantSum))
 		}
 
 		offset += int64(len(c.GetChunkData()))
@@ -569,6 +584,74 @@ func TestUploadHappyPath(t *testing.T) {
 	// at once.
 	if carried(&b.session) != nil {
 		t.Error("upload still registered after RequestFile returned")
+	}
+}
+
+// TestUploadDigest covers the three digest outcomes of an upload: verified,
+// unverified (the client predates the field), and damaged. A damaged upload
+// makes RequestFile fail before its final chunk reaches the writer, and fails
+// the run, so the client learns of it even when the module ignores the error.
+func TestUploadDigest(t *testing.T) {
+	const content = "firmware payload"
+
+	good := sha256.Sum256([]byte(content))
+	wrong := sha256.Sum256([]byte("something else entirely"))
+
+	for _, tc := range []struct {
+		name    string
+		sum     []byte
+		wantErr error
+	}{
+		{name: "verified", sum: good[:]},
+		{name: "no digest is accepted", sum: nil},
+		{name: "mismatch is rejected", sum: wrong[:], wantErr: ErrFileCorrupt},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stream := newScriptedStream()
+			defer close(stream.stop)
+
+			b := &Broker{}
+			sess, runCtx := b.Start(context.Background(), stream)
+
+			var got bytes.Buffer
+
+			result := requestFileAsync(context.Background(), sess, "fw.bin", &got)
+			id := awaitAnnouncement(t, stream, pb.FileTransferRequest_DIRECTION_UPLOAD)
+
+			chunk := uploadChunk(id, 0, content, true)
+			chunk.GetFileChunk().Sha256 = tc.sum
+			stream.reply <- chunk
+
+			err := awaitResult(t, result)
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("RequestFile err = %v, want %v", err, tc.wantErr)
+			}
+
+			if tc.wantErr == nil {
+				if got.String() != content {
+					t.Errorf("module got %q, want %q", got.String(), content)
+				}
+
+				return
+			}
+
+			if !strings.Contains(err.Error(), digest.Hex(tc.sum)) {
+				t.Errorf("err = %q, want it to name the expected digest", err)
+			}
+
+			if got.Len() != 0 {
+				t.Errorf("the module got %q of a damaged file", got.String())
+			}
+
+			select {
+			case <-runCtx.Done():
+				if cause := context.Cause(runCtx); !errors.Is(cause, ErrFileCorrupt) {
+					t.Errorf("worker failure = %v, want ErrFileCorrupt", cause)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("a damaged upload did not fail the run")
+			}
+		})
 	}
 }
 

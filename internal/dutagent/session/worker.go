@@ -21,6 +21,11 @@ import (
 // treating it as an internal fault.
 var ErrBadFileTransfer = errors.New("bad file transfer")
 
+// ErrFileCorrupt marks an upload that does not match the digest the client sent
+// with it: the transport damaged it. Distinct from ErrBadFileTransfer, which is
+// the client misbehaving, so the RPC layer can map the two differently.
+var ErrFileCorrupt = errors.New("file corrupted in transit")
+
 // response frames the event for the client: a ConsoleOpen with the console's
 // id and mode, or a ConsoleClose.
 func (e consoleEvent) response() *pb.RunResponse {
@@ -250,7 +255,7 @@ func fromClientWorker(ctx context.Context, stream Stream, s *backend) error {
 			case *pb.RunRequest_FileChunk:
 				// A broken chunk is a protocol violation the client cannot
 				// recover from, so it ends the run, and the RPC's error tells
-				// the client.
+				// the client. So does a file the transport damaged.
 				err := s.deliverUploadChunk(ctx, msg.FileChunk)
 				if err != nil {
 					return err
