@@ -198,6 +198,7 @@ message FileChunk {
   bytes chunk_data = 3; // File data chunk (max 1MB)
   int64 chunk_offset = 4; // Byte offset in the file
   bool is_final = 5; // Whether this is the last chunk
+  bytes sha256 = 6; // Raw 32-byte SHA-256 of the whole file, on the final chunk only. Empty only from peers predating this field.
 }
 
 // FileTransferRequest starts a file transfer. The agent sends it to request an
