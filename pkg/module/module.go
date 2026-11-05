@@ -84,8 +84,12 @@ type Module interface {
 	// The context carries a logger scoped to this module (log.FromContext) and is
 	// cancelled when the command is aborted or the client disconnects. Run must
 	// then return promptly: until it does, its Run request stays open and the
-	// command's device stays busy for every other command, the same user's
-	// included. A forced unlock does not free it.
+	// command's device stays busy. A forced unlock does not free it.
+	//
+	// dutagent never calls Run on one module twice at once, but Run of other
+	// modules, also of the same type, runs at the same time. Keep per-run state
+	// in Run's locals, and guard what modules share beyond their own fields,
+	// such as a package variable or a library's global state.
 	Run(ctx context.Context, s Session, args ...string) error
 }
 

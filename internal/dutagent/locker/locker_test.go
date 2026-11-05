@@ -169,11 +169,11 @@ func TestAutoLockNoExpiry(t *testing.T) {
 	}
 }
 
-// A device runs one command at a time, even for its own owner: a second run is
-// turned away with an error of its own, which does not present the owner as a
-// stranger holding the device, and the first run keeps the device. Neither the
-// owner's reservation nor a forced unlock of it lets the second run in.
-func TestAutoLockRejectsSameOwnerWhileBusy(t *testing.T) {
+// A command does not run twice at once, even for its own owner: a second run of
+// it is turned away with an error of its own, which does not present the owner
+// as a stranger holding the device, and the first run keeps the device. Neither
+// the owner's reservation nor a forced unlock of it lets the second run in.
+func TestAutoLockRejectsSameCommand(t *testing.T) {
 	tests := []struct {
 		name    string
 		reserve bool
@@ -215,7 +215,8 @@ func TestAutoLockRejectsSameOwnerWhileBusy(t *testing.T) {
 				t.Errorf("second AutoLock: err = %v matches ErrWrongOwner or is a *Error, but the device's holder is the caller", err)
 			}
 
-			want := `device "dev" is still running a command for "alice"; a cancelled command keeps the device until it has stopped`
+			want := `device "dev" is already running "cmd" for "alice"; a command does not run twice at once, ` +
+				`and a cancelled one keeps running until it has stopped`
 			if err.Error() != want {
 				t.Errorf("second AutoLock: message = %q, want %q", err.Error(), want)
 			}
@@ -232,6 +233,51 @@ func TestAutoLockRejectsSameOwnerWhileBusy(t *testing.T) {
 
 			if hold, ok := l.StatusAll()["dev"]; ok {
 				t.Errorf("StatusAll[dev] = %+v after the first run's release, want free: the rejected run took the device over", hold)
+			}
+		})
+	}
+}
+
+// An owner's different commands run on a device at once, each on a lease of
+// its own: whichever ends first, the device stays the owner's until the last
+// has returned, and no other owner gets in meanwhile.
+func TestAutoLockAdmitsOwnersOtherCommands(t *testing.T) {
+	for _, firstToEnd := range []string{"console", "power"} {
+		t.Run(firstToEnd+" ends first", func(t *testing.T) {
+			l := New()
+
+			leases := map[string]*Lease{}
+
+			for _, command := range []string{"console", "power"} {
+				lease, err := l.AutoLock("dev", "alice", command)
+				if err != nil {
+					t.Fatalf("alice's %s: %v", command, err)
+				}
+
+				leases[command] = lease
+			}
+
+			leases[firstToEnd].Release()
+
+			hold, ok := l.StatusAll()["dev"]
+			if !ok || hold.Kind != Busy || hold.Owner != "alice" {
+				t.Fatalf("StatusAll[dev] = %+v (ok=%v) with one of alice's commands still running, want her Busy hold", hold, ok)
+			}
+
+			if _, err := l.AutoLock("dev", "bob", "power"); !errors.Is(err, ErrWrongOwner) {
+				t.Errorf("bob's AutoLock while alice's other command runs: err = %v, want ErrWrongOwner", err)
+			}
+
+			if _, err := l.Lock("dev", "bob", time.Hour); !errors.Is(err, ErrWrongOwner) {
+				t.Errorf("bob's Lock while alice's other command runs: err = %v, want ErrWrongOwner", err)
+			}
+
+			for _, lease := range leases {
+				lease.Release()
+			}
+
+			if hold, ok := l.StatusAll()["dev"]; ok {
+				t.Errorf("StatusAll[dev] = %+v after both commands returned, want free", hold)
 			}
 		})
 	}

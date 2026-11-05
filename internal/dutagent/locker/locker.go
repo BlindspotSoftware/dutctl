@@ -30,11 +30,10 @@ var (
 	// releases only a reservation and never ends a running command.
 	ErrBusy = errors.New("device is running a command")
 	// ErrAlreadyRunning is matched by the error AutoLock returns when the device
-	// is already running a command for the owner asking to run another: a device
-	// runs one command at a time, whoever asks. errors.Is matches it only for the
-	// hold's own owner; another owner gets a *Error, which matches ErrWrongOwner
-	// instead.
-	ErrAlreadyRunning = errors.New("device is already running a command")
+	// is already running the command its owner asks to run. errors.Is matches it
+	// only for the hold's own owner; another owner gets a *Error, which matches
+	// ErrWrongOwner instead.
+	ErrAlreadyRunning = errors.New("device is already running the command")
 	// ErrShuttingDown is returned by Lock and AutoLock for a hold the Locker no
 	// longer grants because the agent is stopping (see Drain and Close).
 	ErrShuttingDown = errors.New("dutagent is shutting down and takes no new work; try again once it is back")
@@ -147,19 +146,23 @@ func (e *busyError) Unwrap() error {
 	return ErrBusy
 }
 
-// runningError is the error AutoLock returns when device is already running a
-// command for owner, the owner asking to run another. It exists to name both in
-// its message without presenting owner as a stranger holding the device; callers
-// match it with errors.Is(err, ErrAlreadyRunning), to which it unwraps. It is
-// returned as a pointer and uses a pointer receiver.
+// runningError is the error AutoLock returns when device is already running
+// command for owner, the owner asking to run it again. It exists to name all
+// three in its message without presenting owner as a stranger holding the
+// device; callers match it with errors.Is(err, ErrAlreadyRunning), to which it
+// unwraps. It is returned as a pointer and uses a pointer receiver.
 type runningError struct {
+	// device is the device the command runs on.
 	device string
-	owner  string
+	// owner is the owner who runs the command and asked to run it again.
+	owner string
+	// command is the name of the command.
+	command string
 }
 
 func (e *runningError) Error() string {
-	return fmt.Sprintf("device %q is still running a command for %q; a cancelled command keeps the device until it has stopped",
-		e.device, e.owner)
+	return fmt.Sprintf("device %q is already running %q for %q; a command does not run twice at once, "+
+		"and a cancelled one keeps running until it has stopped", e.device, e.command, e.owner)
 }
 
 func (e *runningError) Unwrap() error {
@@ -361,12 +364,14 @@ func (l *Locker) ForceClearLock(device string) error {
 }
 
 // AutoLock takes a Busy hold on device for owner's command and returns it as a
-// Lease. A device runs one command at a time, whoever asks: while it has a
-// Busy hold, AutoLock rejects another owner with a *Error and the hold's own
-// owner with an error matching ErrAlreadyRunning. A Reserved hold of another
-// owner is rejected with a *Error as well; owner's own reservation does not
-// stand in the way. While the agent stops, ErrShuttingDown is returned on a
-// device owner has not reserved, and once the Locker is closed on every device.
+// Lease. A device runs the commands of one owner at a time, several at once,
+// but never one command twice, since a command's runs share its module
+// instances: AutoLock rejects another owner with a *Error, and the owner of a
+// command that still runs with an error matching ErrAlreadyRunning. A Reserved
+// hold of another owner is rejected with a *Error as well; owner's own
+// reservation does not stand in the way. While the agent stops, ErrShuttingDown
+// is returned on a device owner has not reserved, and once the Locker is
+// closed on every device.
 func (l *Locker) AutoLock(device, owner, command string) (*Lease, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -380,9 +385,11 @@ func (l *Locker) AutoLock(device, owner, command string) (*Lease, error) {
 		return nil, ErrShuttingDown
 	}
 
-	// checkLocked let owner through, so a lease here is owner's own.
-	if len(l.busy[device]) > 0 {
-		return nil, &runningError{device: device, owner: owner}
+	// checkLocked let owner through, so the leases here are owner's own.
+	for _, lease := range l.busy[device] {
+		if lease.command == command {
+			return nil, &runningError{device: device, owner: owner, command: command}
+		}
 	}
 
 	lease := &Lease{

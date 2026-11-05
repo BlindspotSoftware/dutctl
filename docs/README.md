@@ -21,7 +21,8 @@ The machine or hardware you want to operate.
 ## DUT Client (dutctl)
 This is the actual application running on the user's machine. It provides a command line interface to issue a task.
 This client app, thought, has no knowledge about the connected DUT's and their available control operations. That
-information is provided by the agent on request. 
+information is provided by the agent on request. Who can use a device when, and what is up to you when you run several
+commands on one device at once, is described in [device-access.md](./device-access.md).
 
 ## DUT Agent (DA)
 The DUT Agent is a service designed to run on a single board computer, which can handle the wiring to the DUT (power

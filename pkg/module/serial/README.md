@@ -48,11 +48,17 @@ client until the session is cancelled (Ctrl-C / disconnect), or until `-t`
 elapses — reaching the `-t` deadline in monitor mode is a success. No matching
 is done.
 
-A device runs one command at a time, so while the monitor runs the device stays
-busy for every other command, yours included: a power cycle from a second
-terminal, for example, is rejected until the monitor ends. To power-cycle the
-device and follow its output, configure one command whose modules do both in
-turn, such as a power cycle followed by `serial` with `expect` steps.
+While the monitor runs, the device is busy for other users, but your own other
+commands may run beside it: a power cycle from a second terminal shows up in the
+monitor's output. Start it once the monitor prints `--- Connected to … ---`, or
+the first lines of the boot are lost. If the DUT powers the serial adapter, the
+adapter disappears with the power and the monitor ends.
+
+A serial port serves one command at a time, unless dutagent runs as root.
+Running the same command again is refused, and another command that opens the
+port in use fails when it opens it, after the steps before it have run. Steps that must happen in a fixed order,
+such as a power cycle followed by `serial` with `expect` steps, belong in one
+command.
 
 ## Interactive mode
 
@@ -84,8 +90,9 @@ passes bytes verbatim. Giving them with `-i` is a usage error. The device's
 `imap` [character maps](#character-maps) apply in every mode, the interactive
 one included.
 
-Like the monitor, an interactive session keeps the device busy for every other
-command until it ends.
+Like the monitor, an interactive session keeps the device busy for other users
+until it ends, and your own other commands, a power cycle for instance, may run
+beside it.
 
 ## Flags
 
