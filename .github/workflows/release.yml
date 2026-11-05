@@ -101,14 +101,11 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload ${{ steps.release.outputs.tag_name }} ./dutserver-${{ steps.release.outputs.tag_name }}-linux-arm64
 
-        
-
-
-
-
-
-
-
-
-
-      
+  notify-apt-repo:
+    needs: release-please
+    runs-on: ubuntu-latest
+    steps:
+      - name: On release, trigger 9elements/infrastructure apt-repo rebuild
+        run: gh workflow run apt-repo.yml --repo 9elements/infrastructure --ref main
+        env:
+          GH_TOKEN: ${{ secrets.DUTCTL_INFRASTRUCTURE_TRIGGER }}
