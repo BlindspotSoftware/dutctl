@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """A fake ATX mainboard on the dutctl tester for the ATX board of its PiKVM (PikvmHost in
-.firmwareci/duts/dut-rpi-dutctl-tester/dut.yaml): GPIO 5 and 6 read the power and reset switch,
+.firmwareci/duts/dut-rpi-dutctl-tester/dut.yaml): GPIO 5 and 10 read the power and reset switch,
 GPIO 13 drives the power LED input. Every press goes to stdout, so `journalctl -u fake-atx` shows
 what kvmd pressed and for how long."""
 
 import signal
 import time
 
-POWER_SWITCH, RESET_SWITCH, POWER_LED = 5, 6, 13
+POWER_SWITCH, RESET_SWITCH, POWER_LED = 5, 10, 13
 LONG_PRESS = 4  # seconds; an ATX board forces itself off after a power press this long
 
 
