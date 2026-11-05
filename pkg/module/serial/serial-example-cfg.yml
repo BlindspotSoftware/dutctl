@@ -1,4 +1,4 @@
-version: 1.0.0-alpha.5
+version: 1.0.0-beta.1
 devices:
   server:
     desc: A server that needs to be observed during boot
@@ -15,5 +15,3 @@ devices:
               port: /tmp/ttyS0
               baud: 115200
               delay: 50ms
-              # For a device that ends its lines in a bare LF; most need no map.
-              # imap: [lfcrlf]
