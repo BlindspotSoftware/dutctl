@@ -73,11 +73,11 @@ go install github.com/BlindspotSoftware/dutctl/cmds/dutagent@v1.0.0-alpha.5
 _dutctl_ is on its way to a stable v1.0.0. Before promising backwards compatibility, we use two pre-release phases
 to validate in real-world use that we got the idea of the public interfaces right:
 
-- **Alpha** (current, released as `v1.0.0-alpha.N`) — focus on automated use.
+- **Alpha** (released as `v1.0.0-alpha.N`) — focus on automated use.
   A CI team stresses the features relevant for automated operation of _dutctl_, e.g. in test pipelines and scripted
   workflows. The automation surface is the smaller one to harden, so it comes first.
 
-- **Beta** (released as `v1.0.0-beta.N`) — focus on interactive use.
+- **Beta** (current, released as `v1.0.0-beta.N`) — focus on interactive use.
   Once automated operation proves stable, a team of firmware developers additionally uses _dutctl_ in their daily,
   interactive work with their devices.
 
