@@ -46,9 +46,10 @@ type Broker struct {
 func (b *Broker) init() {
 	b.session.printCh = make(chan string)
 	b.session.consoleCh = make(chan consoleEvent)
-	b.session.fileReqCh = make(chan string)
-	b.session.fileDownCh = make(chan chan []byte)
-	b.session.fileUpCh = make(chan chan []byte)
+	b.session.shutdownCh = make(chan struct{})
+	b.session.fileTransferNotifyCh = make(chan struct{}, 1)
+	b.session.activeUploads = make(map[string]*uploadState)
+	b.session.activeDownloads = make(map[string]*downloadState)
 }
 
 // CloseConsole ends the console a module has open, if any, and tells the
@@ -96,6 +97,25 @@ func (b *Broker) Start(ctx context.Context, s Stream) (module.Session, context.C
 	b.toClient(workerCtx)
 	b.fromClient(workerCtx)
 
+	// Release in-flight transfers as soon as the workers are stopped, without
+	// waiting for them to return. fromClientWorker can be blocked in an upload's
+	// io.Pipe write, which no context can interrupt and only CloseWithError
+	// unblocks, and it is one of the workers b.wg waits on below. Aborting after
+	// wg.Wait alone would therefore never run. Terminates once the workers do:
+	// both call b.stop when they exit.
+	go func() {
+		<-workerCtx.Done()
+		b.session.abortTransfers()
+	}()
+
+	go func() {
+		b.wg.Wait()
+		// Both workers have exited. Release any transfer registered after the
+		// cancellation sweep above, so WaitForTransfers (and thus graceful
+		// shutdown) cannot block forever. abortTransfers is idempotent.
+		b.session.abortTransfers()
+	}()
+
 	return &b.session, runCtx
 }
 
@@ -129,6 +149,18 @@ func (b *Broker) fail(err error) {
 		b.err = err
 		b.cancel(err)
 	})
+}
+
+// Shutdown begins graceful shutdown of the session once the modules have
+// returned: module output stops being forwarded while the workers finish the
+// downloads in flight. Uploads are dropped, as no module is left to read them.
+func (b *Broker) Shutdown() {
+	b.session.Shutdown()
+}
+
+// WaitForTransfersToComplete blocks until every active file transfer has finished.
+func (b *Broker) WaitForTransfersToComplete() {
+	b.session.WaitForTransfers()
 }
 
 func (b *Broker) toClient(ctx context.Context) {

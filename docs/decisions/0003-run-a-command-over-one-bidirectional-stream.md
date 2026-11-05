@@ -60,6 +60,8 @@ did not request, both fail with `InvalidArgument`.
   reaches the stream.
 - [ADR-0035](0035-frame-consoles-in-line-or-raw-mode.md): the messages that
   frame a console on the stream, added in 2026.
+- [ADR-0036](0036-transfer-files-in-chunks-over-the-run-stream.md): files move
+  in chunks instead of one `File` message, since 2026.
 - [ADR-0014](0014-let-the-agent-access-client-files-the-user-did-not-name.md): which paths
   on the client a file transfer may use.
 - Later changes:

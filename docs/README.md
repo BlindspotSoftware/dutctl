@@ -111,19 +111,25 @@ Raw mode is used only when the client's standard input is a terminal and the out
 example with input piped from a file or in CI, the input is forwarded as it is read, in chunks, with no raw mode
 anywhere.
 
-![FileDownload-msg](https://github.com/user-attachments/assets/2e6d75e6-02b0-43e1-875f-3e7634b6b147)
+Files move in chunks of up to 1 MiB, so neither side holds a whole file in memory, and other messages keep flowing
+during a transfer. A transfer has an ID that the agent assigns, and its chunks are numbered from 0; the last one is
+marked final. Transfers can happen multiple times and can be mixed with Print messages, consoles and each other.
+Note that while a console is open, a file transfer waits behind the module's reading of the console input.
 
-**File download to the client**: After the initial RunRequest with a Command message by the client, for commands
-producing any artifacts, these can be downloaded to the client, with a RunResponse being a File message. Downloads can
-happen multiple times and can be mixed with Print messages, consoles and file uploads.
+**File download to the client**: A module sends a file with `SendFile`. The agent announces the download with a
+FileTransferRequest in the download direction, which names the destination path on the client, and then streams the
+file as FileChunk messages. The client writes them to a temporary file next to the destination and moves it into place
+when the final chunk has arrived, so a broken download leaves the destination as it was. It then confirms the download
+with a FileTransferResponse with the status TRANSFER_COMPLETE.
 
-![FileUpload-msg](https://github.com/user-attachments/assets/1a12204b-58b1-4b05-88ec-c8a3ba3f2b6a)
+**File upload to the agent**: A module requests a file with `RequestFile`. The agent sends a FileTransferRequest in the
+upload direction, which names the path on the client. The client answers with a FileTransferRequest that carries the
+file's size, and then sends the file as FileChunk messages. It sends the next chunk only once the agent has answered the
+last one with the status CHUNK_RECEIVED, which the agent does once the module has read it. After the final chunk the
+agent answers TRANSFER_COMPLETE.
 
-**File Upload to the agent**: After the initial RunRequest with a Command message by the client, for commands needing
-any artifacts, these can be uploaded to the agent, with a RunResponse being a FileRequest message and the client
-answering with a RunRequest being a File message. Uploads can happen multiple times and can be mixed with Print
-messages, consoles and file downloads. Note that while a console is open, a file transfer waits behind the module's
-reading of the console input.
+Either side ends a transfer it cannot continue with the status TRANSFER_REJECTED or ERROR. A download that fails this
+way fails the run on the client.
 
 > [!IMPORTANT]
 > The console protocol described here replaced the earlier single Console message. While DUT Control is in alpha, no

@@ -251,8 +251,8 @@ func TestRunRPCPipeEndReachesLaterConsoles(t *testing.T) {
 	}
 }
 
-// A file request answered by the receive routine while the send routine
-// forwards input exercises the one sender both share; the race detector
+// An upload the agent requests while the send routine forwards input exercises
+// the one sender they share; the race detector
 // watches the stream.
 func TestRunRPCFileReplyWhileInputFlows(t *testing.T) {
 	dir := t.TempDir()
@@ -272,13 +272,18 @@ func TestRunRPCFileReplyWhileInputFlows(t *testing.T) {
 			return err
 		}
 
-		if err := stream.Send(&pb.RunResponse{Msg: &pb.RunResponse_FileRequest{FileRequest: &pb.FileRequest{Path: path}}}); err != nil {
+		if err := stream.Send(&pb.RunResponse{Msg: &pb.RunResponse_FileTransferRequest{FileTransferRequest: &pb.FileTransferRequest{
+			TransferId: "1", Metadata: &pb.FileMetadata{Path: path}, Direction: pb.FileTransferRequest_DIRECTION_UPLOAD,
+		}}}); err != nil {
 			return err
 		}
 
-		// The file reply and the input travel on separate routines of the
+		// The file's chunks and the input travel on separate routines of the
 		// client, in no fixed order: wait for both, then end the console.
-		var gotFile, gotEOF bool
+		var (
+			gotFile, gotEOF bool
+			content         []byte
+		)
 
 		for !gotFile || !gotEOF {
 			req, err := agent.receive(stream)
@@ -287,12 +292,24 @@ func TestRunRPCFileReplyWhileInputFlows(t *testing.T) {
 			}
 
 			switch msg := req.GetMsg().(type) {
-			case *pb.RunRequest_File:
-				if string(msg.File.GetContent()) != "file content" {
-					return errors.New("wrong file content")
+			case *pb.RunRequest_FileChunk:
+				content = append(content, msg.FileChunk.GetChunkData()...)
+				status := pb.FileTransferResponse_STATUS_CHUNK_RECEIVED
+
+				if msg.FileChunk.GetIsFinal() {
+					if string(content) != "file content" {
+						return errors.New("wrong file content")
+					}
+
+					gotFile = true
+					status = pb.FileTransferResponse_STATUS_TRANSFER_COMPLETE
 				}
 
-				gotFile = true
+				if err := stream.Send(&pb.RunResponse{Msg: &pb.RunResponse_FileTransferResponse{FileTransferResponse: &pb.FileTransferResponse{
+					TransferId: "1", Status: status, NextChunkExpected: msg.FileChunk.GetChunkNumber() + 1,
+				}}}); err != nil {
+					return err
+				}
 			case *pb.RunRequest_ConsoleControl:
 				gotEOF = msg.ConsoleControl.GetEof() != nil
 			}
