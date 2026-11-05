@@ -65,15 +65,18 @@ message DetailsResponse {
 // to interact with the agent while the command runs. The first RunRequest of a
 // stream must carry a Command message.
 message RunRequest {
-  // 2 carried the Console message of older alphas. It stays reserved, so that
-  // a peer of an older alpha cannot misread a message of this one.
-  reserved 2;
-  reserved "console";
+  // 2 carried the Console message and 3 the unchunked File message of older
+  // alphas. They stay reserved, so that a peer of an older alpha cannot misread
+  // a message of this one.
+  reserved 2, 3;
+  reserved "console", "file";
   oneof msg {
     Command command = 1;
-    File file = 3;
     ConsoleInput console_input = 4;
     ConsoleControl console_control = 5;
+    FileTransferRequest file_transfer_request = 8;
+    FileChunk file_chunk = 9;
+    FileTransferResponse file_transfer_response = 10;
   }
 }
 
@@ -81,17 +84,20 @@ message RunRequest {
 // (Print), the traffic of a console and the events that frame it, or a file
 // transfer.
 message RunResponse {
-  // 2 carried the Console message of older alphas. It stays reserved, so that
-  // a peer of an older alpha cannot misread a message of this one.
-  reserved 2;
-  reserved "console";
+  // 2 carried the Console message, 3 and 4 the unchunked FileRequest and File
+  // messages of older alphas. They stay reserved, so that a peer of an older
+  // alpha cannot misread a message of this one. The file transfer fields share
+  // RunRequest's numbers, since both directions carry the same three messages.
+  reserved 2, 3, 4;
+  reserved "console", "file_request", "file";
   oneof msg {
     Print print = 1;
-    FileRequest file_request = 3;
-    File file = 4;
     ConsoleOpen console_open = 5;
     ConsoleOutput console_output = 6;
     ConsoleClose console_close = 7;
+    FileTransferRequest file_transfer_request = 8;
+    FileChunk file_chunk = 9;
+    FileTransferResponse file_transfer_response = 10;
   }
 }
 
@@ -177,15 +183,53 @@ message ConsoleControl {
 // file transfers and output keep flowing.
 message ConsoleEof {}
 
-// FileRequest is used by the agent to request a file from the client.
-message FileRequest {
-  string path = 1;
+// FileMetadata describes the properties of a file being transferred.
+message FileMetadata {
+  string path = 1; // Path of the file
+  int64 size = 2; // Total file size in bytes
+  string name = 3; // Filename for reference
 }
 
-// File is used by the client and the agent to transfer a file.
-message File {
-  string path = 1;
-  bytes content = 2;
+// FileChunk represents a single chunk of a file being transferred.
+// Maximum chunk size is 1MB.
+message FileChunk {
+  string transfer_id = 1; // Unique ID for this transfer session
+  int32 chunk_number = 2; // Sequential chunk number (0-indexed)
+  bytes chunk_data = 3; // File data chunk (max 1MB)
+  int64 chunk_offset = 4; // Byte offset in the file
+  bool is_final = 5; // Whether this is the last chunk
+  bytes sha256 = 6; // Raw 32-byte SHA-256 of the whole file, on the final chunk only. Empty only from peers predating this field.
+}
+
+// FileTransferRequest starts a file transfer. The agent sends it to request an
+// upload or to announce a download; the client answers an upload request with
+// one that carries the file's size.
+message FileTransferRequest {
+  string transfer_id = 1; // Unique ID for this transfer
+  FileMetadata metadata = 2; // File metadata
+
+  enum Direction {
+    DIRECTION_UNSPECIFIED = 0;
+    DIRECTION_UPLOAD = 1; // Client sending file to agent (agent requesting from client)
+    DIRECTION_DOWNLOAD = 2; // Agent sending file to client
+  }
+  Direction direction = 3; // Direction of file transfer
+}
+
+// FileTransferResponse acknowledges file transfer requests and chunk receipts.
+message FileTransferResponse {
+  string transfer_id = 1; // Matches request ID
+  enum Status {
+    STATUS_UNSPECIFIED = 0;
+    STATUS_ACCEPTED = 1; // Ready to receive chunks
+    STATUS_CHUNK_RECEIVED = 2; // Chunk received successfully
+    STATUS_TRANSFER_COMPLETE = 3; // All chunks received
+    STATUS_TRANSFER_REJECTED = 4; // Transfer cannot proceed
+    STATUS_ERROR = 5; // Transfer error occurred
+  }
+  Status status = 2;
+  int32 next_chunk_expected = 3; // Next chunk number expected (for recovery)
+  string error_message = 4; // Error details if status is ERROR
 }
 
 // LockRequest is sent by the client to acquire or extend a lock on a device.
