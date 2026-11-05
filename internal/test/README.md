@@ -2,6 +2,8 @@
 
 This directory provides support code for unit and integration tests through simple test doubles. The goal is to make tests deterministic and fast without requiring external systems or complex setup.
 
+Besides the doubles in `mock`, package `pty` opens pseudo-terminals for tests of how dutctl handles a terminal, on Linux.
+
 ## Guiding Principles
 
 1. Keep test doubles small and focused.
