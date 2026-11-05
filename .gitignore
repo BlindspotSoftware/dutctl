@@ -10,3 +10,4 @@
 /keys/
 /bin/
 /.firmwareci/*dummy_*.rom
+__pycache__/
