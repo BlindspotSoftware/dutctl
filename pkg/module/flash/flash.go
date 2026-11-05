@@ -46,10 +46,6 @@ func init() {
 	})
 }
 
-// localImagePath is the local path on the dutagent used to temporarily store the flash
-// image during read/write operations.
-const localImagePath = "./image"
-
 // op represents the flash operation.
 type op string
 
@@ -72,10 +68,7 @@ type Flash struct {
 	// For dpcmd: optional, used with --device flag to select specific USB device number.
 	Programmer string `yaml:"programmer"`
 
-	op              op
-	localImagePath  string
-	clientImagePath string
-	supportedTools  []string // supportedTools is a list of base names of supported flash tools
+	supportedTools []string // supportedTools is a list of base names of supported flash tools
 }
 
 // Ensure implementing the Module interface.
@@ -145,60 +138,62 @@ func (f *Flash) isSupported(tool string) bool {
 	return slices.Contains(f.supportedTools, base)
 }
 
-// Deinit removes the temporary flash image file stored locally on the dutagent.
+// Deinit has nothing to clean up: every run removes its own image.
 func (f *Flash) Deinit(_ context.Context) error {
-	return os.RemoveAll(f.localImagePath)
+	return nil
 }
 
 // Run performs a flash operation. args must be "read" or "write" followed by an image path.
 // For a write, the image is uploaded from the client before flashing; for a read, the image
 // is downloaded to the client afterward.
 //
-//nolint:cyclop
+// The image lives in a directory of its own under the dutagent's temporary directory
+// for as long as the run lasts: flash commands of other devices, and other flash
+// commands of the same device, run at the same time.
 func (f *Flash) Run(ctx context.Context, sesh module.Session, args ...string) error {
 	l := log.FromContext(ctx)
 
-	if len(args) < 1 {
-		return errors.New("missing argument: flash operation")
+	operation, clientImagePath, err := parseArgs(args)
+	if err != nil {
+		return err
 	}
 
-	switch op := args[0]; op {
-	case string(opRead):
-		f.op = opRead
-	case string(opWrite):
-		f.op = opWrite
-	default:
-		return fmt.Errorf("unknown operation %q", op)
+	dir, err := os.MkdirTemp("", "flash-")
+	if err != nil {
+		return fmt.Errorf("create directory for the flash image on dutagent: %w", err)
 	}
 
-	//nolint:mnd
-	if len(args) < 2 {
-		return errors.New("missing argument: image file name")
-	}
+	defer func() {
+		// The run's result stands; a leftover directory only takes up space.
+		err := os.RemoveAll(dir)
+		if err != nil {
+			l.Warn(fmt.Sprintf("remove flash image directory: %v", err))
+		}
+	}()
 
-	f.clientImagePath = args[1]
-	f.localImagePath = localImagePath
+	localImagePath := filepath.Join(dir, "image")
 
-	if f.op == opWrite {
-		err := uploadImage(sesh, f.clientImagePath, f.localImagePath)
+	if operation == opWrite {
+		err := uploadImage(sesh, clientImagePath, localImagePath)
 		if err != nil {
 			return err
 		}
 	}
 
 	action := "reading"
-	if f.op == opWrite {
+	if operation == opWrite {
 		action = "writing"
 	}
 
 	l.Info(fmt.Sprintf("%s flash with %s", action, f.Tool))
 
-	cmdStr := fmt.Sprintf("%s %s", f.Tool, strings.Join(f.cmdline(), " "))
+	cmdline := f.cmdline(operation, localImagePath)
+	cmdStr := fmt.Sprintf("%s %s", f.Tool, strings.Join(cmdline, " "))
 
 	l.Debug(fmt.Sprintf("executing %s", cmdStr))
 	sesh.Printf("Executing: %s\n", cmdStr)
 
-	err := execute(ctx, sesh, f.Tool, f.cmdline()...)
+	err = execute(ctx, sesh, f.Tool, cmdline...)
 	if err != nil {
 		return fmt.Errorf("flash operation failed: %w", err)
 	}
@@ -207,14 +202,33 @@ func (f *Flash) Run(ctx context.Context, sesh module.Session, args ...string) er
 
 	time.Sleep(1 * time.Second)
 
-	if f.op == opRead {
-		err := downloadImage(sesh, f.localImagePath, f.clientImagePath)
+	if operation == opRead {
+		err := downloadImage(sesh, localImagePath, clientImagePath)
 		if err != nil {
 			return err
 		}
 	}
 
 	return nil
+}
+
+// parseArgs returns the operation and the client's image path from "read|write <image>".
+func parseArgs(args []string) (op, string, error) {
+	if len(args) < 1 {
+		return "", "", errors.New("missing argument: flash operation")
+	}
+
+	operation := op(args[0])
+	if operation != opRead && operation != opWrite {
+		return "", "", fmt.Errorf("unknown operation %q", args[0])
+	}
+
+	//nolint:mnd
+	if len(args) < 2 {
+		return "", "", errors.New("missing argument: image file name")
+	}
+
+	return operation, args[1], nil
 }
 
 func execute(ctx context.Context, sesh module.Session, tool string, args ...string) error {
@@ -246,10 +260,10 @@ func execute(ctx context.Context, sesh module.Session, tool string, args ...stri
 	return nil
 }
 
-// cmdline returns the arg list for the wrapped flash tool.
+// cmdline returns the arg list for the wrapped flash tool to read or write image.
 // flashrom/flashprog use: -p <programmer> -r/-w <file>.
 // dpcmd uses: -r/-u <file> [--device <n>].
-func (f *Flash) cmdline() []string {
+func (f *Flash) cmdline(operation op, image string) []string {
 	base := filepath.Base(f.Tool)
 
 	var args []string
@@ -261,22 +275,22 @@ func (f *Flash) cmdline() []string {
 			args = append(args, "--device", f.Programmer)
 		}
 
-		switch f.op {
+		switch operation {
 		case opWrite:
 			// dpcmd uses -u (update: erase then program) instead of -w
-			args = append(args, "-u", f.localImagePath)
+			args = append(args, "-u", image)
 		case opRead:
-			args = append(args, "-r", f.localImagePath)
+			args = append(args, "-r", image)
 		}
 	} else {
 		// flashrom and flashprog use the same CLI
 		args = []string{"-p", f.Programmer}
 
-		switch f.op {
+		switch operation {
 		case opWrite:
-			args = append(args, "-w", f.localImagePath)
+			args = append(args, "-w", image)
 		case opRead:
-			args = append(args, "-r", f.localImagePath)
+			args = append(args, "-r", image)
 		}
 	}
 
