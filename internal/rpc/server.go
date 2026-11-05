@@ -9,6 +9,8 @@ import (
 	"net"
 	"net/http"
 	"time"
+
+	"github.com/BlindspotSoftware/dutctl/internal/log"
 )
 
 // readHeaderTimeout bounds how long the server waits to read request headers.
@@ -26,15 +28,21 @@ const shutdownGracePeriod = 15 * time.Second
 // the handler (mux + connect handlers + interceptors) and pass it in, and classify
 // the return via ctx.Err(): a cancelled ctx means a graceful stop, otherwise the
 // server failed to serve.
+//
+// Once bound, it logs the address it listens on through the logger on ctx: the
+// bound one, so a port 0 in addr shows as the port the system picked, and a
+// client may connect from the moment the line is written.
 func ListenAndServe(ctx context.Context, addr string, handler http.Handler) error {
 	var lc net.ListenConfig
 
-	ln, err := lc.Listen(ctx, "tcp", addr)
+	listener, err := lc.Listen(ctx, "tcp", addr)
 	if err != nil {
 		return err
 	}
 
-	return serve(ctx, ln, handler)
+	log.FromContext(ctx).Info("rpc service listening", "addr", listener.Addr().String())
+
+	return serve(ctx, listener, handler)
 }
 
 // serve runs handler on the listener ln. It blocks until ctx is cancelled — then it stops
