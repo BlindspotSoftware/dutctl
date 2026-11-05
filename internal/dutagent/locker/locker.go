@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sync"
 	"time"
 
@@ -83,7 +84,7 @@ func (h Hold) isExpired(now time.Time) bool {
 // a different owner. Holder is the Hold that blocks the operation (its owner,
 // when it was taken, its expiry, and its Kind). Error unwraps to ErrWrongOwner
 // so callers can match the "different owner" case across acquire (Lock/AutoLock)
-// and release (ClearLock/ClearAutoLock) APIs with a single errors.Is check.
+// and release (ClearLock) APIs with a single errors.Is check.
 //
 // It is always returned as a pointer (*Error) and uses a pointer receiver:
 // match the category with errors.Is(err, ErrWrongOwner) and reach the Holder
@@ -166,21 +167,36 @@ func (e *runningError) Unwrap() error {
 }
 
 // Locker tracks per-device holds of two kinds: a Reserved hold driven by
-// Lock/ClearLock/ForceClearLock and a Busy hold driven by AutoLock/
-// ClearAutoLock. The two are stored separately so a clear of one never affects
-// the other, a forced one included: ForceClearLock breaks a reservation, and a
-// running command keeps its Busy hold until it returns. While the agent stops,
-// Drain and then Close restrict which new holds the Locker grants. Locker is
-// safe for concurrent use. Hold state is held in memory only and is lost on
-// agent restart.
+// Lock/ClearLock/ForceClearLock and a Busy hold per running command, the Lease
+// that AutoLock returns. The two are stored separately so a clear of one never
+// affects the other, a forced one included: ForceClearLock breaks a
+// reservation, and a running command keeps its Busy hold until it returns.
+// While the agent stops, Drain and then Close restrict which new holds the
+// Locker grants. Locker is safe for concurrent use. Hold state is held in
+// memory only and is lost on agent restart.
 type Locker struct {
 	mu sync.Mutex
-	// reserved holds Reserved-kind holds (the `lock` command); busy holds the
-	// Busy-kind hold of the one command a device runs at a time.
+	// reserved holds the Reserved-kind hold of each device (the `lock` command).
 	reserved map[string]Hold
-	busy     map[string]Hold
-	mode     mode
-	log      *slog.Logger
+	// busy holds the leases of the commands each device runs, oldest first.
+	busy map[string][]*Lease
+	mode mode
+	log  *slog.Logger
+}
+
+// Lease is the Busy hold of one running command, to be released once the
+// command has returned. It never expires, and only its own Release ends it:
+// ForceClearLock and Close leave it alone. Each Lease is a pointer of its own,
+// so a release, however late, never ends another command's hold.
+type Lease struct {
+	// locker is the Locker that granted the lease.
+	locker *Locker
+	// device is the device the command runs on.
+	device string
+	// command is the name of the running command.
+	command string
+	// hold is the Busy hold the lease stands for.
+	hold Hold
 }
 
 // mode is which new holds a Locker grants.
@@ -196,7 +212,7 @@ const (
 func New() *Locker {
 	return &Locker{
 		reserved: make(map[string]Hold),
-		busy:     make(map[string]Hold),
+		busy:     make(map[string][]*Lease),
 		log:      log.Scope(slog.Default(), "locker"),
 	}
 }
@@ -228,8 +244,9 @@ func (l *Locker) checkLocked(device, owner string) *Error {
 		return &Error{Device: device, Holder: hold}
 	}
 
-	if hold, held := l.busy[device]; held && hold.Owner != owner {
-		return &Error{Device: device, Holder: hold}
+	// All leases of a device belong to one owner: this check admits no other.
+	if leases := l.busy[device]; len(leases) > 0 && leases[0].hold.Owner != owner {
+		return &Error{Device: device, Holder: leases[0].hold}
 	}
 
 	return nil
@@ -330,8 +347,8 @@ func (l *Locker) ForceClearLock(device string) error {
 
 	reservation, reserved := l.liveReservation(device)
 	if !reserved {
-		if hold, busy := l.busy[device]; busy {
-			return &busyError{device: device, owner: hold.Owner}
+		if leases := l.busy[device]; len(leases) > 0 {
+			return &busyError{device: device, owner: leases[0].hold.Owner}
 		}
 
 		return ErrNotLocked
@@ -343,70 +360,71 @@ func (l *Locker) ForceClearLock(device string) error {
 	return nil
 }
 
-// AutoLock acquires the Busy hold on device for owner, for one command. A
-// device runs one command at a time, whoever asks: while it has a Busy hold,
-// AutoLock rejects another owner with a *Error and the hold's own owner with an
-// error matching ErrAlreadyRunning. A Reserved hold of another owner is
-// rejected with a *Error as well; owner's own reservation does not stand in the
-// way. While the agent stops, ErrShuttingDown is returned on a device owner has
-// not reserved, and once the Locker is closed on every device.
-//
-// A Busy hold never expires, and only ClearAutoLock ends it; ForceClearLock
-// and Close leave it alone. So each successful AutoLock must be followed by
-// exactly one ClearAutoLock once the command has returned, or the device stays
-// busy until the agent restarts.
-func (l *Locker) AutoLock(device, owner string) (Hold, error) {
+// AutoLock takes a Busy hold on device for owner's command and returns it as a
+// Lease. A device runs one command at a time, whoever asks: while it has a
+// Busy hold, AutoLock rejects another owner with a *Error and the hold's own
+// owner with an error matching ErrAlreadyRunning. A Reserved hold of another
+// owner is rejected with a *Error as well; owner's own reservation does not
+// stand in the way. While the agent stops, ErrShuttingDown is returned on a
+// device owner has not reserved, and once the Locker is closed on every device.
+func (l *Locker) AutoLock(device, owner, command string) (*Lease, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
 	blocker := l.checkLocked(device, owner)
 	if blocker != nil {
-		return Hold{}, blocker
+		return nil, blocker
 	}
 
 	if !l.admits(device, owner) {
-		return Hold{}, ErrShuttingDown
+		return nil, ErrShuttingDown
 	}
 
-	// checkLocked let owner through, so a Busy hold here is owner's own.
-	if _, held := l.busy[device]; held {
-		return Hold{}, &runningError{device: device, owner: owner}
+	// checkLocked let owner through, so a lease here is owner's own.
+	if len(l.busy[device]) > 0 {
+		return nil, &runningError{device: device, owner: owner}
 	}
 
-	hold := Hold{Owner: owner, LockedAt: time.Now(), Kind: Busy}
-	l.busy[device] = hold
-	l.log.Debug("auto-lock acquired", "device", device, "owner", owner)
+	lease := &Lease{
+		locker:  l,
+		device:  device,
+		command: command,
+		hold:    Hold{Owner: owner, LockedAt: time.Now(), Kind: Busy},
+	}
+	l.busy[device] = append(l.busy[device], lease)
+	l.log.Debug("auto-lock acquired", "device", device, "owner", owner, "command", command)
 
-	return hold, nil
+	return lease, nil
 }
 
-// ClearAutoLock releases the Busy hold on device. Only the owner may release
-// it: it returns ErrNotLocked when no Busy hold is held, or a *Error
-// (unwrapping to ErrWrongOwner) when a different owner holds it. The Reserved
-// hold is not touched.
-func (l *Locker) ClearAutoLock(device, owner string) error {
+// Release ends the lease; releasing it again does nothing.
+func (le *Lease) Release() {
+	l := le.locker
+
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	hold, ok := l.busy[device]
-	if !ok {
-		return ErrNotLocked
+	leases := l.busy[le.device]
+
+	idx := slices.Index(leases, le)
+	if idx < 0 {
+		return
 	}
 
-	if hold.Owner != owner {
-		return &Error{Device: device, Holder: hold}
+	if len(leases) == 1 {
+		delete(l.busy, le.device)
+	} else {
+		l.busy[le.device] = slices.Delete(leases, idx, idx+1)
 	}
 
-	delete(l.busy, device)
-	l.log.Debug("auto-lock released", "device", device, "owner", owner)
-
-	return nil
+	l.log.Debug("auto-lock released", "device", le.device, "owner", le.hold.Owner, "command", le.command)
 }
 
 // StatusAll returns the effective hold for every device that currently has one.
 // A device with a live reservation reports that Reserved hold (it carries the
-// meaningful expiry); a device that is only busy reports its Busy hold. Expired
-// reservations are pruned and omitted; free devices are absent.
+// meaningful expiry); a device that is only busy reports the Busy hold of its
+// oldest running command. Expired reservations are pruned and omitted; free
+// devices are absent.
 func (l *Locker) StatusAll() map[string]Hold {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -416,8 +434,8 @@ func (l *Locker) StatusAll() map[string]Hold {
 	// Busy holds first, then let a live reservation shadow it: when a device
 	// has both (necessarily the same owner), the reservation is the meaningful
 	// holder to report.
-	for device, hold := range l.busy {
-		out[device] = hold
+	for device, leases := range l.busy {
+		out[device] = leases[0].hold
 	}
 
 	for device := range l.reserved {

@@ -257,7 +257,7 @@ func TestRunRejectedBeforeModules(t *testing.T) {
 			setup: func(t *testing.T, svc *rpcService) {
 				t.Helper()
 
-				if _, err := svc.locker.AutoLock(testDevice, "bob"); err != nil {
+				if _, err := svc.locker.AutoLock(testDevice, "bob", "cmd"); err != nil {
 					t.Fatalf("setup AutoLock: %v", err)
 				}
 			},
@@ -269,7 +269,7 @@ func TestRunRejectedBeforeModules(t *testing.T) {
 			setup: func(t *testing.T, svc *rpcService) {
 				t.Helper()
 
-				if _, err := svc.locker.AutoLock(testDevice, "alice"); err != nil {
+				if _, err := svc.locker.AutoLock(testDevice, "alice", "cmd"); err != nil {
 					t.Fatalf("setup AutoLock: %v", err)
 				}
 			},
@@ -814,54 +814,6 @@ func TestFindCommand(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestClearAutoLock(t *testing.T) {
-	t.Run("clears_auto_slot_only", func(t *testing.T) {
-		l := locker.New()
-		if _, err := l.Lock(testDevice, "alice", time.Hour); err != nil {
-			t.Fatalf("setup Lock: %v", err)
-		}
-
-		if _, err := l.AutoLock(testDevice, "alice"); err != nil {
-			t.Fatalf("setup AutoLock: %v", err)
-		}
-
-		clearAutoLock(context.Background(), l, testDevice, "alice")
-
-		got, ok := l.StatusAll()[testDevice]
-		if !ok || got.Kind != locker.Reserved {
-			t.Errorf("StatusAll[%s] = %+v (ok=%v), want the reservation intact", testDevice, got, ok)
-		}
-
-		// Releasing the reservation must leave the device free, proving the Busy
-		// hold really was cleared rather than merely shadowed by the reservation.
-		if err := l.ClearLock(testDevice, "alice"); err != nil {
-			t.Fatalf("ClearLock: %v", err)
-		}
-
-		if _, ok := l.StatusAll()[testDevice]; ok {
-			t.Error("Busy hold still present after clearAutoLock")
-		}
-	})
-
-	t.Run("missing_auto_lock_is_logged", func(t *testing.T) {
-		l := locker.New()
-
-		var buf bytes.Buffer
-
-		ctx := log.Into(context.Background(), slog.New(slog.NewTextHandler(&buf, nil)))
-
-		// Nothing held: a device runs one command at a time, so no other run
-		// shares the hold, and a forced unlock no longer ends it. The
-		// ErrNotLocked from ClearAutoLock is therefore unexpected, and
-		// clearAutoLock warns about it instead of passing over it.
-		clearAutoLock(ctx, l, testDevice, "alice")
-
-		if out := buf.String(); !strings.Contains(out, "level=WARN") || !strings.Contains(out, "failed to release auto-lock") {
-			t.Errorf("log = %q, want a warning that the auto-lock could not be released", out)
-		}
-	})
 }
 
 func TestRunModules(t *testing.T) {

@@ -163,16 +163,15 @@ func TestWaitIdle(t *testing.T) {
 	t.Run("waits until a running command returns", func(t *testing.T) {
 		locks := locker.New()
 
-		if _, err := locks.AutoLock("dev", "alice"); err != nil {
+		lease, err := locks.AutoLock("dev", "alice", "cmd")
+		if err != nil {
 			t.Fatalf("setup AutoLock: %v", err)
 		}
 
 		done := startWaitIdle(locks, nil)
 		stillWaiting(t, done, "the command is still running")
 
-		if err := locks.ClearAutoLock("dev", "alice"); err != nil {
-			t.Fatalf("ClearAutoLock: %v", err)
-		}
+		lease.Release()
 
 		returnsWithin(t, done, time.Second, "the command returned")
 	})
@@ -267,18 +266,17 @@ func TestServeStopStages(t *testing.T) {
 
 		serveStillRunning(t, code, "alice's reservation is held")
 
-		if _, err := agt.locks.AutoLock("free", "bob"); !errors.Is(err, locker.ErrShuttingDown) {
+		if _, err := agt.locks.AutoLock("free", "bob", "cmd"); !errors.Is(err, locker.ErrShuttingDown) {
 			t.Errorf("bob's command on a free device while draining: err = %v, want ErrShuttingDown", err)
 		}
 
 		// The job goes on while the agent drains: alice runs her next command.
-		if _, err := agt.locks.AutoLock("dev", "alice"); err != nil {
+		lease, err := agt.locks.AutoLock("dev", "alice", "cmd")
+		if err != nil {
 			t.Fatalf("alice's command while draining: %v", err)
 		}
 
-		if err := agt.locks.ClearAutoLock("dev", "alice"); err != nil {
-			t.Fatalf("ClearAutoLock: %v", err)
-		}
+		lease.Release()
 
 		if err := agt.locks.ClearLock("dev", "alice"); err != nil {
 			t.Fatalf("ClearLock: %v", err)
@@ -294,7 +292,8 @@ func TestServeStopStages(t *testing.T) {
 			t.Fatalf("setup Lock: %v", err)
 		}
 
-		if _, err := agt.locks.AutoLock("busy", "bob"); err != nil {
+		lease, err := agt.locks.AutoLock("busy", "bob", "cmd")
+		if err != nil {
 			t.Fatalf("setup AutoLock: %v", err)
 		}
 
@@ -312,9 +311,7 @@ func TestServeStopStages(t *testing.T) {
 			t.Errorf("StatusAll() = %+v in stage 2, want only bob's running command", status)
 		}
 
-		if err := agt.locks.ClearAutoLock("busy", "bob"); err != nil {
-			t.Fatalf("ClearAutoLock: %v", err)
-		}
+		lease.Release()
 
 		serveReturns(t, code, 2*time.Second, exit0, "bob's command returned")
 	})
@@ -326,7 +323,8 @@ func TestServeStopStages(t *testing.T) {
 		agt := newServeAgent()
 		agt.address = "no-port" // the service cannot listen
 
-		if _, err := agt.locks.AutoLock("busy", "bob"); err != nil {
+		lease, err := agt.locks.AutoLock("busy", "bob", "cmd")
+		if err != nil {
 			t.Fatalf("setup AutoLock: %v", err)
 		}
 
@@ -336,13 +334,11 @@ func TestServeStopStages(t *testing.T) {
 
 		serveStillRunning(t, code, "bob's command is still running")
 
-		if _, err := agt.locks.AutoLock("free", "carol"); !errors.Is(err, locker.ErrShuttingDown) {
+		if _, err := agt.locks.AutoLock("free", "carol", "cmd"); !errors.Is(err, locker.ErrShuttingDown) {
 			t.Errorf("new command after a service failure: err = %v, want ErrShuttingDown", err)
 		}
 
-		if err := agt.locks.ClearAutoLock("busy", "bob"); err != nil {
-			t.Fatalf("ClearAutoLock: %v", err)
-		}
+		lease.Release()
 
 		serveReturns(t, code, 2*time.Second, exit1, "bob's command returned after the service failed")
 	})
