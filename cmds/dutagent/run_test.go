@@ -264,7 +264,7 @@ func TestRunRejectedBeforeModules(t *testing.T) {
 			wantCode: connect.CodeFailedPrecondition,
 		},
 		{
-			name: "device busy with the same user's run",
+			name: "device busy with the same user's run of the command",
 			reqs: []*pb.RunRequest{commandReq(testDevice, testCommand)},
 			setup: func(t *testing.T, svc *rpcService) {
 				t.Helper()
@@ -484,27 +484,32 @@ func TestRunKeepsSameUsersReservation(t *testing.T) {
 	}
 }
 
-// A device runs one command at a time, even for one user: a second run of the
-// same user, e.g. a power cycle from another terminal while a console is open,
-// is rejected as the device being busy, without presenting the user as a
-// stranger holding it. The first run keeps the device until it ends.
-func TestRunSameUserSecondRunRejected(t *testing.T) {
+// A user runs different commands on a device at once, e.g. a power cycle from
+// another terminal while a console is open, but never one command twice: a
+// second run of the running command is rejected, without presenting the user as
+// a stranger holding the device. Another user is turned away while any of the
+// first user's commands runs, and the device stays busy until the last returns.
+func TestRunSameUserSideBySide(t *testing.T) {
 	started, release := make(chan struct{}), make(chan struct{})
 
-	var secondRan atomic.Bool
+	var secondRan, powerRan atomic.Bool
 
 	svc := newRunService(func(_ context.Context, _ module.Session, args ...string) error {
-		if fmt.Sprint(args) == "[long]" {
+		switch fmt.Sprint(args) {
+		case "[long]":
 			close(started)
 			<-release
-
-			return nil
+		case "[power]":
+			powerRan.Store(true)
+		default:
+			secondRan.Store(true)
 		}
-
-		secondRan.Store(true)
 
 		return nil
 	})
+
+	device := svc.devices[testDevice]
+	device.Cmds["power"] = device.Cmds[testCommand]
 
 	long := newClientStream(t, commandReq(testDevice, testCommand, "long"))
 	done := make(chan error, 1)
@@ -522,14 +527,23 @@ func TestRunSameUserSecondRunRejected(t *testing.T) {
 		t.Errorf("alice's second run: code = %v (err = %v), want FailedPrecondition matching ErrAlreadyRunning", connect.CodeOf(err), err)
 	}
 
-	want := `device "dev" is still running a command for "alice"; a cancelled command keeps the device until it has stopped`
+	want := `device "dev" is already running "cmd" for "alice"; a command does not run twice at once, ` +
+		`and a cancelled one keeps running until it has stopped`
 	var ce *connect.Error
 	if !errors.As(err, &ce) || ce.Message() != want {
 		t.Errorf("alice's second run: err = %v, want the message %q", err, want)
 	}
 
 	if secondRan.Load() {
-		t.Error("alice's second run ran its module while the first still ran")
+		t.Error("alice's second run of the command ran its module while the first still ran")
+	}
+
+	if err := svc.run(context.Background(), newClientStream(t, commandReq(testDevice, "power", "power")), "alice"); err != nil {
+		t.Errorf("alice's other command beside the first: unexpected error: %v", err)
+	}
+
+	if !powerRan.Load() {
+		t.Error("alice's other command did not run its module")
 	}
 
 	err = svc.run(context.Background(), newClientStream(t, commandReq(testDevice, testCommand)), "bob")
@@ -1056,10 +1070,10 @@ func TestRunHoldsDeviceUntilModulesReturn(t *testing.T) {
 	}
 }
 
-// A user who cancels a run and retries at once is turned away while the
-// cancelled run's module is still stopping: the device runs one command at a
-// time, and the cancelled one still drives it. Once the module has returned,
-// the retry is admitted.
+// A user who cancels a run and retries the command at once is turned away while
+// the cancelled run's module is still stopping: a command does not run twice at
+// once, and the cancelled one still drives the device. Once the module has
+// returned, the retry is admitted.
 func TestRunRetryWhileCancelledModuleStops(t *testing.T) {
 	started, stopping, release := make(chan struct{}), make(chan struct{}), make(chan struct{})
 

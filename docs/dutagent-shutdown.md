@@ -16,8 +16,8 @@ deinitialized.
   agent has logged the previous one. An agent started with `SIGINT` or `SIGHUP`
   ignored, as by `nohup` or a script that starts it in the background, keeps
   ignoring them, so it outlives its terminal.
-- **Lock**: per device, a Busy hold while a command runs, and optionally a
-  reservation taken with `dutctl <device> lock`. Both live in memory only and
+- **Lock**: per device, a Busy hold for each command that runs, and optionally
+  a reservation taken with `dutctl <device> lock`. Both live in memory only and
   are gone whenever the agent ends.
 
 ## Who can end what
@@ -152,17 +152,17 @@ delete flash images; close IPMI connections.
 | Trigger | What ends | Device and lock | Deinit | What the user sees |
 |---|---|---|---|---|
 | **User console, client machine** | | | | |
-| Ctrl-C in `dutctl` | the user's own command | busy until the module has returned: at once for most tools, up to 10 s for flash; the user's reservation stays | no | the prompt at once; retrying at once is refused until the device is free |
+| Ctrl-C in `dutctl` | the user's own command | busy until the module has returned: at once for most tools, up to 10 s for flash; the user's reservation stays | no | the prompt at once; retrying the same command at once is refused until it has stopped, the user's other commands may run |
 | `dutctl <device> unlock` | the user's own reservation | a running command stays busy | no | – |
 | `dutctl <device> unlock force` | someone else's reservation | never ends a running command | no | an error if the device is only busy |
-| command refused | nothing starts | unchanged | no | `FailedPrecondition`: held, reserved, already running or agent shutting down; `NotFound`, `InvalidArgument` |
+| command refused | nothing starts | unchanged | no | `FailedPrecondition`: held, reserved, the same command already running or agent shutting down; `NotFound`, `InvalidArgument` |
 | **Network** | | | | |
 | connection lost | the command, once the agent notices: after about 2.5 min, up to about 15 min with data in flight | busy until then | no | a connection error |
 | **Within the command, on the agent machine** | | | | |
 | module done | the command | free | no | output, exit code 0 |
 | module error or panic | the command; later modules do not run | free | no | `Aborted` "module failed: …", for a panic "module failed: module panicked: …" |
 | stream or protocol error | the command | busy until the module has returned | no | the stream's error |
-| module does not return after an abort | nothing | stays busy, the agent log warns every 10 s; `unlock force` does not help | no | new commands are refused until the admin ends the agent |
+| module does not return after an abort | nothing | stays busy, the agent log warns every 10 s; `unlock force` does not help | no | the same command and other users' commands are refused until the admin ends the agent |
 | reservation expires | the reservation, default 30 min, chosen by the user | free, unless a command runs | no | – |
 | **Admin console, agent machine** | | | | |
 | first stop signal: Ctrl-C in the terminal, `kill`, `systemctl stop` or `restart`, reboot | the agent enters stage 1 | commands and reservations go on | afterwards | new reservations, and commands on devices the user has not reserved: `FailedPrecondition` "dutagent is shutting down…"; a reservation's owner may still run commands on it and extend it |

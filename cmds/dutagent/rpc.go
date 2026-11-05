@@ -344,9 +344,9 @@ func (a *rpcService) Unlock(
 // arguments cannot be resolved (Command.ModuleArgs) or the client breaks the file
 // transfer protocol (session.ErrBadFileTransfer); CodeNotFound for an unknown
 // device or command; CodeFailedPrecondition when another owner holds the device,
-// it is already running a command for the caller (a device runs one command at a
-// time) or the agent is shutting down; CodeAborted if the initial receive or a
-// module fails, or the agent aborts the run while it stops;
+// it is already running the same command for the caller or the agent is
+// shutting down; CodeAborted if the initial receive or a module fails, or the
+// agent aborts the run while it stops;
 // CodeCanceled/CodeDeadlineExceeded on cancellation; a failed stream keeps the
 // transport's connect code; CodeInternal otherwise.
 func (a *rpcService) Run(

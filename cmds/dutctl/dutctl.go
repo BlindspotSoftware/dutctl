@@ -57,11 +57,13 @@ releases it; add the force keyword to release a lock held by another user.
 Locks coordinate users who cooperate; they are no security boundary. Reserve a
 device only as long as you need it.
 
-A device runs one command at a time: while a command runs, starting another on
-the device is rejected, even your own from another terminal. To run several
-steps together, have them configured as one command. A forced unlock releases a
-reservation but does not end a running command: the device stays busy until the
-command returns.
+A device runs the commands of one user at a time: while a command runs, another
+user's command on the device is rejected. Your own other commands may run beside
+it, a power cycle from a second terminal while a console is open for instance,
+but a command never runs twice at once. What your commands do to the device
+together is up to you; steps that must happen in a fixed order belong in one
+configured command. A forced unlock releases a reservation but does not end a
+running command: the device stays busy until the command returns.
 
 A command may open a console: its module then reads what you type. For a line
 console the terminal stays as it is, Enter sends the line and Ctrl-C ends the

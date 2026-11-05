@@ -115,7 +115,7 @@ func findCommand(devices dut.Devlist, device, command string) (dut.Command, erro
 // AutoLock grants or refuses atomically under the locker's mutex.
 //
 // Errors: CodeFailedPrecondition when another owner holds the device
-// (locker.ErrWrongOwner), the device is already running a command for user
+// (locker.ErrWrongOwner), the device is already running the command for user
 // (locker.ErrAlreadyRunning) or the agent is shutting down
 // (locker.ErrShuttingDown); CodeInternal otherwise.
 func acquireAutoLock(lk *locker.Locker, device, user, command string) (*locker.Lease, error) {

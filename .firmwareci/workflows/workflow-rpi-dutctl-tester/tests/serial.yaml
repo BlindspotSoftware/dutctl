@@ -122,9 +122,10 @@ stages:
           timeout: 15s
 
   # A command that runs a step before the console is how a user watches a DUT
-  # boot: a device runs one command at a time, so the reset and the console
-  # must be one command. The step's output, the console's marker and the DUT's
-  # reply have to come out in that order.
+  # boot in a fixed order: commands run beside each other in no set order, so
+  # a reset that must come before the console belongs in one command with it.
+  # The step's output, the console's marker and the DUT's reply have to come
+  # out in that order.
   - name: Interactive console after a step, in one command
     steps:
       - cmd: shell
