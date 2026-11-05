@@ -296,6 +296,8 @@ func uploadImage(sesh module.Session, remote, local string) error {
 	}
 
 	_, err = io.Copy(imgFile, img)
+	// A failed close can mean the image did not reach the disk in full.
+	err = errors.Join(err, imgFile.Close())
 	if err != nil {
 		return fmt.Errorf("save flash image on dutagent for write operation: %w", err)
 	}
@@ -309,6 +311,7 @@ func downloadImage(sesh module.Session, local, remote string) error {
 	if err != nil {
 		return fmt.Errorf("open flash image on dutagent after read operation: %w", err)
 	}
+	defer file.Close()
 
 	err = sesh.SendFile(remote, file)
 	if err != nil {
