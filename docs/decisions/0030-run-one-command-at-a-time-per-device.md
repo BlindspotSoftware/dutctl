@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded by ADR-0036
 date: 2026-10-02
 ---
 
@@ -70,6 +70,8 @@ rule.
 
 ## More information
 
+- Superseded by [ADR-0036](0036-run-a-users-different-commands-side-by-side.md),
+  which lets a user run different commands on a device at once.
 - [ADR-0017](0017-lock-devices-in-agent-memory.md): the locks and the busy hold.
 - [ADR-0029](0029-run-the-run-rpc-as-straight-line-code.md): the Run handler
   that applies the rule.
