@@ -176,7 +176,7 @@ func TestUnlockRPCForceWhileRunning(t *testing.T) {
 	t.Run("running only", func(t *testing.T) {
 		svc := newTestService()
 
-		if _, err := svc.locker.AutoLock("devA", "alice"); err != nil {
+		if _, err := svc.locker.AutoLock("devA", "alice", "cmd"); err != nil {
 			t.Fatalf("AutoLock: %v", err)
 		}
 
@@ -197,7 +197,7 @@ func TestUnlockRPCForceWhileRunning(t *testing.T) {
 			t.Fatalf("Lock: %v", err)
 		}
 
-		if _, err := svc.locker.AutoLock("devA", "alice"); err != nil {
+		if _, err := svc.locker.AutoLock("devA", "alice", "cmd"); err != nil {
 			t.Fatalf("AutoLock: %v", err)
 		}
 
@@ -241,7 +241,7 @@ func TestLockRPCDurationBoundaries(t *testing.T) {
 func TestListRPCShowsAutoOnlyLock(t *testing.T) {
 	svc := newTestService()
 
-	if _, err := svc.locker.AutoLock("devA", "alice"); err != nil {
+	if _, err := svc.locker.AutoLock("devA", "alice", "cmd"); err != nil {
 		t.Fatalf("AutoLock: %v", err)
 	}
 
@@ -275,7 +275,7 @@ func TestListRPCShowsAutoOnlyLock(t *testing.T) {
 func TestListRPCExplicitShadowsAuto(t *testing.T) {
 	svc := newTestService()
 
-	if _, err := svc.locker.AutoLock("devA", "alice"); err != nil {
+	if _, err := svc.locker.AutoLock("devA", "alice", "cmd"); err != nil {
 		t.Fatalf("AutoLock: %v", err)
 	}
 

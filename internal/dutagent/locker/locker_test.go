@@ -91,7 +91,7 @@ func TestLockBlockedByDifferentOwnerExplicit(t *testing.T) {
 func TestLockBlockedByDifferentOwnerAuto(t *testing.T) {
 	l := New()
 
-	if _, err := l.AutoLock("dev", "alice"); err != nil {
+	if _, err := l.AutoLock("dev", "alice", "cmd"); err != nil {
 		t.Fatalf("setup AutoLock: %v", err)
 	}
 
@@ -154,13 +154,13 @@ func TestClearLockErrors(t *testing.T) {
 func TestAutoLockNoExpiry(t *testing.T) {
 	l := New()
 
-	info, err := l.AutoLock("dev", "alice")
+	lease, err := l.AutoLock("dev", "alice", "cmd")
 	if err != nil {
 		t.Fatalf("AutoLock: %v", err)
 	}
 
-	if !info.ExpiresAt.IsZero() {
-		t.Errorf("auto-lock ExpiresAt = %v, want zero", info.ExpiresAt)
+	if !lease.hold.ExpiresAt.IsZero() {
+		t.Errorf("auto-lock ExpiresAt = %v, want zero", lease.hold.ExpiresAt)
 	}
 
 	hold, ok := l.StatusAll()["dev"]
@@ -194,7 +194,8 @@ func TestAutoLockRejectsSameOwnerWhileBusy(t *testing.T) {
 				}
 			}
 
-			if _, err := l.AutoLock("dev", "alice"); err != nil {
+			first, err := l.AutoLock("dev", "alice", "cmd")
+			if err != nil {
 				t.Fatalf("first AutoLock: %v", err)
 			}
 
@@ -204,7 +205,7 @@ func TestAutoLockRejectsSameOwnerWhileBusy(t *testing.T) {
 				}
 			}
 
-			_, err := l.AutoLock("dev", "alice")
+			_, err = l.AutoLock("dev", "alice", "cmd")
 			if !errors.Is(err, ErrAlreadyRunning) {
 				t.Fatalf("second AutoLock: err = %v, want ErrAlreadyRunning", err)
 			}
@@ -219,9 +220,7 @@ func TestAutoLockRejectsSameOwnerWhileBusy(t *testing.T) {
 				t.Errorf("second AutoLock: message = %q, want %q", err.Error(), want)
 			}
 
-			if err := l.ClearAutoLock("dev", "alice"); err != nil {
-				t.Fatalf("ClearAutoLock: %v", err)
-			}
+			first.Release()
 
 			// A reservation shadows the Busy hold in StatusAll; clearing it also
 			// proves the rejection left it alone.
@@ -243,11 +242,11 @@ func TestAutoLockRejectsSameOwnerWhileBusy(t *testing.T) {
 func TestAutoLockRejectsOtherOwnerWhileBusy(t *testing.T) {
 	l := New()
 
-	if _, err := l.AutoLock("dev", "alice"); err != nil {
+	if _, err := l.AutoLock("dev", "alice", "cmd"); err != nil {
 		t.Fatalf("alice's AutoLock: %v", err)
 	}
 
-	_, err := l.AutoLock("dev", "bob")
+	_, err := l.AutoLock("dev", "bob", "cmd")
 
 	var le *Error
 	if !errors.As(err, &le) {
@@ -275,13 +274,12 @@ func TestAutoLockAfterRelease(t *testing.T) {
 	l := New()
 
 	for _, owner := range []string{"alice", "alice", "bob", "alice"} {
-		if _, err := l.AutoLock("dev", owner); err != nil {
+		lease, err := l.AutoLock("dev", owner, "cmd")
+		if err != nil {
 			t.Fatalf("%s's AutoLock on a released device: %v", owner, err)
 		}
 
-		if err := l.ClearAutoLock("dev", owner); err != nil {
-			t.Fatalf("%s's ClearAutoLock: %v", owner, err)
-		}
+		lease.Release()
 	}
 
 	if hold, ok := l.StatusAll()["dev"]; ok {
@@ -296,7 +294,7 @@ func TestAutoLockBlockedByExplicitOtherOwner(t *testing.T) {
 		t.Fatalf("setup Lock: %v", err)
 	}
 
-	_, err := l.AutoLock("dev", "bob")
+	_, err := l.AutoLock("dev", "bob", "cmd")
 
 	var le *Error
 	if !errors.As(err, &le) {
@@ -308,20 +306,19 @@ func TestAutoLockBlockedByExplicitOtherOwner(t *testing.T) {
 	}
 }
 
-func TestClearAutoLockLeavesExplicitIntact(t *testing.T) {
+func TestReleaseLeavesExplicitIntact(t *testing.T) {
 	l := New()
 
 	if _, err := l.Lock("dev", "alice", time.Hour); err != nil {
 		t.Fatalf("Lock: %v", err)
 	}
 
-	if _, err := l.AutoLock("dev", "alice"); err != nil {
+	lease, err := l.AutoLock("dev", "alice", "cmd")
+	if err != nil {
 		t.Fatalf("AutoLock: %v", err)
 	}
 
-	if err := l.ClearAutoLock("dev", "alice"); err != nil {
-		t.Fatalf("ClearAutoLock: %v", err)
-	}
+	lease.Release()
 
 	hold, ok := l.StatusAll()["dev"]
 	if !ok || hold.Kind != Reserved {
@@ -335,23 +332,31 @@ func TestClearAutoLockLeavesExplicitIntact(t *testing.T) {
 	}
 
 	if _, ok := l.StatusAll()["dev"]; ok {
-		t.Error("Busy hold still present after ClearAutoLock")
+		t.Error("Busy hold still present after Release")
 	}
 }
 
-func TestClearAutoLockErrors(t *testing.T) {
+// A lease ends only its own hold: a late or repeated Release of an old run's
+// lease leaves the hold of the run that came after it alone, so the device
+// is never handed on while that run still drives it.
+func TestLateReleaseLeavesNewerLease(t *testing.T) {
 	l := New()
 
-	if err := l.ClearAutoLock("dev", "alice"); !errors.Is(err, ErrNotLocked) {
-		t.Errorf("ClearAutoLock on free slot: err = %v, want ErrNotLocked", err)
+	old, err := l.AutoLock("dev", "alice", "cmd")
+	if err != nil {
+		t.Fatalf("first AutoLock: %v", err)
 	}
 
-	if _, err := l.AutoLock("dev", "alice"); err != nil {
-		t.Fatalf("AutoLock: %v", err)
+	old.Release()
+
+	if _, err := l.AutoLock("dev", "alice", "cmd"); err != nil {
+		t.Fatalf("second AutoLock: %v", err)
 	}
 
-	if err := l.ClearAutoLock("dev", "bob"); !errors.Is(err, ErrWrongOwner) {
-		t.Errorf("ClearAutoLock by wrong owner: err = %v, want ErrWrongOwner", err)
+	old.Release()
+
+	if hold, ok := l.StatusAll()["dev"]; !ok || hold.Kind != Busy {
+		t.Errorf("StatusAll[dev] = %+v (ok=%v) after the old lease's late release, want the newer run's Busy hold", hold, ok)
 	}
 }
 
@@ -385,7 +390,8 @@ func TestForceClearLockLeavesBusyHold(t *testing.T) {
 		t.Fatalf("Lock: %v", err)
 	}
 
-	if _, err := l.AutoLock("dev", "alice"); err != nil {
+	lease, err := l.AutoLock("dev", "alice", "cmd")
+	if err != nil {
 		t.Fatalf("AutoLock: %v", err)
 	}
 
@@ -399,7 +405,7 @@ func TestForceClearLockLeavesBusyHold(t *testing.T) {
 	}
 
 	var le *Error
-	if _, err := l.AutoLock("dev", "bob"); !errors.As(err, &le) || le.Holder.Kind != Busy {
+	if _, err := l.AutoLock("dev", "bob", "cmd"); !errors.As(err, &le) || le.Holder.Kind != Busy {
 		t.Errorf("bob's AutoLock after ForceClearLock: err = %v, want a *Error naming the Busy hold", err)
 	}
 
@@ -407,9 +413,7 @@ func TestForceClearLockLeavesBusyHold(t *testing.T) {
 		t.Errorf("second ForceClearLock: err = %v, want ErrBusy", err)
 	}
 
-	if err := l.ClearAutoLock("dev", "alice"); err != nil {
-		t.Fatalf("ClearAutoLock: %v", err)
-	}
+	lease.Release()
 
 	if hold, ok := l.StatusAll()["dev"]; ok {
 		t.Errorf("StatusAll[dev] = %+v after the command's release, want free", hold)
@@ -421,11 +425,12 @@ func TestForceClearLockLeavesBusyHold(t *testing.T) {
 func TestForceClearLockRejectsBusyDevice(t *testing.T) {
 	l := New()
 
-	if _, err := l.AutoLock("dev", "alice"); err != nil {
+	lease, err := l.AutoLock("dev", "alice", "cmd")
+	if err != nil {
 		t.Fatalf("AutoLock: %v", err)
 	}
 
-	err := l.ForceClearLock("dev")
+	err = l.ForceClearLock("dev")
 	if !errors.Is(err, ErrBusy) {
 		t.Fatalf("ForceClearLock: err = %v, want ErrBusy", err)
 	}
@@ -443,8 +448,10 @@ func TestForceClearLockRejectsBusyDevice(t *testing.T) {
 		t.Fatalf("StatusAll[dev] = %+v (ok=%v) after ForceClearLock, want alice's Busy hold", hold, ok)
 	}
 
-	if err := l.ClearAutoLock("dev", "alice"); err != nil {
-		t.Errorf("ClearAutoLock after the rejected ForceClearLock: %v", err)
+	lease.Release()
+
+	if hold, ok := l.StatusAll()["dev"]; ok {
+		t.Errorf("StatusAll[dev] = %+v after the release following the rejected ForceClearLock, want free", hold)
 	}
 }
 
@@ -458,7 +465,7 @@ func TestForceClearLockExpiredReservationWhileBusy(t *testing.T) {
 		t.Fatalf("Lock: %v", err)
 	}
 
-	if _, err := l.AutoLock("dev", "alice"); err != nil {
+	if _, err := l.AutoLock("dev", "alice", "cmd"); err != nil {
 		t.Fatalf("AutoLock: %v", err)
 	}
 
@@ -476,7 +483,7 @@ func TestStatusAllReportsEffectiveHold(t *testing.T) {
 		t.Fatalf("Lock alpha: %v", err)
 	}
 
-	if _, err := l.AutoLock("beta", "bob"); err != nil {
+	if _, err := l.AutoLock("beta", "bob", "cmd"); err != nil {
 		t.Fatalf("AutoLock beta: %v", err)
 	}
 
@@ -485,7 +492,7 @@ func TestStatusAllReportsEffectiveHold(t *testing.T) {
 		t.Fatalf("Lock gamma: %v", err)
 	}
 
-	if _, err := l.AutoLock("gamma", "carol"); err != nil {
+	if _, err := l.AutoLock("gamma", "carol", "cmd"); err != nil {
 		t.Fatalf("AutoLock gamma: %v", err)
 	}
 
@@ -521,13 +528,13 @@ func TestDrainLetsReservationsFinish(t *testing.T) {
 		t.Errorf("new reservation: err = %v, want ErrShuttingDown", err)
 	}
 
-	if _, err := l.AutoLock("free", "bob"); !errors.Is(err, ErrShuttingDown) {
+	if _, err := l.AutoLock("free", "bob", "cmd"); !errors.Is(err, ErrShuttingDown) {
 		t.Errorf("command on an unreserved device: err = %v, want ErrShuttingDown", err)
 	}
 
 	// Another owner learns that the device is taken, as before draining: the
 	// more useful answer of the two.
-	if _, err := l.AutoLock("job", "bob"); !errors.Is(err, ErrWrongOwner) {
+	if _, err := l.AutoLock("job", "bob", "cmd"); !errors.Is(err, ErrWrongOwner) {
 		t.Errorf("command on alice's device by bob: err = %v, want ErrWrongOwner", err)
 	}
 
@@ -535,20 +542,19 @@ func TestDrainLetsReservationsFinish(t *testing.T) {
 		t.Errorf("owner extending the reservation: %v", err)
 	}
 
-	if _, err := l.AutoLock("job", "alice"); err != nil {
+	lease, err := l.AutoLock("job", "alice", "cmd")
+	if err != nil {
 		t.Fatalf("owner running a command on the reserved device: %v", err)
 	}
 
-	if err := l.ClearAutoLock("job", "alice"); err != nil {
-		t.Errorf("ClearAutoLock: %v", err)
-	}
+	lease.Release()
 
 	if err := l.ClearLock("job", "alice"); err != nil {
 		t.Errorf("owner releasing the reservation: %v", err)
 	}
 
 	// Without the reservation, alice's device is closed to her too.
-	if _, err := l.AutoLock("job", "alice"); !errors.Is(err, ErrShuttingDown) {
+	if _, err := l.AutoLock("job", "alice", "cmd"); !errors.Is(err, ErrShuttingDown) {
 		t.Errorf("command after the reservation ended: err = %v, want ErrShuttingDown", err)
 	}
 }
@@ -562,7 +568,8 @@ func TestCloseEndsReservationsKeepsRunningCommands(t *testing.T) {
 		t.Fatalf("setup Lock: %v", err)
 	}
 
-	if _, err := l.AutoLock("busy", "bob"); err != nil {
+	lease, err := l.AutoLock("busy", "bob", "cmd")
+	if err != nil {
 		t.Fatalf("setup AutoLock: %v", err)
 	}
 
@@ -578,13 +585,11 @@ func TestCloseEndsReservationsKeepsRunningCommands(t *testing.T) {
 		t.Errorf("Lock after Close: err = %v, want ErrShuttingDown", err)
 	}
 
-	if _, err := l.AutoLock("job", "alice"); !errors.Is(err, ErrShuttingDown) {
+	if _, err := l.AutoLock("job", "alice", "cmd"); !errors.Is(err, ErrShuttingDown) {
 		t.Errorf("AutoLock after Close: err = %v, want ErrShuttingDown", err)
 	}
 
-	if err := l.ClearAutoLock("busy", "bob"); err != nil {
-		t.Errorf("releasing the running command's hold: %v", err)
-	}
+	lease.Release()
 
 	if status := l.StatusAll(); len(status) != 0 {
 		t.Errorf("StatusAll() = %+v after the command returned, want nothing", status)
@@ -602,7 +607,7 @@ func TestDrainedLockerStaysEmpty(t *testing.T) {
 			t.Errorf("Lock by %s: err = %v, want ErrShuttingDown", owner, err)
 		}
 
-		if _, err := l.AutoLock("dev", owner); !errors.Is(err, ErrShuttingDown) {
+		if _, err := l.AutoLock("dev", owner, "cmd"); !errors.Is(err, ErrShuttingDown) {
 			t.Errorf("AutoLock by %s: err = %v, want ErrShuttingDown", owner, err)
 		}
 	}
