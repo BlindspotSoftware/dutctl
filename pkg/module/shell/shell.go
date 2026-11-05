@@ -6,6 +6,7 @@
 package shell
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -88,8 +89,8 @@ func (s *Shell) Deinit(_ context.Context) error {
 // Run executes the single command-string argument via the configured shell's
 // -c flag. It forwards the command's combined output to the session, unless the
 // module is in quiet mode, in which case stdout is suppressed and only stderr
-// is forwarded on failure. It returns an error if no command-string is given,
-// if more than one argument is passed, or if the command exits non-zero.
+// is forwarded. It returns an error if no command-string is given, if more
+// than one argument is passed, or if the command exits non-zero.
 func (s *Shell) Run(ctx context.Context, sesh module.Session, args ...string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("missing command-string")
@@ -109,22 +110,15 @@ func (s *Shell) Run(ctx context.Context, sesh module.Session, args ...string) er
 	// instead of orphaning children and blocking on their inherited output pipes.
 	shell := procexec.Command(ctx, syscall.SIGKILL, procexec.DefaultGrace, binary, "-c", cmdStr)
 
-	out, err := shell.CombinedOutput()
-
-	if !s.Quiet {
-		// TODO: consider a console (sesh.OpenConsole) for an interactive shell
+	// TODO: consider a console (sesh.OpenConsole) for an interactive shell
+	out, err := s.output(shell)
+	if len(out) > 0 {
 		sesh.Print(string(out))
 	}
 
 	if err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
-			// Print stderr although the command is quiet
-			if s.Quiet {
-				sesh.Print(string(exitErr.Stderr))
-				sesh.Print("\n")
-			}
-
 			return fmt.Errorf("shell command exited with code %d", exitErr.ExitCode())
 		}
 
@@ -132,4 +126,19 @@ func (s *Shell) Run(ctx context.Context, sesh module.Session, args ...string) er
 	}
 
 	return nil
+}
+
+// output runs shell and returns what it forwards: stdout and stderr as the
+// command interleaved them, or stderr alone in quiet mode.
+func (s *Shell) output(shell *exec.Cmd) ([]byte, error) {
+	if !s.Quiet {
+		return shell.CombinedOutput()
+	}
+
+	var stderr bytes.Buffer
+
+	shell.Stderr = &stderr
+	err := shell.Run()
+
+	return stderr.Bytes(), err
 }
