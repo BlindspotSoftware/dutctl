@@ -127,6 +127,5 @@ messages, consoles and file downloads. Note that while a console is open, a file
 reading of the console input.
 
 > [!IMPORTANT]
-> The console protocol described here replaced the earlier single Console message. While DUT Control is in alpha, no
-> compatibility between versions is kept across such a change: update dutctl and dutagent together, and do not run
-> mixed versions.
+> The console protocol described here replaced the earlier single Console message. Before v1.0.0, no compatibility
+> between versions is kept across such a change: update dutctl and dutagent together, and do not run mixed versions.
