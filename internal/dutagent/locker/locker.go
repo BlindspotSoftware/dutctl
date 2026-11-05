@@ -122,7 +122,7 @@ func (e *Error) Error() string {
 		return fmt.Sprintf("device %q is locked by %q for %s", e.Device, e.Holder.Owner, remaining)
 	}
 
-	return fmt.Sprintf("device %q is locked by %q", e.Device, e.Holder.Owner)
+	return fmt.Sprintf("device %q is in use by %q", e.Device, e.Holder.Owner)
 }
 
 func (e *Error) Unwrap() error {

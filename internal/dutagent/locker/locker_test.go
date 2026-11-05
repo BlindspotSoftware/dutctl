@@ -258,6 +258,12 @@ func TestAutoLockRejectsOtherOwnerWhileBusy(t *testing.T) {
 		t.Errorf("Error = %+v, want kind=busy owner=alice", le)
 	}
 
+	// A running command is no lock the user took: the message says so, as
+	// dutctl list does.
+	if want := `device "dev" is in use by "alice"`; err.Error() != want {
+		t.Errorf("bob's AutoLock: message = %q, want %q", err.Error(), want)
+	}
+
 	if errors.Is(err, ErrAlreadyRunning) {
 		t.Errorf("bob's AutoLock: err = %v matches ErrAlreadyRunning, but the device runs alice's command", err)
 	}
