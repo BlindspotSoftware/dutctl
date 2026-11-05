@@ -210,8 +210,6 @@ func (agt *agent) startRPCService(ctx context.Context, service *rpcService) erro
 	)
 	mux.Handle(path, handler)
 
-	slog.Info("rpc service listening", "addr", agt.address)
-
 	return rpc.ListenAndServe(ctx, agt.address, mux)
 }
 

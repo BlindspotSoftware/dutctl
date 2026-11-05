@@ -91,8 +91,6 @@ func (svr *server) startRPCService(ctx context.Context) error {
 	path, handler = relayv1alpha1connect.NewRelayServiceHandler(service)
 	mux.Handle(path, handler)
 
-	slog.Info("rpc service listening", "addr", svr.address)
-
 	return rpc.ListenAndServe(ctx, svr.address, mux)
 }
 
