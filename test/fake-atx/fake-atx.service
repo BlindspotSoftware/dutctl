@@ -2,7 +2,7 @@
 # /etc/systemd/system/, then `systemctl daemon-reload` and
 # `systemctl enable --now fake-atx`.
 [Unit]
-Description=Fake ATX board for the tester's PiKVM (GPIO 5, 6 and 13)
+Description=Fake ATX board for the tester's PiKVM (GPIO 5, 10 and 13)
 
 [Service]
 User=oscar
