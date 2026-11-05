@@ -6,6 +6,7 @@ package gpio
 
 import (
 	"fmt"
+	"sync"
 
 	"github.com/stianeikeland/go-rpio/v4"
 )
@@ -38,7 +39,17 @@ func (d *devmem) Toggle(pin Pin) error {
 	})
 }
 
+// memmapMu serialises memmapDo: go-rpio keeps its register mapping in package
+// variables, so one operation's Close would unmap the registers another is
+// still writing, a fault that ends the whole agent.
+//
+//nolint:gochecknoglobals // guards go-rpio's package-level mapping, which is process-wide too
+var memmapMu sync.Mutex
+
 func memmapDo(op func()) error {
+	memmapMu.Lock()
+	defer memmapMu.Unlock()
+
 	err := rpio.Open()
 	if err != nil {
 		return fmt.Errorf("memory map GPIO via /dev/mem is not supported: %v", err)
