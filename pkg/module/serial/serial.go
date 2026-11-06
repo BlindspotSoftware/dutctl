@@ -85,9 +85,9 @@ const abstract = `Scripted or interactive serial connection to the DUT
 
 const usage = `
 ARGUMENTS:
-	[-t <duration>] [-eol cr|lf|crlf|none] [-keep-escapes]                 (monitor: stream output)
-	[-t <duration>] [-eol cr|lf|crlf|none] [-keep-escapes] [--] <step>...  (run a step sequence)
-	[-t <duration>] -i                                                     (interactive console)
+	[-reconnect] [-t <duration>] [-eol cr|lf|crlf|none] [-keep-escapes]                 (monitor)
+	[-reconnect] [-t <duration>] [-eol cr|lf|crlf|none] [-keep-escapes] [--] <step>...  (step sequence)
+	[-reconnect] [-t <duration>] -i                                                (interactive)
 
 	step := expect <regex> | send <data> | send-raw <data>
 
@@ -139,6 +139,20 @@ FLAGS (before the steps):
 	                       queries) instead of stripping them from the output.
 	-i                     Interactive console. Takes no steps, and no -eol or
 	                       -keep-escapes: the bytes pass verbatim.
+	-reconnect             Wait for an absent device and reopen after disconnect.
+	                       Off by default; permission/busy/configuration errors fail.
+
+With -reconnect, use a stable /dev/serial/by-id/... path. The same session stays
+open, with disconnected/waiting/reconnected notices (stderr with -i). Reopening
+reapplies the configured baud rate and preserves queued boot output. Output
+emitted while the adapter is absent cannot be recovered. The original -t deadline
+includes waiting and never restarts; monitor/interactive deadlines still succeed.
+
+Interactive input received while offline is discarded, with a notice, and is
+never replayed. A pending expect resumes with an empty matcher and filter state;
+completed steps are not repeated. An attempted send that fails ends the script
+with uncertain delivery instead of retrying it. A send not yet attempted may wait
+for the device. Without -reconnect, device errors still end the run immediately.
 
 The device's character maps (the imap configuration option, named as picocom
 names them: lfcrlf for a device that ends its lines in a bare LF, which would
@@ -156,6 +170,7 @@ right after a send can match your own input rather than the device's reply.
 EXAMPLES:
 	monitor the console:            (no arguments)
 	interactive console:            -i
+	monitor across power cycles:    -reconnect
 	wait for a boot marker:         -- expect 'Welcome to'
 	login then run a command:       -- expect 'login:' send root expect '# ' send reboot
 	send Ctrl-C then expect shell:  -- send-raw '\x03' expect '$ '
@@ -237,7 +252,7 @@ func defaultOpenPort(name string, baud int) (port, error) {
 	if err != nil {
 		_ = serialPort.Close()
 
-		return nil, fmt.Errorf("failed to set read timeout on %s: %w", name, err)
+		return nil, &portConfigurationError{fmt.Errorf("failed to set read timeout on %s: %w", name, err)}
 	}
 
 	return serialPort, nil
@@ -250,8 +265,8 @@ func defaultOpenPort(name string, baud int) (port, error) {
 // failing on the first expect that times out. With -i it opens a raw console
 // and passes bytes verbatim until the session ends, -t elapses, or the user's
 // input ended (all a success).
-//
-//nolint:cyclop,funlen // monitor/sequence/interactive dispatch with pacing and drain; the branch count is inherent
+// With -reconnect the same session waits for absent devices and recovers read
+// disconnections within the original deadline; attempted writes are never replayed.
 func (s *Serial) Run(ctx context.Context, session module.Session, args ...string) error {
 	// The logger carried on ctx is already scoped to this module by the agent
 	// (scope "module", with module/device/command attributes), so the module
@@ -263,6 +278,10 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 	cfg, err := parseArgs(args)
 	if err != nil {
 		return err
+	}
+
+	if cfg.reconnect {
+		return s.runReconnecting(ctx, session, cfg)
 	}
 
 	opener := s.open
@@ -312,13 +331,20 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 	clientOut := newClientWriter(session)
 	clientOut.markerf("--- Connected to %s at %d baud ---\n", s.Port, s.Baud)
 
+	return s.runSequence(loopCtx, ctx, cfg, serialPort, clientOut)
+}
+
+//nolint:cyclop // monitor/sequence dispatch with pacing, step progress and final drain
+func (s *Serial) runSequence(
+	ctx, drainCtx context.Context, cfg scriptConfig, serialPort port, clientOut *clientWriter,
+) error {
 	eng := newEngine(serialPort, newInbound(s.imap, !cfg.keepEscapes), clientOut)
 
 	// Monitor mode: no steps — stream the console until cancelled or -t elapses.
 	if len(cfg.steps) == 0 {
-		l.Debug("monitor mode; streaming until cancelled")
+		log.FromContext(ctx).Debug("monitor mode; streaming until cancelled")
 
-		err = eng.monitor(loopCtx)
+		err := eng.monitor(ctx)
 		if err != nil {
 			return fmt.Errorf("monitor: %w", err)
 		}
@@ -333,7 +359,7 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 	for idx, curStep := range cfg.steps {
 		switch curStep.kind {
 		case stepExpect:
-			err = eng.readUntil(loopCtx, curStep.expect)
+			err := eng.readUntil(ctx, curStep.expect)
 			if err != nil {
 				return stepError(idx, curStep, cfg.timeout, err)
 			}
@@ -341,7 +367,7 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 			clientOut.markerf("--- [%d/%d] matched %q ---\n", idx+1, total, curStep.label())
 		case stepSend, stepSendRaw:
 			// Pace input: pause before each send (interruptible by the deadline).
-			err = sleepCtx(loopCtx, s.delay)
+			err := sleepCtx(ctx, s.delay)
 			if err != nil {
 				return fmt.Errorf("step %d (send %q): %w", idx+1, curStep.label(), err)
 			}
@@ -356,9 +382,9 @@ func (s *Serial) Run(ctx context.Context, session module.Session, args ...string
 	}
 
 	// If the sequence ended on a send, drain briefly so the DUT's reply to the
-	// final input is visible. Uses the original ctx (its own window).
+	// final input is visible. drainCtx preserves the legacy window without -reconnect.
 	if cfg.steps[total-1].kind != stepExpect {
-		err = eng.drain(ctx, s.drainFor())
+		err := eng.drain(drainCtx, s.drainFor(), !cfg.reconnect)
 		if err != nil {
 			return fmt.Errorf("draining after final send: %w", err)
 		}

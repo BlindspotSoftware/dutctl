@@ -15,9 +15,9 @@ mode: see [Interactive mode](#interactive-mode).
 
 ```
 ARGUMENTS:
-	[-t <duration>] [-eol cr|lf|crlf|none] [-keep-escapes]                 (monitor: stream output)
-	[-t <duration>] [-eol cr|lf|crlf|none] [-keep-escapes] [--] <step>...  (run a step sequence)
-	[-t <duration>] -i                                                     (interactive console)
+	[-reconnect] [-t <duration>] [-eol cr|lf|crlf|none] [-keep-escapes]                 (monitor)
+	[-reconnect] [-t <duration>] [-eol cr|lf|crlf|none] [-keep-escapes] [--] <step>...  (step sequence)
+	[-reconnect] [-t <duration>] -i                                                (interactive)
 
 	step := expect <regex> | send <data> | send-raw <data>
 ```
@@ -51,8 +51,8 @@ is done.
 While the monitor runs, the device is busy for other users, but your own other
 commands may run beside it: a power cycle from a second terminal shows up in the
 monitor's output. Start it once the monitor prints `--- Connected to … ---`, or
-the first lines of the boot are lost. If the DUT powers the serial adapter, the
-adapter disappears with the power and the monitor ends.
+the first lines of the boot are lost. If the serial adapter disappears during a
+power cycle, the monitor ends unless `-reconnect` is given.
 
 A serial port serves one command at a time, unless dutagent runs as root.
 Running the same command again is refused, and another command that opens the
@@ -94,6 +94,42 @@ Like the monitor, an interactive session keeps the device busy for other users
 until it ends, and your own other commands, a power cycle for instance, may run
 beside it.
 
+## Temporary disconnections
+
+Pass `-reconnect` in any mode to wait for an initially absent device and reopen
+it after a disconnect. Configure a stable path such as
+`/dev/serial/by-id/usb-...`, so a replacement `/dev/ttyUSBn` number cannot select
+another adapter. Reopening uses the same path and baud rate, at 250 ms intervals.
+Permission, busy and configuration errors remain fatal. Without the flag, opening
+or reading an unavailable device still fails immediately.
+
+The session and device reservation stay open. Notices appear once per transition:
+
+```text
+--- Serial device disconnected: /dev/serial/by-id/usb-... ---
+--- Waiting for serial device to reconnect: /dev/serial/by-id/usb-... ---
+--- Serial device reconnected: /dev/serial/by-id/usb-... at 115200 baud ---
+```
+
+An initially absent device prints the waiting notice. Interactive notices use
+stderr with CR LF; stdout continues to contain only DUT bytes. Input received
+while disconnected is discarded, with a notice, rather than replayed after
+reconnection. An interrupted interactive write is not replayed either.
+
+Monitor output resumes. A pending `expect` resumes with its match buffer and
+partial character-map/escape state cleared, so a match cannot span two boots.
+Completed steps are never repeated. A send that has not started may wait for the
+device; any failed attempted send terminates the script with uncertain delivery,
+including short writes that failed partway through. It is never retried.
+
+The original `-t` deadline includes all waiting and the final drain, and never
+restarts on reconnection. Reaching it still succeeds in monitor/interactive mode;
+an unfinished scripted step fails. With `-t 0`, waiting ends on cancellation (or
+interactive input EOF). Ctrl-A x remains available while waiting in a console.
+Newly opened ports are not flushed, preserving queued boot bytes; output emitted
+while the adapter was absent cannot be recovered. Without `-reconnect`, the
+initial input buffer is still flushed as before.
+
 ## Flags
 
 | Flag | Description |
@@ -102,6 +138,7 @@ beside it.
 | `-eol cr\|lf\|crlf\|none` | Line ending appended by `send`. Default `cr` (`\r`), which is what serial consoles expect on Enter. |
 | `-keep-escapes` | Keep terminal escape sequences in the output instead of stripping them (e.g. for binary data or exact-byte capture). |
 | `-i` | Interactive console: bridge the port to your terminal. Takes no steps, and no `-eol` or `-keep-escapes`. |
+| `-reconnect` | Wait for an absent device and reopen after disconnection. Default off; see [Temporary disconnections](#temporary-disconnections). |
 
 The `--` separator before the steps is optional; it is only needed if a step
 value would otherwise look like a flag.
@@ -138,6 +175,9 @@ serial
 
 # Interactive console (end it with Ctrl-A x).
 serial -i
+
+# Keep the same console through USB serial disconnections during power cycles.
+serial -reconnect -i
 
 # Wait for a boot marker, then succeed.
 serial -- expect 'Welcome to'
