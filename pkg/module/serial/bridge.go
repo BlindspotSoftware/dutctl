@@ -41,6 +41,10 @@ func bridge(
 ) error {
 	_, _ = fmt.Fprintf(con.Stderr, "--- Connected to %s at %d baud ---\r\n", name, baud)
 
+	return bridgeConsole(ctx, serialPort, incoming, con, drain)
+}
+
+func bridgeConsole(ctx context.Context, serialPort port, incoming *inbound, con module.Console, drain time.Duration) error {
 	// The input pump runs on its own goroutine, since a Read on Stdin and a Read
 	// on the port both block. stopped is closed when it returned, and writeErr
 	// is read only after that.
@@ -171,7 +175,7 @@ func forwardOutput(
 			}
 		}
 
-		if err != nil {
+		if err != nil && !errors.Is(err, errDisconnected) {
 			return err
 		}
 	}

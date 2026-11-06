@@ -5,6 +5,7 @@
 package serial
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -110,7 +111,12 @@ func (in *inbound) read(serialPort port, buf []byte) ([]byte, error) {
 		return in.flush(), nil
 	}
 
-	return in.apply(buf[:n]), err
+	out := in.apply(buf[:n])
+	if errors.Is(err, errDisconnected) {
+		*in = inbound{maps: in.maps, strip: in.strip}
+	}
+
+	return out, err
 }
 
 // apply returns what of chunk is to be shown.

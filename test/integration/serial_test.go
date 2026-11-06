@@ -81,8 +81,8 @@ func (l *serialLine) send(t *testing.T, s string) {
 }
 
 // serialAgent starts an agent whose device dut has an interactive console,
-// a boot command and a scripted command on the line's port.
-func serialAgent(t *testing.T, line *serialLine) *agent {
+// a boot command and a scripted command on port.
+func serialAgent(t *testing.T, port string) *agent {
 	t.Helper()
 
 	return startAgentYAML(t, fmt.Sprintf(`
@@ -109,7 +109,7 @@ devices:
             passthrough: true
             with:
               port: %[1]s
-`, line.port))
+`, port))
 }
 
 // The interactive console from a pipe: the device gets the bytes as typed,
@@ -119,7 +119,7 @@ func TestSerialConsoleFromAPipe(t *testing.T) {
 	t.Parallel()
 
 	line := startSerialLine(t)
-	agt := serialAgent(t, line)
+	agt := serialAgent(t, line.port)
 
 	console := agt.start(t, "dut", "console")
 	console.stderr.waitFor(t, "--- Connected to "+line.port+" at 115200 baud ---")
@@ -153,10 +153,10 @@ func TestSerialConsoleOnATerminal(t *testing.T) {
 	t.Parallel()
 
 	line := startSerialLine(t)
-	agt := serialAgent(t, line)
+	agt := serialAgent(t, line.port)
 
 	term := agt.startOnTerminal(t, "-no-color", "dut", "console")
-	before := pty.Termios(t, term.slave)
+	before := term.original
 
 	term.stderr.waitFor(t, "Connected to")
 
@@ -204,7 +204,7 @@ func TestSerialStepBeforeTheConsole(t *testing.T) {
 	t.Parallel()
 
 	line := startSerialLine(t)
-	agt := serialAgent(t, line)
+	agt := serialAgent(t, line.port)
 
 	boot := agt.start(t, "dut", "boot")
 	boot.stderr.waitFor(t, "Connected to")
@@ -225,7 +225,7 @@ func TestSerialScript(t *testing.T) {
 	t.Parallel()
 
 	line := startSerialLine(t)
-	agt := serialAgent(t, line)
+	agt := serialAgent(t, line.port)
 
 	script := agt.start(t, "dut", "script", "-t", "10s", "--", "send", "ping", "expect", "pong")
 	line.received.waitFor(t, "ping\r")
@@ -241,7 +241,7 @@ func TestSerialPortGone(t *testing.T) {
 	t.Parallel()
 
 	line := startSerialLine(t)
-	agt := serialAgent(t, line)
+	agt := serialAgent(t, line.port)
 
 	console := agt.start(t, "dut", "console")
 	console.stderr.waitFor(t, "Connected to")
@@ -261,7 +261,7 @@ func TestSerialPortInUse(t *testing.T) {
 	}
 
 	line := startSerialLine(t)
-	agt := serialAgent(t, line)
+	agt := serialAgent(t, line.port)
 
 	console := agt.start(t, "dut", "console")
 	console.stderr.waitFor(t, "Connected to")
