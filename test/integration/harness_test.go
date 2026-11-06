@@ -48,6 +48,7 @@ import (
 	"time"
 
 	"github.com/BlindspotSoftware/dutctl/internal/test/pty"
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -635,6 +636,8 @@ type terminal struct {
 	// slave is the terminal's slave end, the client's standard input and
 	// output.
 	slave *os.File
+	// original is captured before the client can switch the terminal to raw mode.
+	original *unix.Termios
 	// screen collects what the client writes to the terminal.
 	screen *stream
 }
@@ -650,7 +653,7 @@ func (a *agent) startOnTerminal(t *testing.T, args ...string) *terminal {
 	cmd.Stdin, cmd.Stdout = slave, slave
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true, Setctty: true, Ctty: 0}
 
-	term := &terminal{master: master, slave: slave, screen: newStream()}
+	term := &terminal{master: master, slave: slave, original: pty.Termios(t, slave), screen: newStream()}
 
 	// The copy ends when the test closes the terminal.
 	go func() { _, _ = io.Copy(term.screen, master) }()
