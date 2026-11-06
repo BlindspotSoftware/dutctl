@@ -8,10 +8,12 @@ devices:
           Demo of the Serial module as a passthrough module: the client supplies
           the send/expect script at runtime, e.g.
             dutctl server serial -t 60s -- expect 'login:' send root expect '# '
+          Keep the console open across USB disconnections with:
+            dutctl server serial -reconnect -i
         uses:
           - module: serial
             passthrough: true
             with:
-              port: /tmp/ttyS0
+              port: /dev/serial/by-id/usb-example-console
               baud: 115200
               delay: 50ms

@@ -61,6 +61,7 @@ type scriptConfig struct {
 	timeout     time.Duration
 	keepEscapes bool
 	interactive bool
+	reconnect   bool
 	steps       []step
 }
 
@@ -78,12 +79,14 @@ func parseArgs(args []string) (scriptConfig, error) {
 		eolName     string
 		keepEscapes bool
 		interactive bool
+		reconnect   bool
 	)
 
 	fs.DurationVar(&timeout, "t", 0, "global timeout for the whole run (e.g. 30s, 3m); 0 = no timeout")
 	fs.StringVar(&eolName, "eol", defaultEOL, "line ending appended by 'send': cr|lf|crlf|none")
 	fs.BoolVar(&keepEscapes, "keep-escapes", false, "keep terminal escape sequences in the output instead of stripping them")
 	fs.BoolVar(&interactive, "i", false, "interactive console: bridge the port to the client's terminal")
+	fs.BoolVar(&reconnect, "reconnect", false, "wait for an absent serial device and reconnect after disconnection")
 
 	err := fs.Parse(args)
 	if err != nil {
@@ -96,7 +99,7 @@ func parseArgs(args []string) (scriptConfig, error) {
 			return scriptConfig{}, err
 		}
 
-		return scriptConfig{timeout: timeout, interactive: true}, nil
+		return scriptConfig{timeout: timeout, interactive: true, reconnect: reconnect}, nil
 	}
 
 	eol, err := resolveEOL(eolName)
@@ -109,7 +112,7 @@ func parseArgs(args []string) (scriptConfig, error) {
 		return scriptConfig{}, err
 	}
 
-	return scriptConfig{timeout: timeout, keepEscapes: keepEscapes, steps: steps}, nil
+	return scriptConfig{timeout: timeout, keepEscapes: keepEscapes, reconnect: reconnect, steps: steps}, nil
 }
 
 // checkInteractive rejects what -i cannot be combined with: steps, and the

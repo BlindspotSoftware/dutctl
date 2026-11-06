@@ -6,6 +6,7 @@ package serial
 
 import (
 	"context"
+	"errors"
 	"io"
 	"regexp"
 	"time"
@@ -78,13 +79,19 @@ func (e *engine) readUntil(ctx context.Context, pattern *regexp.Regexp) error {
 		}
 
 		// go.bug.st returns (0, nil) on a read timeout — keep waiting and let
-		// the ctx check above enforce the overall deadline. Any real error
-		// (port closed / device gone) ends the step.
+		// the ctx check above enforce the overall deadline. The reconnecting
+		// adapter marks device loss as a boundary; other errors end the step.
 		out, err := e.in.read(e.p, readBuf)
 
 		werr := e.tee(out)
 		if werr != nil {
 			return werr
+		}
+
+		if errors.Is(err, errDisconnected) {
+			e.buf = e.buf[:0]
+
+			continue
 		}
 
 		if err != nil {
@@ -163,6 +170,10 @@ func (e *engine) pump(ctx context.Context, swallowReadErr bool) error {
 			}
 		}
 
+		if errors.Is(err, errDisconnected) {
+			continue
+		}
+
 		if err != nil {
 			if swallowReadErr {
 				return nil
@@ -180,12 +191,11 @@ func (e *engine) monitor(ctx context.Context) error {
 	return e.pump(ctx, false)
 }
 
-// drain forwards serial output for up to d, so the DUT's reply to a final send
-// is visible before the run closes. It is best-effort: a read error (e.g. the
-// device rebooted from that send) ends it without failing the run.
-func (e *engine) drain(ctx context.Context, d time.Duration) error {
+// drain forwards serial output for up to d. Legacy runs tolerate read errors
+// after a final send; reconnecting runs handle device loss and expose fatal errors.
+func (e *engine) drain(ctx context.Context, d time.Duration, swallowReadErr bool) error {
 	drainCtx, cancel := context.WithTimeout(ctx, d)
 	defer cancel()
 
-	return e.pump(drainCtx, true)
+	return e.pump(drainCtx, swallowReadErr)
 }
