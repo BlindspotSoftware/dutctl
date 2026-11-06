@@ -185,7 +185,7 @@ func TestEngineDrainForwardsBestEffort(t *testing.T) {
 	sink := &bytes.Buffer{}
 	eng := newEngine(fp, newInbound(charMap{}, false), sink)
 
-	if err := eng.drain(context.Background(), 50*time.Millisecond); err != nil {
+	if err := eng.drain(context.Background(), 50*time.Millisecond, true); err != nil {
 		t.Fatalf("drain: %v", err)
 	}
 
