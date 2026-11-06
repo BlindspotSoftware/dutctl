@@ -33,6 +33,7 @@ func init() {
 const (
 	vendorIntellinet = "intellinet"
 	vendorGude       = "gude"
+	vendorNetio      = "netio"
 )
 
 const defaultTimeout = 10 * time.Second // Default timeout for HTTP requests.
@@ -119,10 +120,10 @@ func commandList() string {
 
 // PDU is a module that provides basic power management functions for a PDU
 // (Power Distribution Unit). It supports Intellinet-style PDUs (e.g. Intellinet
-// 163682, LogiLink PDU8P01) and Gude PDUs; the concrete device is selected via
+// 163682, LogiLink PDU8P01), Gude and NETIO PDUs; the concrete device is selected via
 // the Vendor option.
 type PDU struct {
-	Vendor   string `yaml:"vendor"` // Vendor selects the PDU HTTP API: "intellinet" (default) or "gude".
+	Vendor   string `yaml:"vendor"` // Vendor selects the PDU HTTP API: "intellinet" (default), "gude" or "netio".
 	Host     string // Host is the base address of the PDU.
 	User     string // User for HTTP Basic Auth; set together with Password, or leave both empty for no auth.
 	Password string // Password for HTTP Basic Auth; set together with User, or leave both empty for no auth.
@@ -269,12 +270,14 @@ func newBackend(vendor string, req *requester, host string) (backend, error) {
 		return intellinet{req: req, base: base}, nil
 	case vendorGude:
 		return gude{req: req, base: base}, nil
+	case vendorNetio:
+		return netio{req: req, base: base}, nil
 	default:
-		return nil, fmt.Errorf("unknown PDU vendor %q (supported: %q, %q)", vendor, vendorIntellinet, vendorGude)
+		return nil, fmt.Errorf("unknown PDU vendor %q (supported: %q, %q, %q)", vendor, vendorIntellinet, vendorGude, vendorNetio)
 	}
 }
 
-// requester performs authenticated GET requests against a PDU's HTTP API. It
+// requester performs authenticated requests against a PDU's HTTP API. It
 // carries the credentials so vendor backends need not repeat the request setup.
 type requester struct {
 	client   *http.Client
@@ -282,17 +285,27 @@ type requester struct {
 	password string
 }
 
-// get issues an authenticated GET against endpoint. On success the caller owns the
-// response and must close its Body; on any error the returned response is nil (its
-// body already closed if one existed). A non-200 status is reported as an error.
 func (r *requester) get(ctx context.Context, endpoint string) (*http.Response, error) {
+	return r.do(ctx, http.MethodGet, endpoint, nil)
+}
+
+func (r *requester) post(ctx context.Context, endpoint string, body io.Reader) (*http.Response, error) {
+	return r.do(ctx, http.MethodPost, endpoint, body)
+}
+
+// On success the caller owns the response body; failures close it before returning.
+func (r *requester) do(ctx context.Context, method, endpoint string, body io.Reader) (*http.Response, error) {
 	authenticated := r.user != "" && r.password != ""
 
-	log.FromContext(ctx).Debug("GET "+endpoint, "auth", authenticated)
+	log.FromContext(ctx).Debug(method+" "+endpoint, "auth", authenticated)
 
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	request, err := http.NewRequestWithContext(ctx, method, endpoint, body)
 	if err != nil {
 		return nil, err
+	}
+
+	if method == http.MethodPost {
+		request.Header.Set("Content-Type", "application/json")
 	}
 
 	if authenticated {

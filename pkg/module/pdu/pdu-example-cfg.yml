@@ -28,3 +28,17 @@ devices:
               user: admin
               password: admin
               outlet: 1
+  netio-board:
+    desc: A board connected to NETIO output 1
+    cmds:
+      power:
+        desc: Control the power (on|off|toggle|status) via NETIO
+        uses:
+          - module: pdu
+            passthrough: true
+            with:
+              vendor: netio
+              host: http://192.168.1.201:8080
+              user: netio
+              password: example-password
+              outlet: 0

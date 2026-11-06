@@ -33,6 +33,11 @@ func TestBackendSelection(t *testing.T) {
 			want:    gude{},
 		},
 		{
+			name:    "netio",
+			options: "vendor: netio\nhost: http://10.0.0.1\noutlet: 0\n",
+			want:    netio{},
+		},
+		{
 			name:    "legacy config without vendor defaults to intellinet",
 			options: "host: http://10.0.0.1\noutlet: 0\n",
 			want:    intellinet{},
@@ -93,6 +98,8 @@ func typeName(b backend) string {
 		return "intellinet"
 	case gude:
 		return "gude"
+	case netio:
+		return "netio"
 	default:
 		return "nil"
 	}
