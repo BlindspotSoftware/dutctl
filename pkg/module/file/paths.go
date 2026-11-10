@@ -19,36 +19,32 @@ const (
 	colonArgCount = 2
 )
 
-// parsePaths resolves the source and destination for the transfer from the
-// configured Source/Destination and the command-line args, storing the result
-// in f.sourcePath and f.destPath. It returns an error when the argument count
-// or the src:dest colon syntax conflicts with what the config already fixes.
-func (f *File) parsePaths(args []string) error {
+// parsePaths returns the source and destination for the transfer, resolved from
+// the configured Source/Destination and the command-line args. It returns an
+// error when the argument count or the src:dest colon syntax conflicts with
+// what the config already fixes.
+func (f *File) parsePaths(args []string) (string, string, error) {
 	arg, err := f.evalArgs(args)
 	if err != nil {
-		return err
+		return "", "", err
 	}
-
-	// Initialize source and destination with configured values
-	f.sourcePath = f.Source
-	f.destPath = f.Destination
 
 	// If both source and destination are configured, arg must be empty
 	if f.Source != "" && f.Destination != "" {
 		if arg != "" {
-			return fmt.Errorf("no path expected when both source and destination are configured")
+			return "", "", fmt.Errorf("no path expected when both source and destination are configured")
 		}
 
-		return nil
+		return f.Source, f.Destination, nil
 	}
 
 	// Validate argument is not empty (required when not both configs are set)
 	if arg == "" {
-		if f.sourcePath != "" {
-			return errors.New("destination path cannot be empty")
+		if f.Source != "" {
+			return "", "", errors.New("destination path cannot be empty")
 		}
 
-		return errors.New("source path cannot be empty")
+		return "", "", errors.New("source path cannot be empty")
 	}
 
 	// Check if colon syntax is used
@@ -92,68 +88,61 @@ func (f *File) evalArgs(args []string) (string, error) {
 
 // parseSinglePath handles single path argument (no colon syntax).
 // Determines source and destination based on configured values.
-func (f *File) parseSinglePath(arg string) error {
+func (f *File) parseSinglePath(arg string) (string, string, error) {
 	switch {
-	case f.sourcePath != "":
+	case f.Source != "":
 		// Source is configured, arg is destination - sanitize
 		destPath, err := sanitizePath(arg)
 		if err != nil {
-			return err
+			return "", "", err
 		}
 
-		f.destPath = destPath
-	case f.destPath != "":
+		return f.Source, destPath, nil
+	case f.Destination != "":
 		// Destination is configured, arg is source - keep as-is
-		f.sourcePath = arg
+		return arg, f.Destination, nil
 	default:
 		// Neither configured, arg is source, sanitize for destination
-		f.sourcePath = arg
-
-		f.destPath = filepath.Base(arg)
+		return arg, filepath.Base(arg), nil
 	}
-
-	return nil
 }
 
 // parseColonPath parses the argument for colon syntax (src:dest).
-func (f *File) parseColonPath(arg string) error {
+func (f *File) parseColonPath(arg string) (string, string, error) {
 	// Colon syntax used - check mutual exclusivity with config
 	if f.Source != "" {
-		return fmt.Errorf("cannot use colon syntax when source is configured: %q", f.Source)
+		return "", "", fmt.Errorf("cannot use colon syntax when source is configured: %q", f.Source)
 	}
 
 	if f.Destination != "" {
-		return fmt.Errorf("cannot use colon syntax when destination is configured: %q", f.Destination)
+		return "", "", fmt.Errorf("cannot use colon syntax when destination is configured: %q", f.Destination)
 	}
 
 	parts := strings.Split(arg, ":")
 	if len(parts) != colonArgCount {
-		return fmt.Errorf("colon syntax requires exactly one colon")
+		return "", "", fmt.Errorf("colon syntax requires exactly one colon")
 	}
 
 	if parts[srcArg] == "" {
-		return errors.New("src path cannot be empty in 'src:dest' syntax")
+		return "", "", errors.New("src path cannot be empty in 'src:dest' syntax")
 	}
 
 	if parts[dstArg] == "" {
-		return errors.New("destination path cannot be empty in 'src:dest' syntax")
+		return "", "", errors.New("destination path cannot be empty in 'src:dest' syntax")
 	}
 
 	// Sanitize both parts
 	sourcePath, err := sanitizePath(parts[srcArg])
 	if err != nil {
-		return err
+		return "", "", err
 	}
 
 	destPath, err := sanitizePath(parts[dstArg])
 	if err != nil {
-		return err
+		return "", "", err
 	}
 
-	f.sourcePath = sourcePath
-	f.destPath = destPath
-
-	return nil
+	return sourcePath, destPath, nil
 }
 
 // sanitizePath cleans a user-provided path and rejects any that could escape

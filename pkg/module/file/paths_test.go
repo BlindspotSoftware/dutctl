@@ -385,7 +385,7 @@ func TestParsePaths(t *testing.T) {
 				args = []string{tt.arg}
 			}
 
-			err := f.parsePaths(args)
+			src, dest, err := f.parsePaths(args)
 
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("parsePaths() error = %v, wantErr %v", err, tt.wantErr)
@@ -398,11 +398,11 @@ func TestParsePaths(t *testing.T) {
 				return
 			}
 
-			if f.sourcePath != tt.wantSrc {
-				t.Errorf("parsePaths() sourcePath = %q, want %q", f.sourcePath, tt.wantSrc)
+			if src != tt.wantSrc {
+				t.Errorf("parsePaths() source = %q, want %q", src, tt.wantSrc)
 			}
-			if f.destPath != tt.wantDest {
-				t.Errorf("parsePaths() destPath = %q, want %q", f.destPath, tt.wantDest)
+			if dest != tt.wantDest {
+				t.Errorf("parsePaths() destination = %q, want %q", dest, tt.wantDest)
 			}
 		})
 	}
