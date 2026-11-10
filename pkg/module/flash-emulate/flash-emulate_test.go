@@ -70,31 +70,29 @@ func TestInitDefaultTool(t *testing.T) {
 	}
 }
 
-func TestDeinit(t *testing.T) {
-	t.Run("no image to clean up", func(t *testing.T) {
-		e := FlashEmulate{}
-		if err := e.Deinit(context.Background()); err != nil {
-			t.Errorf("unexpected error: %v", err)
-		}
-	})
+// setTmpDir points TMPDIR at an empty directory and returns it, so a test can
+// check that a run leaves nothing behind there.
+func setTmpDir(t *testing.T) string {
+	t.Helper()
 
-	t.Run("removes image file on cleanup", func(t *testing.T) {
-		f, err := os.CreateTemp(t.TempDir(), "flash-emulate-test-*")
-		if err != nil {
-			t.Fatal(err)
-		}
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp)
 
-		f.Close()
+	return tmp
+}
 
-		e := FlashEmulate{localImagePath: f.Name()}
-		if err := e.Deinit(context.Background()); err != nil {
-			t.Errorf("unexpected error: %v", err)
-		}
+// assertRemoved fails the test if a run left anything in tmp.
+func assertRemoved(t *testing.T, tmp string) {
+	t.Helper()
 
-		if _, statErr := os.Stat(f.Name()); !os.IsNotExist(statErr) {
-			t.Errorf("expected file %q to be removed after Deinit", f.Name())
-		}
-	})
+	entries, err := os.ReadDir(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(entries) > 0 {
+		t.Errorf("run left %v in the temporary directory", entries)
+	}
 }
 
 func TestRun(t *testing.T) {
@@ -125,10 +123,13 @@ func TestRun(t *testing.T) {
 	}
 
 	t.Run("successful run uploads image and invokes tool", func(t *testing.T) {
+		tmp := setTmpDir(t)
 		dir := t.TempDir()
 		fakeTool := filepath.Join(dir, "em100")
+		loaded := filepath.Join(dir, "loaded")
 
-		if err := os.WriteFile(fakeTool, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		// The image follows -d, the fifth argument; keep a copy of what the tool loaded.
+		if err := os.WriteFile(fakeTool, []byte("#!/bin/sh\ncp \"$5\" '"+loaded+"'\n"), 0o755); err != nil {
 			t.Fatal(err)
 		}
 
@@ -142,6 +143,17 @@ func TestRun(t *testing.T) {
 			t.Errorf("unexpected error: %v", err)
 		}
 
+		content, err := os.ReadFile(loaded)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if string(content) != "fake firmware content" {
+			t.Errorf("tool loaded %q, want %q", content, "fake firmware content")
+		}
+
+		assertRemoved(t, tmp)
+
 		if !sesh.RequestFileCalled {
 			t.Error("expected RequestFile to be called")
 		}
@@ -153,13 +165,10 @@ func TestRun(t *testing.T) {
 		if !strings.HasSuffix(sesh.PrintText, "\n") {
 			t.Errorf("expected output to end with a newline, got %q", sesh.PrintText)
 		}
-
-		if err := e.Deinit(context.Background()); err != nil {
-			t.Errorf("unexpected Deinit error: %v", err)
-		}
 	})
 
 	t.Run("uploadImage failure cleans up temp file", func(t *testing.T) {
+		tmp := setTmpDir(t)
 		sesh := &mock.Session{
 			RequestFileErr: errors.New("fake transfer error"),
 		}
@@ -170,12 +179,11 @@ func TestRun(t *testing.T) {
 			t.Error("expected error but got nil")
 		}
 
-		if e.localImagePath != "" {
-			t.Errorf("expected localImagePath to be empty after failure, got %q", e.localImagePath)
-		}
+		assertRemoved(t, tmp)
 	})
 
 	t.Run("execute failure cleans up temp file", func(t *testing.T) {
+		tmp := setTmpDir(t)
 		dir := t.TempDir()
 		fakeTool := filepath.Join(dir, "em100")
 
@@ -193,41 +201,7 @@ func TestRun(t *testing.T) {
 			t.Error("expected error but got nil")
 		}
 
-		if e.localImagePath != "" {
-			t.Errorf("expected localImagePath to be empty after failure, got %q", e.localImagePath)
-		}
-	})
-
-	t.Run("second run cleans up temp file from first run", func(t *testing.T) {
-		dir := t.TempDir()
-		fakeTool := filepath.Join(dir, "em100")
-
-		if err := os.WriteFile(fakeTool, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-			t.Fatal(err)
-		}
-
-		e := FlashEmulate{Tool: fakeTool, Chip: "N25Q256A13"}
-		ctx := context.Background()
-
-		sesh1 := &mock.Session{RequestedFileResponse: strings.NewReader("firmware v1")}
-		if err := e.Run(ctx, sesh1, "fw1.rom"); err != nil {
-			t.Fatalf("first Run failed: %v", err)
-		}
-
-		firstPath := e.localImagePath
-
-		sesh2 := &mock.Session{RequestedFileResponse: strings.NewReader("firmware v2")}
-		if err := e.Run(ctx, sesh2, "fw2.rom"); err != nil {
-			t.Fatalf("second Run failed: %v", err)
-		}
-
-		if _, statErr := os.Stat(firstPath); !os.IsNotExist(statErr) {
-			t.Errorf("expected first temp file %q to be cleaned up before second run", firstPath)
-		}
-
-		if err := e.Deinit(context.Background()); err != nil {
-			t.Errorf("unexpected Deinit error: %v", err)
-		}
+		assertRemoved(t, tmp)
 	})
 }
 
@@ -285,17 +259,15 @@ func TestCmdline(t *testing.T) {
 		{
 			name: "basic cmdline without device",
 			flashEmulate: FlashEmulate{
-				Chip:           "N25Q256A13",
-				localImagePath: "./flash-emulate-image",
+				Chip: "N25Q256A13",
 			},
 			expected: []string{"--stop", "--set", "N25Q256A13", "-d", "./flash-emulate-image", "-v", "--start"},
 		},
 		{
 			name: "cmdline with device selector",
 			flashEmulate: FlashEmulate{
-				Chip:           "N25Q256A13",
-				Device:         "1",
-				localImagePath: "./flash-emulate-image",
+				Chip:   "N25Q256A13",
+				Device: "1",
 			},
 			expected: []string{"--device", "1", "--stop", "--set", "N25Q256A13", "-d", "./flash-emulate-image", "-v", "--start"},
 		},
@@ -303,7 +275,7 @@ func TestCmdline(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := tt.flashEmulate.cmdline()
+			got := tt.flashEmulate.cmdline("./flash-emulate-image")
 
 			if len(got) != len(tt.expected) {
 				t.Fatalf("cmdline length: expected %d args %v, got %d args %v", len(tt.expected), tt.expected, len(got), got)

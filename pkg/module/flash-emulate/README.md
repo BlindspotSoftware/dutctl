@@ -14,6 +14,8 @@ ARGUMENTS:
 
 The image is transferred to the _dutagent_ and loaded into the SPI flash emulator.
 Any running emulation session is stopped first, then the new image is loaded and emulation is started.
+Until the emulator holds it, the image is kept in a directory of its own under the _dutagent_'s temporary directory
+(`$TMPDIR`, `/tmp` if unset), which the run removes when it ends.
 
 This module wraps an emulation tool on the _dutagent_ (default: `em100`). The tool must be installed on the _dutagent_,
 and a compatible emulator (e.g. EM100Pro-G2 from Dediprog) must be connected to the DUT's SPI flash bus.

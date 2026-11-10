@@ -13,6 +13,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -34,9 +35,6 @@ func init() {
 
 const defaultTool = "em100"
 
-// tmpDirPerm is the permission bits used when creating the temporary image directory.
-const tmpDirPerm = 0o700
-
 // FlashEmulate is a module that loads a firmware image into an SPI flash emulator connected to the DUT.
 type FlashEmulate struct {
 	// Tool is the path to the emulation tool on the dutagent. Defaults to "em100".
@@ -45,9 +43,6 @@ type FlashEmulate struct {
 	Chip string `yaml:"chip"`
 	// Device is the USB device number used when multiple emulators are connected. Optional.
 	Device string `yaml:"device"`
-
-	localImagePath  string // localImagePath is the path to the firmware image on the dutagent
-	clientImagePath string // clientImagePath is the image path as named by the client
 }
 
 // Ensure implementing the Module interface.
@@ -109,10 +104,14 @@ func (e *FlashEmulate) Init(ctx context.Context) error {
 	return nil
 }
 
+// Deinit has nothing to clean up: every run removes its own image.
 func (e *FlashEmulate) Deinit(_ context.Context) error {
-	return os.RemoveAll(e.localImagePath)
+	return nil
 }
 
+// Run loads the image the client names in args into the emulator. The image lives in
+// a directory of its own for as long as the run lasts; once the tool has loaded it,
+// the emulator holds a copy of its own.
 func (e *FlashEmulate) Run(ctx context.Context, sesh module.Session, args ...string) error {
 	l := log.FromContext(ctx)
 
@@ -120,39 +119,27 @@ func (e *FlashEmulate) Run(ctx context.Context, sesh module.Session, args ...str
 		return errors.New("missing argument: image file path")
 	}
 
-	e.clientImagePath = args[0]
-
-	// Clean up any image file left over from a previous Run call on this instance.
-	if e.localImagePath != "" {
-		_ = os.RemoveAll(e.localImagePath)
-		e.localImagePath = ""
+	dir, err := os.MkdirTemp("", "flash-emulate-")
+	if err != nil {
+		return fmt.Errorf("create directory for the image on dutagent: %w", err)
 	}
 
-	tmpDir := os.TempDir()
+	defer func() {
+		// The run's result stands; a leftover directory only takes up space.
+		err := os.RemoveAll(dir)
+		if err != nil {
+			l.Warn(fmt.Sprintf("remove image directory: %v", err))
+		}
+	}()
 
-	err := os.MkdirAll(tmpDir, tmpDirPerm)
+	localImagePath := filepath.Join(dir, "image")
+
+	err = uploadImage(sesh, args[0], localImagePath)
 	if err != nil {
-		return fmt.Errorf("create temp dir for image: %w", err)
-	}
-
-	tmpFile, err := os.CreateTemp(tmpDir, "flash-emulate-image-*")
-	if err != nil {
-		return fmt.Errorf("create temp image file: %w", err)
-	}
-
-	tmpFile.Close()
-
-	e.localImagePath = tmpFile.Name()
-
-	err = uploadImage(sesh, e.clientImagePath, e.localImagePath)
-	if err != nil {
-		_ = os.RemoveAll(e.localImagePath)
-		e.localImagePath = ""
-
 		return err
 	}
 
-	cmdArgs := e.cmdline()
+	cmdArgs := e.cmdline(localImagePath)
 
 	l.Info(fmt.Sprintf("loading image into emulator with %s", e.Tool))
 	l.Debug(fmt.Sprintf("executing %s %s", e.Tool, strings.Join(cmdArgs, " ")))
@@ -160,9 +147,6 @@ func (e *FlashEmulate) Run(ctx context.Context, sesh module.Session, args ...str
 
 	err = execute(ctx, sesh, e.Tool, cmdArgs...)
 	if err != nil {
-		_ = os.RemoveAll(e.localImagePath)
-		e.localImagePath = ""
-
 		return fmt.Errorf("emulation failed: %w", err)
 	}
 
@@ -171,16 +155,16 @@ func (e *FlashEmulate) Run(ctx context.Context, sesh module.Session, args ...str
 	return nil
 }
 
-// cmdline returns the argument list for the emulation tool:
+// cmdline returns the argument list for the emulation tool to load image:
 // [--device <n>] --stop --set <chip> -d <image> -v --start.
-func (e *FlashEmulate) cmdline() []string {
+func (e *FlashEmulate) cmdline(image string) []string {
 	var args []string
 
 	if e.Device != "" {
 		args = append(args, "--device", e.Device)
 	}
 
-	args = append(args, "--stop", "--set", e.Chip, "-d", e.localImagePath, "-v", "--start")
+	args = append(args, "--stop", "--set", e.Chip, "-d", image, "-v", "--start")
 
 	return args
 }
@@ -198,17 +182,9 @@ func uploadImage(sesh module.Session, remote, local string) error {
 	}
 
 	_, err = io.Copy(imgFile, img)
+	// A failed close can mean the image did not reach the disk in full.
+	err = errors.Join(err, imgFile.Close())
 	if err != nil {
-		_ = imgFile.Close()
-		_ = os.Remove(local)
-
-		return fmt.Errorf("save image on dutagent: %w", err)
-	}
-
-	err = imgFile.Close()
-	if err != nil {
-		_ = os.Remove(local)
-
 		return fmt.Errorf("save image on dutagent: %w", err)
 	}
 
