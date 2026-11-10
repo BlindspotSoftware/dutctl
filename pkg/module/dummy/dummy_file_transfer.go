@@ -65,38 +65,38 @@ func (d *FT) Run(ctx context.Context, s module.Session, args ...string) error {
 
 	fileReader, err := s.RequestFile(inFile)
 	if err != nil {
-		return fmt.Errorf("file request failed: %v", err)
+		return fmt.Errorf("file request failed: %w", err)
 	}
 
 	l.Debug(fmt.Sprintf("reading input file %q", inFile))
 
 	raw, err := io.ReadAll(fileReader)
 	if err != nil {
-		return fmt.Errorf("failed to read file: %v", err)
+		return fmt.Errorf("failed to read file: %w", err)
 	}
 
 	dir, err := os.MkdirTemp("", "dummy-ft-")
 	if err != nil {
-		return fmt.Errorf("failed to create temp dir: %v", err)
+		return fmt.Errorf("failed to create temp dir: %w", err)
 	}
 
 	defer os.RemoveAll(dir)
 
 	err = save(l, raw, dir, inFile)
 	if err != nil {
-		return fmt.Errorf("failed to save file: %v", err)
+		return fmt.Errorf("failed to save file: %w", err)
 	}
 
 	result, err := process(raw)
 	if err != nil {
-		return fmt.Errorf("failed to process file: %v", err)
+		return fmt.Errorf("failed to process file: %w", err)
 	}
 
 	outFile := args[1]
 
 	err = s.SendFile(outFile, bytes.NewBuffer(result))
 	if err != nil {
-		return fmt.Errorf("failed to send file: %v", err)
+		return fmt.Errorf("failed to send file: %w", err)
 	}
 
 	l.Info(fmt.Sprintf("processed and returned %q", outFile))
@@ -113,7 +113,7 @@ func save(l *slog.Logger, raw []byte, dir, path string) error {
 
 	err := os.WriteFile(dest, raw, fs.FileMode(perm))
 	if err != nil {
-		return fmt.Errorf("failed to write file: %v", err)
+		return fmt.Errorf("failed to write file: %w", err)
 	}
 
 	l.Debug(fmt.Sprintf("wrote received file to %q", dest))
