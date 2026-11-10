@@ -7,6 +7,7 @@ package file
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -233,19 +234,13 @@ func (f *File) uploadFile(ctx context.Context, sesh module.Session) error {
 		return fmt.Errorf("failed to create destination file %q: %w", f.destPath, err)
 	}
 
-	var copyErr error
+	bytesWritten, err := io.Copy(dstFile, fileReader)
+	// A failed close can mean the data did not reach the disk in full.
+	err = errors.Join(err, dstFile.Close())
+	if err != nil {
+		os.Remove(f.destPath)
 
-	defer func() {
-		dstFile.Close()
-
-		if copyErr != nil {
-			os.Remove(f.destPath)
-		}
-	}()
-
-	bytesWritten, copyErr := io.Copy(dstFile, fileReader)
-	if copyErr != nil {
-		return fmt.Errorf("failed to write file data: %w", copyErr)
+		return fmt.Errorf("failed to write file data: %w", err)
 	}
 
 	l.Info(fmt.Sprintf("uploaded %d bytes to %q", bytesWritten, f.destPath))
