@@ -89,7 +89,11 @@ type Module interface {
 	// dutagent never calls Run on one module twice at once, but Run of other
 	// modules, also of the same type, runs at the same time. Keep per-run state
 	// in Run's locals, and guard what modules share beyond their own fields,
-	// such as a package variable or a library's global state.
+	// such as a package variable or a library's global state. Keep the files
+	// of a run in a directory of its own, made with os.MkdirTemp under the
+	// agent's temporary directory, and remove it before Run returns. Close
+	// every file Run opens, and treat a failed close of a file it wrote as a
+	// failed write.
 	Run(ctx context.Context, s Session, args ...string) error
 }
 

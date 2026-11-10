@@ -26,6 +26,8 @@ type Module interface {
 See [`pkg/module/module.go`](../pkg/module/module.go) for further information on the set of functions.
 `Run` must return promptly once its context is cancelled (the command was aborted or the client disconnected):
 until it returns, the device stays busy, and a forced unlock does not free it.
+Runs of other modules, also of the same type, run at the same time: keep a run's state in `Run`'s locals and its files
+in a directory of its own from `os.MkdirTemp`, which `Run` removes before it returns.
 With the _Session_ provided to the module, it is able to interact with the client during execution (status messages,
 request input, file transfer, etc.).
 
