@@ -57,13 +57,6 @@ type File struct {
 	// If set, the command-line arg becomes the counterpart (dest or src respectively).
 	Source      string
 	Destination string
-
-	// sourcePath is the final source path, combined from config and args,
-	// used for the internal file transfer operation.
-	sourcePath string
-	// destPath is the final destination path, combined from config and args,
-	// used for the internal file transfer operation.
-	destPath string
 }
 
 // Ensure implementing the Module interface.
@@ -187,38 +180,38 @@ func (f *File) Deinit(_ context.Context) error {
 // path(s) not already fixed by Source/Destination, in SRC[:DEST] form; see Help.
 func (f *File) Run(ctx context.Context, sesh module.Session, args ...string) error {
 	// Parse paths
-	err := f.parsePaths(args)
+	src, dest, err := f.parsePaths(args)
 	if err != nil {
 		return err
 	}
 
 	switch f.Operation {
 	case string(opUpload):
-		return f.uploadFile(ctx, sesh)
+		return f.uploadFile(ctx, sesh, src, dest)
 	case string(opDownload):
-		return f.downloadFile(ctx, sesh)
+		return downloadFile(ctx, sesh, src, dest)
 	default:
 		return fmt.Errorf("invalid operation %q: must be 'upload' or 'download'", f.Operation)
 	}
 }
 
 // uploadFile handles uploading a file from client to dutagent.
-func (f *File) uploadFile(ctx context.Context, sesh module.Session) error {
+func (f *File) uploadFile(ctx context.Context, sesh module.Session, src, dest string) error {
 	l := log.FromContext(ctx)
-	l.Debug(fmt.Sprintf("uploading %q from client to %q on dutagent", f.sourcePath, f.destPath))
+	l.Debug(fmt.Sprintf("uploading %q from client to %q on dutagent", src, dest))
 
 	// Request file from client
-	fileReader, err := sesh.RequestFile(f.sourcePath)
+	fileReader, err := sesh.RequestFile(src)
 	if err != nil {
 		return fmt.Errorf("failed to request file from client: %w", err)
 	}
 
 	// Create parent directories
-	destDir := filepath.Dir(f.destPath)
+	destDir := filepath.Dir(dest)
 
 	err = os.MkdirAll(destDir, DefaultDirPerm)
 	if err != nil {
-		return fmt.Errorf("failed to create parent directories for %q: %w", f.destPath, err)
+		return fmt.Errorf("failed to create parent directories for %q: %w", dest, err)
 	}
 
 	mode, err := strconv.ParseUint(f.Permission, 8, 32)
@@ -229,56 +222,56 @@ func (f *File) uploadFile(ctx context.Context, sesh module.Session) error {
 	perm := fs.FileMode(mode)
 
 	// Create destination file
-	dstFile, err := os.OpenFile(f.destPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)
+	dstFile, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)
 	if err != nil {
-		return fmt.Errorf("failed to create destination file %q: %w", f.destPath, err)
+		return fmt.Errorf("failed to create destination file %q: %w", dest, err)
 	}
 
 	bytesWritten, err := io.Copy(dstFile, fileReader)
 	// A failed close can mean the data did not reach the disk in full.
 	err = errors.Join(err, dstFile.Close())
 	if err != nil {
-		os.Remove(f.destPath)
+		os.Remove(dest)
 
 		return fmt.Errorf("failed to write file data: %w", err)
 	}
 
-	l.Info(fmt.Sprintf("uploaded %d bytes to %q", bytesWritten, f.destPath))
-	sesh.Printf("Upload complete: %s -> %s (%d bytes)\n", f.sourcePath, f.destPath, bytesWritten)
+	l.Info(fmt.Sprintf("uploaded %d bytes to %q", bytesWritten, dest))
+	sesh.Printf("Upload complete: %s -> %s (%d bytes)\n", src, dest, bytesWritten)
 
 	return nil
 }
 
 // downloadFile handles downloading a file from dutagent to client.
-func (f *File) downloadFile(ctx context.Context, sesh module.Session) error {
+func downloadFile(ctx context.Context, sesh module.Session, src, dest string) error {
 	l := log.FromContext(ctx)
-	l.Debug(fmt.Sprintf("downloading %q from dutagent to %q on client", f.sourcePath, f.destPath))
+	l.Debug(fmt.Sprintf("downloading %q from dutagent to %q on client", src, dest))
 
 	// Validate source file exists
-	fileInfo, err := os.Stat(f.sourcePath)
+	fileInfo, err := os.Stat(src)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return fmt.Errorf("source file %q not found on dutagent", f.sourcePath)
+			return fmt.Errorf("source file %q not found on dutagent", src)
 		}
 
-		return fmt.Errorf("failed to open source file %q: %w", f.sourcePath, err)
+		return fmt.Errorf("failed to open source file %q: %w", src, err)
 	}
 
 	// Open source file
-	srcFile, err := os.Open(f.sourcePath)
+	srcFile, err := os.Open(src)
 	if err != nil {
-		return fmt.Errorf("failed to open source file %q: %w", f.sourcePath, err)
+		return fmt.Errorf("failed to open source file %q: %w", src, err)
 	}
 	defer srcFile.Close()
 
 	// Send file to client
-	err = sesh.SendFile(f.destPath, srcFile)
+	err = sesh.SendFile(dest, srcFile)
 	if err != nil {
 		return fmt.Errorf("failed to send file to client: %w", err)
 	}
 
-	l.Info(fmt.Sprintf("downloaded %d bytes from %q", fileInfo.Size(), f.sourcePath))
-	sesh.Printf("Download complete: %s -> %s (%d bytes)\n", f.sourcePath, f.destPath, fileInfo.Size())
+	l.Info(fmt.Sprintf("downloaded %d bytes from %q", fileInfo.Size(), src))
+	sesh.Printf("Download complete: %s -> %s (%d bytes)\n", src, dest, fileInfo.Size())
 
 	return nil
 }
