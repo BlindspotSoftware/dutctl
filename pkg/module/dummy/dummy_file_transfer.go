@@ -75,7 +75,14 @@ func (d *FT) Run(ctx context.Context, s module.Session, args ...string) error {
 		return fmt.Errorf("failed to read file: %v", err)
 	}
 
-	err = save(l, raw, inFile)
+	dir, err := os.MkdirTemp("", "dummy-ft-")
+	if err != nil {
+		return fmt.Errorf("failed to create temp dir: %v", err)
+	}
+
+	defer os.RemoveAll(dir)
+
+	err = save(l, raw, dir, inFile)
 	if err != nil {
 		return fmt.Errorf("failed to save file: %v", err)
 	}
@@ -98,17 +105,13 @@ func (d *FT) Run(ctx context.Context, s module.Session, args ...string) error {
 	return nil
 }
 
-func save(l *slog.Logger, raw []byte, path string) error {
-	dir, err := os.MkdirTemp("", "dutagent-out")
-	if err != nil {
-		return fmt.Errorf("failed to create temp dir: %v", err)
-	}
-
+// save writes raw into dir under the base name of path.
+func save(l *slog.Logger, raw []byte, dir, path string) error {
 	dest := filepath.Join(dir, filepath.Base(path))
 
 	perm := 0600
 
-	err = os.WriteFile(dest, raw, fs.FileMode(perm))
+	err := os.WriteFile(dest, raw, fs.FileMode(perm))
 	if err != nil {
 		return fmt.Errorf("failed to write file: %v", err)
 	}
