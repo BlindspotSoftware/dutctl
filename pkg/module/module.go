@@ -103,6 +103,12 @@ type Module interface {
 // opaquely (no sentinel to match) and typically means the client declined the file
 // or the transfer stream failed.
 //
+// Transfers are checksummed by the framework, and one damaged in transit fails
+// the run. The reader RequestFile returns delivers a file as it arrives, so a
+// damaged one makes it fail at the end instead of returning io.EOF: a module
+// that acts on a file only after reading it to io.EOF never acts on damaged
+// content.
+//
 // OpenConsole, Print, RequestFile and SendFile must be called only from the module's
 // Run goroutine.
 type Session interface {
@@ -152,11 +158,25 @@ type Session interface {
 	// first, whose Stdin then reports io.EOF and whose writers fail. Print may
 	// be used while a console is open.
 	OpenConsole(opts ConsoleOptions) Console
-	// RequestFile requests a file from the client.
-	// The file is identified by its name and is made available to the module via the returned io.Reader.
-	RequestFile(name string) (io.Reader, error)
-	// SendFile sends a file to the client.
-	SendFile(name string, r io.Reader) error
+	// RequestFile requests a file from the client. The file is identified by its
+	// name and is made available to the module via the returned io.Reader.
+	//
+	// ctx bounds the transfer: cancelling it aborts the transfer and fails the
+	// reader. Pass Run's context, or a deadline derived from it. The session
+	// imposes no limit of its own.
+	RequestFile(ctx context.Context, name string) (io.Reader, error)
+	// SendFile sends a file to the client. size is the total file size in bytes,
+	// which the agent announces to the client.
+	//
+	// It returns as soon as the transfer is registered; the bytes are streamed
+	// afterwards, so r must stay readable beyond this call. If r implements
+	// io.Closer the session takes ownership and closes it when the transfer
+	// completes, but only on a nil return. On error the caller still owns r and
+	// must close it.
+	//
+	// ctx bounds the transfer, and still does after SendFile returns: cancelling
+	// it aborts the in-flight transfer and closes r.
+	SendFile(ctx context.Context, name string, size int64, r io.Reader) error
 }
 
 // ConsoleMode is how a module uses its console. Only the module knows, and the
