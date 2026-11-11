@@ -121,8 +121,6 @@ jobs:
       fail-fast: false
       matrix:
         configfile: ${{ fromJson(needs.get-matrix.outputs.matrix) }}
-        include:
-          - configfile: './contrib/dutagent-cfg-example.yaml'
     steps:
       - name: Checkout
         uses: actions/checkout@v7

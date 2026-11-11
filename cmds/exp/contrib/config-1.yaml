@@ -3,8 +3,10 @@ devices:
   device1:
     desc: Device 1
     cmds:
-      status:
-        desc: Report status
+      power:
+        desc: Show or switch the power of the simulated demo board
         uses:
-          - module: dummy-status
+          - module: demo-switch
             passthrough: true
+            with:
+              line: power

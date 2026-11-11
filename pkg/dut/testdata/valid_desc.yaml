@@ -4,4 +4,4 @@ device1:
     flash:
       desc: "Flash the firmware"
       uses:
-        - module: dummy-status
+        - module: wrap-print

@@ -81,9 +81,9 @@ the full version):
   in chunks, with no raw mode anywhere. Users who pipe input into a raw console have to send CR themselves if the far
   end needs it.
 
-The [project's dummy modules](../pkg/module/dummy) contain the smallest example in both modes, the `dummy-console`
-module with a raw, a hex and a line demo. The serial module's `-i` mode is the real bridge of a terminal line to a
-raw console.
+The [project's demo modules](../pkg/module/demo) contain the smallest example of each mode, the `wrap-prompt` module
+for a line console and the `wrap-raw` module for a raw one, and a bridge to a simulated board's serial console, the
+`demo-console` module. The serial module's `-i` mode is the real bridge of a terminal line to a raw console.
 
 ## Registration
 
@@ -111,7 +111,7 @@ checking and should be preferred over the constructor for most setup code.
 With this in place, the _dutagent_ can use modules by using anonymous imports, e.g.:
 
 ```go
-_ "github.com/BlindspotSoftware/dutctl/pkg/module/dummy"
+_ "github.com/BlindspotSoftware/dutctl/pkg/module/demo"
 ```
 
 ## Configuration
@@ -149,4 +149,5 @@ devices:
 > The `with` map in the configuration file is generic (string → any type), so it is important that the user knows what
 > values are expected.
 
-The [project's dummy modules](../pkg/module/dummy/dummy_status.go) show all the details of a complete implementation.
+The [project's demo modules](../pkg/module/demo) show all the details of a complete implementation, the
+[switch module](../pkg/module/demo/switch.go) with options that `Init` checks, for instance.

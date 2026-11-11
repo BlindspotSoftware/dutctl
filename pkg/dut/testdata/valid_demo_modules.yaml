@@ -1,0 +1,10 @@
+device1:
+  desc: "Device 1"
+  cmds:
+    all:
+      desc: "Several demo modules"
+      uses:
+        - module: wrap-print
+          passthrough: true
+        - module: demo-console
+        - module: demo-flash

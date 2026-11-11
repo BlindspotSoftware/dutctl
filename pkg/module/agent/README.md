@@ -22,4 +22,4 @@ cmds:
           - module: agent-status
             passthrough: true
 ```
-See [here](../../../contrib/dutagent-cfg-example.yaml) for a complete dutagent configuration example.
+See [here](../demo/demo-example-cfg.yml) for a complete dutagent configuration example.

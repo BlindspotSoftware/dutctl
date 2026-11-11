@@ -4,6 +4,6 @@ device1:
     status:
       desc: "Explicit passthrough with helper"
       uses:
-        - module: dummy-console
+        - module: demo-console
           passthrough: true
-        - module: dummy-status
+        - module: wrap-print
