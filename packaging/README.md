@@ -28,3 +28,7 @@ The systemd service needs a non-root user to run, with correct privileges (for e
 
 ## `packaging/dutagent.tmpfiles`
 Just like with `sysusers` case, we use `systemd-tmpfiles` tool to create directories needed by `dutagent`, with correct ownership and permissions. This is done automatically by `systemd` on installation of the distribution package.
+
+
+## `packaging/dutagent-usb-ports.rules`
+A udev rule that lets the `plugdev` group, which `dutagent` belongs to, write the sysfs `disable` file of each USB hub port. `uhubctl` then switches port power through sysfs, and the kernel does not power a port again early. The `recover` option of the flash module relies on this to cut USB power for the full time; through libusb alone the port comes back after about 3 s, which is too short to reset a hung DediProg. Together with `ReadWritePaths=-/sys/devices` in `dutagent.service`, which lifts the read-only `/sys` of `ProtectKernelTunables` for these files.

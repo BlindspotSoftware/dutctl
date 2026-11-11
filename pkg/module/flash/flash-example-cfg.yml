@@ -12,3 +12,18 @@ devices:
             with:
               tool: /usr/sbin/flashprog
               programmer: dediprog
+      flash-bmc:
+        desc: |
+          Write an OpenBMC image to the BMC flash. A rewrite of the same image
+          writes only u-boot-env and rwfs, and a hung DediProg is power-cycled.
+        uses:
+          - module: flash
+            passthrough: true
+            with:
+              tool: flashprog
+              programmer: dediprog:spispeed=24M
+              skipUnchanged:
+                preset: openbmc-static
+              recover:
+                hubs: ["1-1", "2"]
+                device: "0483:dada"

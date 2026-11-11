@@ -71,12 +71,27 @@ type Flash struct {
 	// For flashrom/flashprog: passed via -p flag (e.g., "dediprog", "ch341a_spi").
 	// For dpcmd: optional, used with --device flag to select specific USB device number.
 	Programmer string `yaml:"programmer"`
+	// SkipUnchanged makes a write skip the regions the chip already holds from the
+	// last verified full write of the same image. Only flashrom and flashprog.
+	SkipUnchanged *SkipUnchanged `yaml:"skipUnchanged"`
+	// Recover power-cycles the programmer's USB hubs when it does not respond or
+	// a write fails, and then writes the whole chip again. Only flashrom and
+	// flashprog.
+	Recover *Recover `yaml:"recover"`
 
 	op              op
 	localImagePath  string
 	clientImagePath string
+	imageSum        string
+	imageSize       int64
 	supportedTools  []string // supportedTools is a list of base names of supported flash tools
 }
+
+// Files next to the local image that hold flashrom/flashprog layouts.
+const (
+	layoutPath = "./layout"
+	headsPath  = "./layout-heads"
+)
 
 // Ensure implementing the Module interface.
 var _ module.Module = &Flash{}
@@ -136,6 +151,33 @@ func (f *Flash) Init(ctx context.Context) error {
 		return fmt.Errorf("programmer must be configured for %q", base)
 	}
 
+	return f.initOptions(base)
+}
+
+// initOptions validates skipUnchanged and recover.
+func (f *Flash) initOptions(base string) error {
+	if (f.SkipUnchanged != nil || f.Recover != nil) && base == dpcmdTool {
+		return fmt.Errorf("skipUnchanged and recover need flashrom or flashprog, not %q", base)
+	}
+
+	if f.SkipUnchanged != nil {
+		err := f.SkipUnchanged.validate()
+		if err != nil {
+			return err
+		}
+
+		if f.SkipUnchanged.State == "" {
+			f.SkipUnchanged.State = defaultState(f.Programmer)
+		}
+	}
+
+	if f.Recover != nil {
+		err := f.Recover.validate()
+		if err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -145,19 +187,13 @@ func (f *Flash) isSupported(tool string) bool {
 	return slices.Contains(f.supportedTools, base)
 }
 
-// Deinit removes the temporary flash image file stored locally on the dutagent.
+// Deinit removes the temporary flash image and layout files stored locally on the dutagent.
 func (f *Flash) Deinit(_ context.Context) error {
-	return os.RemoveAll(f.localImagePath)
+	return errors.Join(os.RemoveAll(f.localImagePath), os.RemoveAll(layoutPath), os.RemoveAll(headsPath))
 }
 
-// Run performs a flash operation. args must be "read" or "write" followed by an image path.
-// For a write, the image is uploaded from the client before flashing; for a read, the image
-// is downloaded to the client afterward.
-//
-//nolint:cyclop
-func (f *Flash) Run(ctx context.Context, sesh module.Session, args ...string) error {
-	l := log.FromContext(ctx)
-
+// parseArgs sets the operation and the image paths from "read|write <image>".
+func (f *Flash) parseArgs(args []string) error {
 	if len(args) < 1 {
 		return errors.New("missing argument: flash operation")
 	}
@@ -179,11 +215,31 @@ func (f *Flash) Run(ctx context.Context, sesh module.Session, args ...string) er
 	f.clientImagePath = args[1]
 	f.localImagePath = localImagePath
 
+	return nil
+}
+
+// Run performs a flash operation. args must be "read" or "write" followed by an image path.
+// For a write, the image is uploaded from the client before flashing; for a read, the image
+// is downloaded to the client afterward.
+//
+//nolint:cyclop
+func (f *Flash) Run(ctx context.Context, sesh module.Session, args ...string) error {
+	l := log.FromContext(ctx)
+
+	err := f.parseArgs(args)
+	if err != nil {
+		return err
+	}
+
 	if f.op == opWrite {
 		err := uploadImage(sesh, f.clientImagePath, f.localImagePath)
 		if err != nil {
 			return err
 		}
+	}
+
+	if f.op == opWrite && (f.SkipUnchanged != nil || f.Recover != nil) {
+		return f.runWithOptions(ctx, sesh)
 	}
 
 	action := "reading"
@@ -198,7 +254,7 @@ func (f *Flash) Run(ctx context.Context, sesh module.Session, args ...string) er
 	l.Debug(fmt.Sprintf("executing %s", cmdStr))
 	sesh.Printf("Executing: %s\n", cmdStr)
 
-	err := execute(ctx, sesh, f.Tool, f.cmdline()...)
+	err = execute(ctx, sesh, f.Tool, f.cmdline()...)
 	if err != nil {
 		return fmt.Errorf("flash operation failed: %w", err)
 	}
@@ -213,6 +269,20 @@ func (f *Flash) Run(ctx context.Context, sesh module.Session, args ...string) er
 			return err
 		}
 	}
+
+	return nil
+}
+
+// runWithOptions writes the uploaded image with skipUnchanged and recover.
+func (f *Flash) runWithOptions(ctx context.Context, sesh module.Session) error {
+	log.FromContext(ctx).Info(fmt.Sprintf("writing flash with %s", f.Tool))
+
+	err := f.writeWithOptions(ctx, sesh)
+	if err != nil {
+		return fmt.Errorf("flash operation failed: %w", err)
+	}
+
+	sesh.Println("Flash operation completed successfully")
 
 	return nil
 }
