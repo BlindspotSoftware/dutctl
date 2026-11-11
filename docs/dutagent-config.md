@@ -61,4 +61,6 @@ Command arguments define named parameters that can be passed at runtime and dist
 
 ### Example config file
 
-See [dutagent-cfg-example.yaml](../contrib/dutagent-cfg-example.yaml)
+See [demo-example-cfg.yml](../pkg/module/demo/demo-example-cfg.yml), the configuration of the demo modules: commands of
+one module each on the device `agent`, and commands of several modules, with fixed, declared and passed through
+arguments and module options, on the simulated `demo-board`.

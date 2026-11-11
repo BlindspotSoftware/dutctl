@@ -39,7 +39,7 @@ jobs:
       fail-fast: false
       matrix:
         configfile:
-          - ./contrib/dutagent-cfg-example.yaml
+          - ./pkg/module/demo/demo-example-cfg.yml
           #- ./test/test-dutagent-cfg.yaml
     steps:
       # Base repository only — the fork's tree is deliberately not checked out.

@@ -4,8 +4,8 @@ device1:
     status:
       desc: "Report status"
       uses:
-        - module: dummy-status
+        - module: wrap-print
     repeat:
       desc: "Repeat input"
       uses:
-        - module: dummy-console
+        - module: demo-console

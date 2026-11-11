@@ -4,11 +4,11 @@ device1:
     status:
       desc: "Status"
       uses:
-        - module: dummy-status
+        - module: wrap-print
 device2:
   desc: "Device 2"
   cmds:
     repeat:
       desc: "Repeat"
       uses:
-        - module: dummy-console
+        - module: demo-console

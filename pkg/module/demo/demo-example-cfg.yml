@@ -1,0 +1,131 @@
+version: 1.0.0-beta.1
+devices:
+  agent:
+    desc: >-
+      The agent itself as a device, with nothing attached to it. Each command
+      runs one wrap module, which wraps one feature of the session between a
+      module and you and does nothing else: printing, a line console, a raw
+      console, a file in either direction, a failure. Try them to see what a
+      module can do; read their code to see how.
+    cmds:
+      echo:
+        desc: Print the words you pass, as the module received them
+        uses:
+          - module: wrap-print
+            passthrough: true
+      hello:
+        desc: Greet someone by name
+        args:
+          - name: who
+            desc: The name to greet
+        uses:
+          - module: wrap-print
+            args:
+              - Hello, ${who}!
+      prompt:
+        desc: Answer a question in a line console, where your terminal edits the line and Enter sends it
+        uses:
+          - module: wrap-prompt
+      keys:
+        desc: Show the bytes your keys send in a raw console, where every key arrives at once; a lone Ctrl-D ends it
+        uses:
+          - module: wrap-raw
+      upload:
+        desc: Send a file from your machine to the module, which tells its size and checksum
+        uses:
+          - module: wrap-upload
+            passthrough: true
+      download:
+        desc: Receive a file the module makes, saved on your machine under the name you pass
+        uses:
+          - module: wrap-download
+            passthrough: true
+      fail:
+        desc: Run a module that returns an error
+        uses:
+          - module: wrap-fault
+            args:
+              - error
+              - the device did not answer
+      crash:
+        desc: Run a module that panics; the agent recovers and goes on serving
+        uses:
+          - module: wrap-fault
+            args:
+              - panic
+  demo-board:
+    desc: >-
+      A simulated board with a power line, a flash with a write-protect line,
+      and a serial console. Each demo module drives one kind of part and knows
+      nothing of what the board is for: the switch module switches whichever
+      line it is wired to. The commands give the modules their meaning on this
+      board, so the switch becomes power, protect and unprotect, and a step of
+      reboot and update.
+    cmds:
+      power:
+        desc: Switch the board's power (on, off, toggle, cycle) or show it (status)
+        uses:
+          - module: demo-switch
+            passthrough: true
+            with:
+              line: power
+      protect:
+        desc: Write-protect the flash, so that no image can be written to it
+        uses:
+          - module: demo-switch
+            args:
+              - "on"
+            with:
+              line: write-protect
+      unprotect:
+        desc: Lift the write protection of the flash
+        uses:
+          - module: demo-switch
+            args:
+              - "off"
+            with:
+              line: write-protect
+      console:
+        desc: Attach to the board's serial console; exit or Ctrl-A x ends it
+        uses:
+          - module: demo-console
+      reboot:
+        desc: Power-cycle the board and watch it boot, until it prints its welcome line
+        uses:
+          - module: demo-switch
+            args:
+              - cycle
+            with:
+              line: power
+              cycle: 500ms
+          - module: demo-console
+            with:
+              expect: Welcome to the demo board.
+      update:
+        desc: Write a firmware image to the flash and boot it
+        args:
+          - name: image
+            desc: The firmware image on your machine
+        uses:
+          - module: wrap-print
+            args:
+              - Updating the board with ${image}.
+          - module: demo-switch
+            args:
+              - "off"
+            with:
+              line: power
+          - module: demo-flash
+            args:
+              - write
+              - ${image}
+          - module: demo-switch
+            args:
+              - "on"
+            with:
+              line: power
+      flash:
+        desc: Write an image to the flash (write <image>) or read the flash into a file (read <file>); a write needs the board off and the flash unprotected
+        uses:
+          - module: demo-flash
+            passthrough: true

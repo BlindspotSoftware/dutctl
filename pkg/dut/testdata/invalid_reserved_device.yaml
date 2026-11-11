@@ -4,4 +4,4 @@ version:
     status:
       desc: "Report status"
       uses:
-        - module: dummy-status
+        - module: wrap-print

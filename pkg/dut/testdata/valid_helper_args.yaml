@@ -4,8 +4,8 @@ device1:
     status:
       desc: "Passthrough module plus helper with args"
       uses:
-        - module: dummy-console
+        - module: demo-console
           passthrough: true
-        - module: dummy-status
+        - module: wrap-print
           args:
             - "verbose"

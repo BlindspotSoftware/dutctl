@@ -55,12 +55,6 @@
                 "README.md",
                 {
                     "type": "yaml",
-                    "path": "contrib/*.yaml",
-                    "glob": true,
-                    "jsonpath": "$.version"
-                },
-                {
-                    "type": "yaml",
                     "path": "cmds/exp/contrib/*.yaml",
                     "glob": true,
                     "jsonpath": "$.version"

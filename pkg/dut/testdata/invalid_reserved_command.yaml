@@ -4,4 +4,4 @@ device1:
     lock:
       desc: "Report status"
       uses:
-        - module: dummy-status
+        - module: wrap-print

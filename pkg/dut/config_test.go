@@ -15,8 +15,8 @@ import (
 
 	"github.com/BlindspotSoftware/dutctl/internal/keyword"
 
-	// Register dummy modules so module.New() succeeds in tests.
-	_ "github.com/BlindspotSoftware/dutctl/pkg/module/dummy"
+	// Register the demo modules so module.New() succeeds in tests.
+	_ "github.com/BlindspotSoftware/dutctl/pkg/module/demo"
 )
 
 // NOTE: Tests that unmarshal through the full dutagent config struct
@@ -339,8 +339,8 @@ func TestValidConfig(t *testing.T) {
 			},
 		},
 		{
-			name:     "all_dummy_modules",
-			file:     "valid_all_dummies.yaml",
+			name:     "several_demo_modules",
+			file:     "valid_demo_modules.yaml",
 			wantDevs: 1,
 			checkFunc: func(t *testing.T, devs Devlist) {
 				t.Helper()

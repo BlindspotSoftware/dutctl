@@ -13,7 +13,7 @@ package main
 
 import (
 	_ "github.com/BlindspotSoftware/dutctl/pkg/module/agent"
-	_ "github.com/BlindspotSoftware/dutctl/pkg/module/dummy"
+	_ "github.com/BlindspotSoftware/dutctl/pkg/module/demo"
 	_ "github.com/BlindspotSoftware/dutctl/pkg/module/file"
 	_ "github.com/BlindspotSoftware/dutctl/pkg/module/flash"
 	_ "github.com/BlindspotSoftware/dutctl/pkg/module/flash-emulate"

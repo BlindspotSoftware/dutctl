@@ -4,7 +4,7 @@ device1:
     status:
       desc: "valid command"
       uses:
-        - module: dummy-status
+        - module: wrap-print
 device2:
   desc: "Device 2"
   cmds:

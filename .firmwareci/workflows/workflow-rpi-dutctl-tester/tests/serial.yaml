@@ -141,7 +141,7 @@ stages:
         parameters:
           command: "( printf 'x'; sleep 4 ) | [[input.DUTCTL]] -s [[attributes.DutagentEndpoint]] [[attributes.DeviceName]] boot 2>&1"
           expect:
-            - regex: "(?s)Hello from dummy status module.*Arg 0: power-cycle.*Connected to /home/oscar/ttyS2.*U-Boot.*Connection closed"
+            - regex: "(?s)power-cycle.*Connected to /home/oscar/ttyS2.*U-Boot.*Connection closed"
         options:
           timeout: 15s
 
@@ -157,9 +157,9 @@ stages:
         transport:
           proto: local
         parameters:
-          command: "D='[[input.DUTCTL]] -s [[attributes.DutagentEndpoint]] -u fwci-side-by-side@ci'; ( sleep 6 ) | $D [[attributes.DeviceName]] console > /tmp/side-by-side-console.log 2>&1 & for i in $(seq 1 50); do grep -q 'Connected to' /tmp/side-by-side-console.log && break; sleep 0.2; done; $D [[attributes.DeviceName]] dummy-status beside-the-console 2>&1; $D [[attributes.DeviceName]] console < /dev/null 2>&1; wait; cat /tmp/side-by-side-console.log"
+          command: "D='[[input.DUTCTL]] -s [[attributes.DutagentEndpoint]] -u fwci-side-by-side@ci'; ( sleep 6 ) | $D [[attributes.DeviceName]] console > /tmp/side-by-side-console.log 2>&1 & for i in $(seq 1 50); do grep -q 'Connected to' /tmp/side-by-side-console.log && break; sleep 0.2; done; $D [[attributes.DeviceName]] echo beside-the-console 2>&1; $D [[attributes.DeviceName]] console < /dev/null 2>&1; wait; cat /tmp/side-by-side-console.log"
           expect:
-            - regex: "(?s)Hello from dummy status module.*Arg 0: beside-the-console"
+            - regex: "beside-the-console"
             - regex: "already running .console. for .fwci-side-by-side@ci.; a command does not run twice at once"
             - regex: "(?s)Connected to /home/oscar/ttyS2.*Connection closed"
         options:

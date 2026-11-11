@@ -78,7 +78,7 @@ The `workflows` directory is where the tests live.
 ## Adding a new test
 
 Create a new `.yaml` file in `.firmwareci/workflows/workflow-rpi-dutctl-tester/tests/`.
-Copying an existing test is the quickest start; `dummy.yaml` is a simple one.
+Copying an existing test is the quickest start; `gpio.yaml` is a simple one.
 
 A test needs only `name`, `description` and `stages` — the setup and tear-down
 come from the DUT. Refer to the device through `[[attributes.*]]` rather than

@@ -52,10 +52,11 @@ go install github.com/BlindspotSoftware/dutctl/cmds/dutagent@v1.0.0-beta.1
 
 1. **Start the DUT Agent**
    ```bash
-   dutagent -a localhost:2024 -c ./contrib/dutagent-cfg-example.yaml
+   dutagent -a localhost:2024 -c ./pkg/module/demo/demo-example-cfg.yml
    ```
    Run the DUT Agent locally with an example configuration in a separate terminal session.
-   This test configuration does not require a connected DUT.
+   This configuration sets up two devices that the [demo modules](pkg/module/demo) provide, so it does not require a
+   connected DUT: `agent`, whose commands each show one thing a module can do, and `demo-board`, a simulated board.
 
 2. **Play around with the DUT Client**
    ```bash
