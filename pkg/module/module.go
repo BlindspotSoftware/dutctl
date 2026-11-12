@@ -123,10 +123,11 @@ type Session interface {
 	// user's input on Stdin, and Stdout and Stderr, which reach the user's
 	// standard output and standard error. It tells the client the console's
 	// mode, so the client can set up the user's terminal, and the client
-	// forwards the user's input from then on; until a console is open, the
-	// user's input is discarded, never queued for a later console. Like
-	// Print, OpenConsole returns once the client was told, so it waits for a
-	// stalled client.
+	// forwards the user's input once a console is open. Input the user typed
+	// or piped before that reaches the first console that opens; input sent to
+	// a console that has closed never reaches a later one. Like Print,
+	// OpenConsole returns once the client was told, so it waits for a stalled
+	// client.
 	//
 	// Two things happen to a console that the module does not control, and
 	// both are the normal course of a run, not a failure:
