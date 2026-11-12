@@ -23,7 +23,7 @@ its CI.
 dutctl is tested end to end on real hardware through FirmwareCI, for pull
 requests and for pushes to main.
 
-- The `fwci-test` workflow builds snapshot packages with GoReleaser and nFPM.
+- The `Hardware-Integration` workflow builds snapshot packages with GoReleaser and nFPM.
   GoReleaser serves only as a build tool; releases still come from
   release-please ([ADR-0008](0008-release-from-conventional-commits-with-release-please.md)).
 - FirmwareCI receives the arm64 Debian package, the amd64 dutctl binary, an
@@ -43,7 +43,7 @@ requests and for pushes to main.
   does not depend on a service manager.
 - CI also runs the built dutagent with `-check-config` on the example
   configurations and the test configuration in the repository.
-- Pull requests from forks get no repository secrets, so `fwci-contrib` submits
+- Pull requests from forks get no repository secrets, so `Hardware-Integration-Fork` submits
   their build from the base repository. It never checks out or runs the
   contributor's code, and it treats the downloaded artifact as untrusted. A
   maintainer must approve the `firmwareci-contrib` environment first, because
@@ -64,8 +64,8 @@ requests and for pushes to main.
   waits.
 - Bad, because the hardware tests of a fork's pull request wait for a
   maintainer, who should read the diff before approving.
-- Bad, because `fwci-contrib` repeats the submission step of `fwci-test` and
-  has to be kept in line with it by hand.
+- Bad, because `Hardware-Integration-Fork` repeats the submission step of
+  `Hardware-Integration` and has to be kept in line with it by hand.
 - Neutral, because GoReleaser is a second build path next to the plain
   `go build` of the release workflow.
 
@@ -76,16 +76,16 @@ requests and for pushes to main.
 - [.firmwareci/README.md](../../.firmwareci/README.md): the layout of the tests
   and how to add one.
 - [packaging/README.md](../../packaging/README.md): the example packaging.
-- [.github/workflows/fwci-test.yml](../../.github/workflows/fwci-test.yml)
-  builds the packages and runs the hardware test and the configuration check.
-- [.github/workflows/fwci-contrib.yml](../../.github/workflows/fwci-contrib.yml)
-  runs the hardware test for pull requests from forks.
+- [.github/workflows/hardware-integration.yml](../../.github/workflows/hardware-integration.yml)
+  builds the packages and submits the hardware tests.
+- [.github/workflows/hardware-integration-fork.yml](../../.github/workflows/hardware-integration-fork.yml)
+  submits the hardware tests for pull requests from forks.
 - Later changes:
   - 2026-07: CI started to validate the configurations with the built
     dutagent. The example systemd unit moved from `.firmwareci/` to
     `packaging/`.
   - 2026-08: pull requests from forks started to reach FirmwareCI through
-    `fwci-contrib`, behind the reviewer gate.
+    `Hardware-Integration-Fork`, behind the reviewer gate.
   - 2026-09: one combined test of the dummy modules gave way to separate test
     files for nine modules, several of them against hardware wired to the
     tester, so a failure names the module that broke. The shared setup moved
@@ -93,5 +93,11 @@ requests and for pushes to main.
     and post stages.
   - 2026-09: `dutagent -check-config` started to exit non-zero for an invalid
     configuration; until then the validation caught only crashes.
+  - 2026-11: the tests that need no hardware moved to the integration tests on
+    the CI runner, and the configuration check into dutagent's unit tests. The
+    workflows `fwci-test` and `fwci-contrib` became `Hardware-Integration` and
+    `Hardware-Integration-Fork`, the FirmwareCI workflow `test-dutctl` became
+    `Hardware-Integration`, and each test is named after the hardware feature
+    it tests.
 
 Recorded retroactively in October 2026.
