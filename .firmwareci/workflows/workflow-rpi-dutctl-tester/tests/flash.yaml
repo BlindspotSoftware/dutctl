@@ -1,5 +1,5 @@
 ---
-name: flash module
+name: SPI-Flash
 description: Flash the DUT with dpcmd through the flash module.
 
 stages:

@@ -1,6 +1,9 @@
 ---
-name: fwci-test
-# Gorelease is used only as build-tool, not handling actual releases.
+name: Hardware-Integration
+# The tests on real hardware in FirmwareCI. FirmwareCI reports each test as a
+# check of its own, named after this workflow and the test, such as
+# Hardware-Integration - GPIO-Power. GoReleaser is used only as a build tool
+# here, not for releases.
 
 on:
   pull_request: {}
@@ -10,9 +13,6 @@ on:
     tags: ["v*"]
 
 env:
-  APPLY_FIXES: none
-  APPLY_FIXES_EVENT: pull_request
-  APPLY_FIXES_MODE: commit
   DISABLE_TELEMETRY: 1
 concurrency:
   group: ${{ github.ref }}-${{ github.workflow }}
@@ -24,6 +24,7 @@ permissions:
 jobs:
   # Job to build binaries and linux packages with goreleaser, without making release
   build-with-goreleaser:
+    name: Build-Packages
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -43,11 +44,13 @@ jobs:
           path: bin/
           retention-days: 14 days
 
-  # Run a firmware-ci test suite
+  # Submit the tests to FirmwareCI.
   client-agent-integration:
+    name: Submit
     # Pull requests from forks run without repository secrets, so FWCI_TOKEN
-    # would be empty here. The fwci-contrib workflow picks those up instead, from
-    # the base repository and behind a required-reviewer environment.
+    # would be empty here. The Hardware-Integration-Fork workflow picks those up
+    # instead, from the base repository and behind a required-reviewer
+    # environment.
     if: >-
       github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository
@@ -85,7 +88,7 @@ jobs:
         uses: docker://firmwareci/action:v6.1
         with:
           TOKEN: "${{ secrets.FWCI_TOKEN }}"
-          WORKFLOW_NAME: test-dutctl
+          WORKFLOW_NAME: Hardware-Integration
           COMMIT_HASH: ${{ github.event.pull_request.head.sha || github.sha }}
           BINARIES: DUTCTL=${{ steps.filenames.outputs.dutctl_path }};REMOTE_PKG=${{ steps.filenames.outputs.dutctl_pkg_path }};CONFIG=./test/test-dutagent-cfg.yaml;TASKFILE=./.firmwareci/Taskfile.yml;DUMMY_SPI_FLASH_ROM=./.firmwareci/dummy_binary.rom
           GITHUB_INSTALLATION_ID: 45795153

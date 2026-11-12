@@ -1,4 +1,4 @@
 ---
-name: test-dutctl
+name: Hardware-Integration
 description: "This is workflow configuration for new dutctl testing"
 runs-on: fwci-dutctl-tester

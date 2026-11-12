@@ -35,7 +35,10 @@ hardening and device list are not tested here yet.
 
 ### One test per hardware feature, shared setup on the DUT
 Each hardware feature gets its own test file, so a failure names the feature
-that broke instead of one combined run.
+that broke instead of one combined run. FirmwareCI reports each test as a
+check of the pull request named `<workflow> - <test>`; the workflow is named
+`Hardware-Integration` and a test's name says which feature it tests, so a
+check reads `Hardware-Integration - GPIO-Power`.
 
 The setup and tear-down around every test is the same and rather involved:
 

@@ -1,5 +1,5 @@
 ---
-name: GPIO power control
+name: GPIO-Power
 description: Drive and read GPIO pins to power-cycle the DUT.
 
 defaults:
