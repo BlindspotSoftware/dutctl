@@ -114,7 +114,7 @@ tasks:
         sh: ls ./bin/dutctl_linux_amd64_*/dutctl
       DUTCTL_PKG_PATH:
         sh: ls ./bin/dutctl_*_arm64.deb
-      CONFIG: ./pkg/module/demo/demo-example-cfg.yml
+      CONFIG: ./test/test-dutagent-cfg.yaml
     cmds:
       - fwci job --workflow="Hardware-Integration" "DUTCTL={{.DUTCTL_PATH}}" "REMOTE_PKG={{.DUTCTL_PKG_PATH}}" "CONFIG={{.CONFIG}}" "DUMMY_SPI_FLASH_ROM=.firmwareci/dummy_binary.rom" "TASKFILE=.firmwareci/Taskfile.yml"
     #sources:
@@ -155,8 +155,7 @@ tasks:
         sh: ls ./bin/dutctl_linux_amd64_*/dutctl
       REMOTE_PKG:
         sh: ls ./bin/dutctl_*_arm64.deb
-      #CONFIG: ./test/test-dutagent-cfg.yaml
-      CONFIG: ./pkg/module/demo/demo-example-cfg.yml
+      CONFIG: ./test/test-dutagent-cfg.yaml
       DUMMY_SPI_FLASH_ROM: ./.firmwareci/dummy_binary.rom
       TASKFILE: .firmwareci/Taskfile.yml
       RPI: fwci-dutctl-tester.firmwareci.9e.network

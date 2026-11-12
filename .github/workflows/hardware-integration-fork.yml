@@ -36,15 +36,10 @@ jobs:
     # letting a contributor's firmware run on real hardware, so the reviewer
     # should have read the diff first.
     environment: firmwareci-contrib
-    strategy:
-      fail-fast: false
-      matrix:
-        configfile:
-          - ./pkg/module/demo/demo-example-cfg.yml
-          #- ./test/test-dutagent-cfg.yaml
     steps:
       # Base repository only — the fork's tree is deliberately not checked out.
-      # This provides the config file passed as CONFIG below.
+      # This provides the agent configuration, the Taskfile and the flash image
+      # passed below, as the Hardware-Integration workflow passes them.
       - name: Checkout
         uses: actions/checkout@v7
 
@@ -106,6 +101,15 @@ jobs:
           echo "dutctl_path:     ${DUTCTL_PATH}"
           echo "dutctl_pkg_path: ${DUTCTL_PKG_PATH}"
 
+      - name: Install task
+        uses: arduino/setup-task@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create dummy SPI flash image
+        working-directory: .firmwareci
+        run: task misc:dummy-binary-for-flashing
+
       - name: Upload to FirmwareCI
         uses: docker://firmwareci/action:v6.0
         with:
@@ -118,5 +122,5 @@ jobs:
           # The fork's branch does not exist in this repository, so the
           # FirmwareCI config has to be resolved against the base branch.
           BRANCH: main
-          BINARIES: DUTCTL=${{ steps.filenames.outputs.dutctl_path }};REMOTE_PKG=${{ steps.filenames.outputs.dutctl_pkg_path }};CONFIG=${{ matrix.configfile }}
+          BINARIES: DUTCTL=${{ steps.filenames.outputs.dutctl_path }};REMOTE_PKG=${{ steps.filenames.outputs.dutctl_pkg_path }};CONFIG=./test/test-dutagent-cfg.yaml;TASKFILE=./.firmwareci/Taskfile.yml;DUMMY_SPI_FLASH_ROM=./.firmwareci/dummy_binary.rom
           GITHUB_INSTALLATION_ID: 45795153
