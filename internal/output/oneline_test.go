@@ -42,6 +42,37 @@ func TestDeviceEntryString(t *testing.T) {
 	}
 }
 
+func TestOneLineFormatterKeepsAContentOnOneLine(t *testing.T) {
+	tests := []struct {
+		name string
+		data string
+		want string
+	}{
+		{"line ending dropped", "The board is off.\n", `"The board is off."`},
+		{"CRLF line ending dropped", "U-Boot\r\n", "U-Boot"},
+		{"inner lines escaped", "ARGUMENTS:\n\ton\n", `ARGUMENTS:\n` + "\t" + `on`},
+		{"carriage return escaped", "50%\r100%", `50%\r100%`},
+		{"only one line ending dropped", "end\n\n", `end\n`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var stdout bytes.Buffer
+
+			newOneLineFormatter(Config{Stdout: &stdout}).Write(tt.data)
+
+			line, found := strings.CutSuffix(stdout.String(), "\n")
+			if !found || strings.Contains(line, "\n") {
+				t.Fatalf("output %q is not one line", stdout.String())
+			}
+
+			if data := line[strings.LastIndex(line, ",INFO,")+len(",INFO,"):]; data != tt.want {
+				t.Errorf("data column %s, want %s", data, tt.want)
+			}
+		})
+	}
+}
+
 func TestOneLineFormatter(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 

@@ -27,9 +27,11 @@ import (
 // sit before the data column, so data's position is not fixed across lines.
 //
 // Fields are separated by a comma; any field containing a comma or a space is
-// wrapped in double quotes with embedded quotes doubled. The data column packs
-// structured payloads: a device list is a '|'-joined list of device tokens
-// (see deviceEntryString) and a file transfer is "direction bytes path".
+// wrapped in double quotes with embedded quotes doubled. Each Content stays on
+// one line, however many lines its data has (see formatQuotedString). The data
+// column packs structured payloads: a device list is a '|'-joined list of
+// device tokens (see deviceEntryString) and a file transfer is
+// "direction bytes path".
 type OneLineFormatter struct {
 	stdout    io.Writer
 	stderr    io.Writer
@@ -109,8 +111,16 @@ func (f *OneLineFormatter) IsBuffering() bool {
 	return f.buffering
 }
 
-// formatQuotedString formats a string with proper quoting if it contains special characters.
+// formatQuotedString formats a string with proper quoting if it contains special
+// characters. A record stays on one line: the line ending at the value's end is
+// dropped, and a line break or carriage return inside it is written as \n or \r.
 func formatQuotedString(value, separator string) string {
+	if v, ok := strings.CutSuffix(value, "\n"); ok {
+		value = strings.TrimSuffix(v, "\r")
+	}
+
+	value = strings.ReplaceAll(strings.ReplaceAll(value, "\r", `\r`), "\n", `\n`)
+
 	if strings.ContainsAny(value, separator+" ") {
 		return "\"" + strings.ReplaceAll(value, "\"", "\"\"") + "\""
 	}
