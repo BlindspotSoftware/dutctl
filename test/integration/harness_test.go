@@ -13,7 +13,11 @@
 // The tests skip unless DUTCTL_INTEGRATION=1, and with -short. The first test
 // builds both binaries, with the race detector when the tests run with it, and
 // every test starts an agent of its own on a free port. The serial tests also
-// need socat, and skip without it.
+// need socat, and skip without it. CI runs them for every commit.
+//
+// The name of every test starts with its area, TestRPC, TestSession,
+// TestConfig, TestModules or TestSerial, so that a failure says what broke and
+// -run '^TestSerial' runs one area.
 //
 // With DUTCTL_INTEGRATION_COVERDIR set to an absolute directory, the binaries
 // are built with coverage of all packages of the module and write their

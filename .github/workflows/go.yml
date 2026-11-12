@@ -1,6 +1,9 @@
-# This workflow builds and tests a golang project for every commit in a PR
-# 
-# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-go
+# Builds and tests every commit of a pull request, with the unit and the
+# integration tests, so that every commit in the history passes them and can be
+# reverted or bisected on its own, and lints the pull request's result. A pull
+# request shows a check per commit and architecture, such as
+# "Go / Unit · amd64 · 943a740 fix: ...", and one check over them,
+# "Go / All-Checks", which is the required one.
 
 name: Go
 
@@ -12,55 +15,166 @@ on:
 
 permissions:
   contents: read
-  # Optional: allow read access to pull request. Use with `only-new-issues` option.
-  # pull-requests: read
 
 jobs:
-  # This job identifies all commits that need to be tested
-  # For push events: only tests the latest commit
-  # For PR events: tests every commit in the PR
-  commit_list:
-    name: Get Commits to Test
+  # Lists the commits to test as {sha, title}, the title naming a commit's
+  # checks: on a push the pushed commit; on a pull request each of its commits,
+  # oldest first, and the merge result when it differs from the head.
+  list-commits:
+    name: List-Commits
     runs-on: ubuntu-latest
+    outputs:
+      commits: ${{ steps.list.outputs.commits }}
     steps:
-      # Checkout with full history to enable commit listing
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      # For push events: only test the latest commit (GITHUB_SHA)
-      - name: Get commit list (push)
-        id: get_commit_list_push
-        if: ${{ github.event_name == 'push' }}
+      - name: List the commits
+        id: list
+        env:
+          BASE: ${{ github.base_ref }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
-          # Create a single output variable with the latest commit
-          echo "id0=$GITHUB_SHA" > $GITHUB_OUTPUT
-          # Add commit URL to the workflow summary for visibility
-          echo "List of tested commits:" > $GITHUB_STEP_SUMMARY
-          echo "- https://github.com/${{ github.repository }}/commit/$GITHUB_SHA" >> $GITHUB_STEP_SUMMARY
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            git log --reverse --format='%H%x09%h %s' "origin/$BASE..$HEAD" > commits.tsv
+            if ! git diff --quiet "$HEAD" "$GITHUB_SHA"; then
+              printf '%s\tmerge into %s\n' "$GITHUB_SHA" "$BASE" >> commits.tsv
+            fi
+          else
+            git log -1 --format='%H%x09%h %s' "$GITHUB_SHA" > commits.tsv
+          fi
 
-      # For PR events: get all commits in the PR
-      - name: Get commit list (PR)
-        id: get_commit_list_pr
-        if: ${{ github.event_name == 'pull_request' }}
+          echo "commits=$(jq -Rsc 'split("\n")[:-1] | map(split("\t") | {sha: .[0], title: (.[1:] | join("\t"))})' commits.tsv)" >> "$GITHUB_OUTPUT"
+
+          echo "List of tested commits:" >> "$GITHUB_STEP_SUMMARY"
+          jq -Rr --arg url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/commit/" 'split("\t") | "- \($url)\(.[0]) \(.[1:] | join("\t"))"' commits.tsv >> "$GITHUB_STEP_SUMMARY"
+
+  unit:
+    name: Unit · ${{ matrix.arch }} · ${{ matrix.commit.title }}
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+    needs: list-commits
+    strategy:
+      # A failure of one commit or architecture does not stop the others.
+      fail-fast: false
+      matrix:
+        commit: ${{ fromJSON(needs.list-commits.outputs.commits) }}
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ matrix.commit.sha }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: 'go.mod'
+
+      - run: go version
+
+      # Also compiles the packages that have no tests.
+      - name: Build
+        run: go build -v ./...
+
+      - name: Unit tests
+        run: go test -race -v ./...
+
+  # dutctl against a dutagent on the runner, with the demo modules instead of
+  # hardware (see test/integration), apart from the unit tests so that it runs
+  # when they fail.
+  integration:
+    name: Integration · ${{ matrix.arch }} · ${{ matrix.commit.title }}
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+    needs: list-commits
+    strategy:
+      fail-fast: false
+      matrix:
+        commit: ${{ fromJSON(needs.list-commits.outputs.commits) }}
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ matrix.commit.sha }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Install socat for the serial line of the integration tests
+        run: sudo apt-get update && sudo apt-get install -y socat
+
+      # The log shows the tests' plain output, each test's lines named after
+      # it, as the tests run in parallel; the JSON events are kept for the
+      # summary. A commit from before the integration tests has none.
+      - name: Integration tests
+        shell: bash
+        env:
+          DUTCTL_INTEGRATION: "1"
         run: |
-          # Get all commits between base branch and PR head, in oldest to newest order
-          git rev-list --reverse refs/remotes/origin/${{ github.base_ref }}..${{ github.event.pull_request.head.sha }} | 
-            awk '{ print "id" NR "=" $1 }' > $GITHUB_OUTPUT
-          
-          # If the merge commit differs from the PR head, also test the merge commit
-          git diff --quiet ${{ github.event.pull_request.head.sha }} ${{ github.sha }} || 
-            echo "id0=$GITHUB_SHA" >> $GITHUB_OUTPUT
-          
-          # Create a summary with links to all commits
-          echo "List of tested commits:" > $GITHUB_STEP_SUMMARY
-          sed -n 's,^id[0-9]\+=\(.*\),- https://github.com/${{ github.repository }}/commit/\1,p' -- $GITHUB_OUTPUT >> $GITHUB_STEP_SUMMARY
+          if [ ! -d test/integration ]; then exit 0; fi
+          go test -race -count=1 -json ./test/integration/ | tee "$RUNNER_TEMP/integration.json" |
+            jq -j 'select(.Output) | if .Test != null and (.Output | startswith("    ")) then "    \(.Test): \(.Output | ltrimstr("    "))" else .Output end'
 
-    # Make the list of commits available to downstream jobs
-    outputs:
-      commits: ${{ toJSON(steps.*.outputs.*) }}
+      # A summary on the run's page for a failed run, and for the pull
+      # request's head or the pushed commit: the counts, each failed test with
+      # its dutctl commands and the start of its output, and a table of all.
+      - name: Summary
+        if: ${{ failure() || matrix.commit.sha == (github.event.pull_request.head.sha || github.sha) }}
+        shell: bash
+        env:
+          TITLE: ${{ matrix.arch }} · ${{ matrix.commit.title }}
+        run: |
+          if [ ! -s "$RUNNER_TEMP/integration.json" ]; then exit 0; fi
+          jq -r -s --arg title "$TITLE" '
+            def lines: rtrimstr("\n") | split("\n");
+            def commands: [lines[] | capture("\\$ (?<c>dutctl.*)$").c];
+            def block: if length == 0 then "" else "```\n" + join("\n") + "\n```\n" end;
+            (map(select(.Test == null and (.Action == "pass" or .Action == "fail"))) | last) as $pkg
+            | (reduce (.[] | select(.Test != null and .Output != null)) as $e ({}; .[$e.Test] += $e.Output)) as $out
+            | (map(select(.Test != null and (.Action == "pass" or .Action == "fail" or .Action == "skip"))) | sort_by(.Test)) as $results
+            | ($results | map(select(.Action == "fail"))) as $failed
+            | "### Integration tests, \($title)\n\n"
+              + "\($results | map(select(.Action == "pass")) | length) passed, \($failed | length) failed, "
+              + "\($results | map(select(.Action == "skip")) | length) skipped, in \($pkg.Elapsed // 0) s\n"
+              + ($failed | map(
+                  ($out[.Test] // "") as $o
+                  | "\n#### \(.Test) failed\n\n"
+                    + ($o | commands | map("$ " + .) | block)
+                    + ([$o | lines[] | select(test("^\\s*(=== |--- )|: \\$ dutctl ") | not)] | .[:20] | block)
+                ) | join(""))
+              + (if $pkg.Action == "fail" and ($failed | length) == 0 then
+                  "\nThe tests ended before their results:\n\n"
+                  + ([.[] | select(.Test == null and .Output != null) | .Output] | add // "" | [lines[]] | .[:20] | block)
+                else "" end)
+              + (if ($results | length) == 0 then "" else
+                  "\n<details><summary>All tests</summary>\n\n| Test | Result | dutctl commands |\n|---|---|---|\n"
+                  + ($results | map("| \(.Test) | \(.Action) | \($out[.Test] // "" | commands | map("`" + gsub("\\|"; "\\|") + "`") | join("<br>")) |") | join("\n"))
+                  + "\n\n</details>\n"
+                end)
+          ' "$RUNNER_TEMP/integration.json" >> "$GITHUB_STEP_SUMMARY"
 
-  # Lint job - runs once per workflow execution, not per commit
+  # The required check. The checks of the commits change their names with every
+  # pull request, so they cannot be required themselves; this one passes only
+  # when all of them passed, and fails when the commits could not be listed.
+  # The lint checks are not part of it yet.
+  all-checks:
+    name: All-Checks
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    needs: [list-commits, unit, integration]
+    steps:
+      - name: Every commit passed its checks on every architecture
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          for result in $RESULTS; do
+            if [ "$result" != success ]; then
+              echo "A job ended with $result: $RESULTS"
+              exit 1
+            fi
+          done
+
   golangci-lint:
     name: Lint
     runs-on: ubuntu-latest
@@ -79,43 +193,10 @@ jobs:
         with:
           version: v2.14.0
 
-  # Build and test each commit for both architectures
-  # Uses a matrix strategy to create separate job runs for each combination of commit and architecture
-  per_commit_build_test:
-    name: Build & Test  ${{ matrix.arch }}
-    runs-on: ubuntu-latest
-    needs: commit_list
-    strategy:
-      # Don't stop all tests if one commit/arch fails
-      fail-fast: false
-      matrix:
-        # Create matrix entries for each combination of commit and architecture
-        commit: ${{ fromJSON(needs.commit_list.outputs.commits) }}
-        arch: [amd64, arm64]
-    steps:
-      # Checkout the specific commit to test
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ matrix.commit }}
-
-      - name: Set up Go
-        uses: actions/setup-go@v7
-        with:
-          go-version-file: 'go.mod'
-
-      - run: go version
-
-      - name: Build ${{ matrix.commit }} for ${{ matrix.arch }}
-        run: GOARCH=${{ matrix.arch }} go build -v ./...
-        
-      - name: Unit test ${{ matrix.commit }} for ${{ matrix.arch }}
-        run: go test -race -v ./...
-
-  # License check runs once per workflow execution
   check-license-lines:
     name: Check License Lines
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v7
-    
+
     - uses: kt3k/license_checker@v1.0.6
