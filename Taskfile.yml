@@ -116,7 +116,7 @@ tasks:
         sh: ls ./bin/dutctl_*_arm64.deb
       CONFIG: ./pkg/module/demo/demo-example-cfg.yml
     cmds:
-      - fwci job --workflow="test-dutctl" "DUTCTL={{.DUTCTL_PATH}}" "REMOTE_PKG={{.DUTCTL_PKG_PATH}}" "CONFIG={{.CONFIG}}" "DUMMY_SPI_FLASH_ROM=.firmwareci/dummy_binary.rom" "TASKFILE=.firmwareci/Taskfile.yml"
+      - fwci job --workflow="Hardware-Integration" "DUTCTL={{.DUTCTL_PATH}}" "REMOTE_PKG={{.DUTCTL_PKG_PATH}}" "CONFIG={{.CONFIG}}" "DUMMY_SPI_FLASH_ROM=.firmwareci/dummy_binary.rom" "TASKFILE=.firmwareci/Taskfile.yml"
     #sources:
     #  - ./.firmwareci/**/*.yaml
     #  - ./.firmwareci/**/Taskfile.yml

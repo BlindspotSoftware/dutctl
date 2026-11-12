@@ -1,9 +1,9 @@
 ---
-name: fwci-contrib
-# Pull requests from forks run without repository secrets, so fwci-test cannot
-# submit a FirmwareCI job for them. This workflow runs in the base repository,
-# where the secrets live, and submits the binaries the contributor's run already
-# built.
+name: Hardware-Integration-Fork
+# Pull requests from forks run without repository secrets, so the
+# Hardware-Integration workflow cannot submit a FirmwareCI job for them. This
+# workflow runs in the base repository, where the secrets live, and submits the
+# binaries the contributor's run already built.
 #
 # Contributor-authored code is never executed here: this job only downloads the
 # build artifact and hands it to FirmwareCI. The environment gate below is what
@@ -11,7 +11,7 @@ name: fwci-contrib
 
 on:
   workflow_run:
-    workflows: ["fwci-test"]
+    workflows: ["Hardware-Integration"]
     types: [completed]
 
 permissions:
@@ -24,8 +24,9 @@ concurrency:
 
 jobs:
   client-agent-integration:
+    name: Submit
     # Fork pull requests only. Same-repo pull requests and pushes have secrets
-    # and already submit their job from fwci-test.
+    # and already submit their job from Hardware-Integration.
     if: >-
       github.event.workflow_run.event == 'pull_request' &&
       github.event.workflow_run.conclusion == 'success' &&
@@ -109,7 +110,7 @@ jobs:
         uses: docker://firmwareci/action:v6.0
         with:
           TOKEN: "${{ secrets.FWCI_TOKEN }}"
-          WORKFLOW_NAME: test-dutctl
+          WORKFLOW_NAME: Hardware-Integration
           # The workflow_run payload carries the pull request head commit. This
           # workflow itself runs on the base branch, so auto-detection would
           # report the wrong commit.

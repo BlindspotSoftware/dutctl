@@ -1,5 +1,5 @@
 ---
-name: PDU power control
+name: PDU-Power
 description: Switch and read a Gude PDU outlet through the dutctl pdu module.
 
 stages:

@@ -1,5 +1,5 @@
 ---
-name: serial module
+name: Serial-Console
 description: Read the serial console, scripted and interactive, through the packaged agent on the tester.
 
 defaults:
