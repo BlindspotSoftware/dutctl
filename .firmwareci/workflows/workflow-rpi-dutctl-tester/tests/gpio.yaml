@@ -22,6 +22,17 @@ defaults:
 stages:
   - name: Test GPIO power via shell script
     steps:
+      # The switch is configured initial: off, which the agent applies when it
+      # starts, before any command: a DUT must not power up with its agent.
+      - cmd: cmd
+        name: power pin is low once the agent started
+        transport: *transport_oscar
+        parameters:
+          executable: pinctrl
+          args: ["lev", "21"]
+          expect:
+            - regex: "0"
+
       - cmd: cmd
         name: initial dutctl power off
         transport:

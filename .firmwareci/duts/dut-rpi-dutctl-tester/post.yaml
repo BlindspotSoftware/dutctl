@@ -22,7 +22,7 @@ post-stage:
   #  Delete the files copied over for the test
   # ===========================================
   - cmd: shell
-    name: Stop remotelab-server systemd service
+    name: Stop the dutagent systemd service
     transport: *transport_root
     parameters:
       command: "systemctl stop [[attributes.DutagentService]] || true"

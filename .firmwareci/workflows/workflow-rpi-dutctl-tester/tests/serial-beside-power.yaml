@@ -1,0 +1,25 @@
+---
+name: Serial-Beside-Power
+description: Switch the power through GPIO while the serial console is open, as a user does from a second terminal.
+
+# A user's other command runs beside an open console, while the same command
+# is refused. Here the other command switches the power pin while the console
+# holds the serial port. Every call names the same user with -u: without
+# $USER, as in a container, each call would be a user of its own, and the
+# side-by-side run would be refused as another user's. The console's input
+# stays open for six seconds, then it ends.
+stages:
+  - name: Power beside an open console
+    steps:
+      - cmd: shell
+        name: Switch the power beside the console, then try the console again
+        transport:
+          proto: local
+        parameters:
+          command: "D='[[input.DUTCTL]] -s [[attributes.DutagentEndpoint]] -u fwci-side-by-side@ci'; ( sleep 6 ) | $D [[attributes.DeviceName]] console > /tmp/side-by-side-console.log 2>&1 & for i in $(seq 1 50); do grep -q 'Connected to' /tmp/side-by-side-console.log && break; sleep 0.2; done; $D [[attributes.DeviceName]] power on 2>&1; $D [[attributes.DeviceName]] power off 2>&1; $D [[attributes.DeviceName]] console < /dev/null 2>&1; wait; cat /tmp/side-by-side-console.log"
+          expect:
+            - regex: "(?s)DUT power .GPIO 26.: turned on.*DUT power .GPIO 26.: turned off"
+            - regex: "already running .console. for .fwci-side-by-side@ci.; a command does not run twice at once"
+            - regex: "(?s)Connected to /home/oscar/ttyS2.*Connection closed"
+        options:
+          timeout: 30s

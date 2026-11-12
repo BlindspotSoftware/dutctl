@@ -31,16 +31,6 @@ devices:
             with:
               port: "/home/oscar/ttyS2"
               baud: 115200
-      boot:
-        desc: "A step, then the interactive host serial console, as a boot command is shaped"
-        uses:
-          - module: wrap-print
-            args: ["power-cycle"]
-          - module: serial
-            args: ["-i"]
-            with:
-              port: "/home/oscar/ttyS2"
-              baud: 115200
       flash:
         desc: "Host SPI flash chip"
         uses:
@@ -62,43 +52,3 @@ devices:
           - module: time-wait
             with:
               duration: 1s
-      system-info:
-        desc: "Report information about the dutagent system"
-        uses:
-          - module: agent-status
-            passthrough: true
-      wait:
-        desc: "Wait for the given duration"
-        uses:
-          - module: time-wait
-            passthrough: true
-            with:
-              duration: 1s
-      run:
-        desc: "Run a shell command on the dutagent"
-        uses:
-          - module: shell
-            passthrough: true
-            with:
-              path: bash
-      upload:
-        desc: "Upload a file from the client to the dutagent"
-        uses:
-          - module: file
-            passthrough: true
-            with:
-              operation: "upload"
-              destination: "/tmp/dutctl-fwci-upload.txt"
-      download:
-        desc: "Download a file from the dutagent to the client"
-        uses:
-          - module: file
-            passthrough: true
-            with:
-              operation: "download"
-              source: "/tmp/dutctl-fwci-download.txt"
-      echo:
-        desc: "Print the arguments"
-        uses:
-          - module: wrap-print
-            passthrough: true

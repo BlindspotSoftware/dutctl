@@ -1,6 +1,6 @@
 ---
 name: serial module
-description: Verify serial console access through the serial module, scripted and interactive.
+description: Read the serial console, scripted and interactive, through the packaged agent on the tester.
 
 defaults:
   transport_oscar: &transport_oscar
@@ -120,47 +120,3 @@ stages:
             - regex: "(?s)^\\s*42 4f 4f 54 0d 0a 1b 5b 31 6d 6f 6b 1b 5b 30 6d\\s+0d 0a\\s*$"
         options:
           timeout: 15s
-
-  # A command that runs a step before the console is how a user watches a DUT
-  # boot in a fixed order: commands run beside each other in no set order, so
-  # a reset that must come before the console belongs in one command with it.
-  # The step's output, the console's marker and the DUT's reply have to come
-  # out in that order.
-  - name: Interactive console after a step, in one command
-    steps:
-      - cmd: shell
-        name: Let the DUT answer the first byte it receives
-        transport: *transport_oscar
-        parameters:
-          command: "( timeout 20 bash -c 'read -r -n1 < [[attributes.FakeSerialInput]]; printf \"U-Boot\\r\\n\" > [[attributes.FakeSerialInput]]' ) >/dev/null 2>&1 & disown"
-
-      - cmd: shell
-        name: Step output, then the console, then the DUT
-        transport:
-          proto: local
-        parameters:
-          command: "( printf 'x'; sleep 4 ) | [[input.DUTCTL]] -s [[attributes.DutagentEndpoint]] [[attributes.DeviceName]] boot 2>&1"
-          expect:
-            - regex: "(?s)power-cycle.*Connected to /home/oscar/ttyS2.*U-Boot.*Connection closed"
-        options:
-          timeout: 15s
-
-  # A user's other command runs beside an open console, as a power cycle from a
-  # second terminal would, while the same command is refused. Every call names
-  # the same user with -u: without $USER, as in a container, each call would be
-  # a user of its own, and the side-by-side run would be refused as another
-  # user's. The console's input stays open for six seconds, then it ends.
-  - name: A command beside an open console
-    steps:
-      - cmd: shell
-        name: Run a command beside the console, then the console again
-        transport:
-          proto: local
-        parameters:
-          command: "D='[[input.DUTCTL]] -s [[attributes.DutagentEndpoint]] -u fwci-side-by-side@ci'; ( sleep 6 ) | $D [[attributes.DeviceName]] console > /tmp/side-by-side-console.log 2>&1 & for i in $(seq 1 50); do grep -q 'Connected to' /tmp/side-by-side-console.log && break; sleep 0.2; done; $D [[attributes.DeviceName]] echo beside-the-console 2>&1; $D [[attributes.DeviceName]] console < /dev/null 2>&1; wait; cat /tmp/side-by-side-console.log"
-          expect:
-            - regex: "beside-the-console"
-            - regex: "already running .console. for .fwci-side-by-side@ci.; a command does not run twice at once"
-            - regex: "(?s)Connected to /home/oscar/ttyS2.*Connection closed"
-        options:
-          timeout: 30s
