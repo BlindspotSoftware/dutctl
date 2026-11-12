@@ -19,12 +19,14 @@ permissions:
 jobs:
   # Lists the commits to test as {sha, title}, the title naming a commit's
   # checks: on a push the pushed commit; on a pull request each of its commits,
-  # oldest first, and the merge result when it differs from the head.
+  # oldest first, and the merge result when it differs from the head. The
+  # commits to lint are the same but the merge result, with their parents.
   list-commits:
     name: List-Commits
     runs-on: ubuntu-latest
     outputs:
       commits: ${{ steps.list.outputs.commits }}
+      lint: ${{ steps.list.outputs.lint }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -37,18 +39,21 @@ jobs:
           HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
           if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
-            git log --reverse --format='%H%x09%h %s' "origin/$BASE..$HEAD" > commits.tsv
-            if ! git diff --quiet "$HEAD" "$GITHUB_SHA"; then
-              printf '%s\tmerge into %s\n' "$GITHUB_SHA" "$BASE" >> commits.tsv
-            fi
+            git log --reverse --format='%H%x09%P%x09%h %s' "origin/$BASE..$HEAD" > commits.tsv
           else
-            git log -1 --format='%H%x09%h %s' "$GITHUB_SHA" > commits.tsv
+            git log -1 --format='%H%x09%P%x09%h %s' "$GITHUB_SHA" > commits.tsv
           fi
 
-          echo "commits=$(jq -Rsc 'split("\n")[:-1] | map(split("\t") | {sha: .[0], title: (.[1:] | join("\t"))})' commits.tsv)" >> "$GITHUB_OUTPUT"
+          echo "lint=$(jq -Rsc 'split("\n")[:-1] | map(split("\t") | {sha: .[0], parent: (.[1] | split(" ")[0]), title: (.[2:] | join("\t"))})' commits.tsv)" >> "$GITHUB_OUTPUT"
+
+          if [ "$GITHUB_EVENT_NAME" = pull_request ] && ! git diff --quiet "$HEAD" "$GITHUB_SHA"; then
+            printf '%s\t-\tmerge into %s\n' "$GITHUB_SHA" "$BASE" >> commits.tsv
+          fi
+
+          echo "commits=$(jq -Rsc 'split("\n")[:-1] | map(split("\t") | {sha: .[0], title: (.[2:] | join("\t"))})' commits.tsv)" >> "$GITHUB_OUTPUT"
 
           echo "List of tested commits:" >> "$GITHUB_STEP_SUMMARY"
-          jq -Rr --arg url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/commit/" 'split("\t") | "- \($url)\(.[0]) \(.[1:] | join("\t"))"' commits.tsv >> "$GITHUB_STEP_SUMMARY"
+          jq -Rr --arg url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/commit/" 'split("\t") | "- \($url)\(.[0]) \(.[2:] | join("\t"))"' commits.tsv >> "$GITHUB_STEP_SUMMARY"
 
   unit:
     name: Unit · ${{ matrix.arch }} · ${{ matrix.commit.title }}
@@ -174,6 +179,33 @@ jobs:
               exit 1
             fi
           done
+
+  # Lints every commit for the findings it brings, so that each finding shows
+  # once, at the commit that brought it.
+  lint-commits:
+    name: Lint · ${{ matrix.commit.title }}
+    runs-on: ubuntu-latest
+    needs: list-commits
+    strategy:
+      fail-fast: false
+      matrix:
+        commit: ${{ fromJSON(needs.list-commits.outputs.lint) }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ matrix.commit.sha }}
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: 'go.mod'
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.14.0
+          args: --new-from-rev=${{ matrix.commit.parent }}
 
   golangci-lint:
     name: Lint
