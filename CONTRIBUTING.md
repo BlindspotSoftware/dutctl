@@ -45,6 +45,23 @@ Unsure where to begin contributing to dutctl? You can start by looking through t
 5. **Consider Draft PRs**: This way you can ensure the CI passes, before asking for review.
 6. 🚀 Issue the pull request!
 
+### Automated Review
+
+GitHub Copilot reviews every pull request before the maintainers do. It checks the change against
+short rules in [`.github/copilot-instructions.md`](.github/copilot-instructions.md), in
+[`.github/instructions/`](.github/instructions) by path, and in the skill
+[`.github/skills/code-review/`](.github/skills/code-review), which lists the constraints of the
+[decision records](docs/decisions/README.md). Each rule has an ID and links the document it
+summarizes. Copilot's comments are hints: they do not block a merge, and they miss things, so the
+maintainers' review decides.
+
+The documents stay the source of the rules: this guide, `docs/`, the READMEs, the doc and code
+comments and the decision records. A change to a convention changes the rule that summarizes it in
+the same pull request: in the same commit as the document, or, for a decision record, which goes
+into a `docs` commit of its own (see [Documentation commits](#documentation-commits)), in a commit
+of its own. A new rule only summarizes a convention that a document states. A rule's ID stays the
+same, and the ID of a removed rule is not used again.
+
 ## Development Workflow
 
 ### Setting Up the Development Environment
@@ -90,7 +107,7 @@ This project uses no scopes: commitlint rejects a header such as `fix(serial): .
 Where type is one of the following:
 - **build**: Build and packaging setup, such as the GoReleaser configuration and `packaging/`
 - **chore**: Housekeeping: dependency updates, release commits and repository settings such as `.gitignore`
-- **ci**: Continuous integration: workflows, the firmware CI setup and the linter settings in `.golangci.yml`
+- **ci**: Continuous integration: workflows, the firmware CI setup, the linter settings in `.golangci.yml` and the rules of the [automated review](#automated-review)
 - **docs**: Readme, doc comments, decision records, see [Documentation commits](#documentation-commits)
 - **feat**: Source code changes introducing new functionality
 - **fix**: Bug fixes, no new functionality
