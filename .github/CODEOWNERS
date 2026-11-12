@@ -1,0 +1,11 @@
+# Copilot's code review reads its instructions, the agent instruction files and the
+# skills from the pull request's own branch, so a pull request could change the rules of
+# its own review. Changes to these files need the team's review. A pattern without a
+# leading slash matches in every directory.
+/.github/   @BlindspotSoftware/dutctl-team
+AGENTS.md   @BlindspotSoftware/dutctl-team
+CLAUDE.md   @BlindspotSoftware/dutctl-team
+GEMINI.md   @BlindspotSoftware/dutctl-team
+REVIEW.md   @BlindspotSoftware/dutctl-team
+/.claude/   @BlindspotSoftware/dutctl-team
+/.agents/   @BlindspotSoftware/dutctl-team
