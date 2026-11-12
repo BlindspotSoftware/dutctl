@@ -1,0 +1,38 @@
+# Runs the integration tests many times over, every night, to find tests that
+# fail only now and then. Every commit of a pull request runs them once, so a
+# rare failure there would block an unrelated change; here it shows up first.
+
+name: Flakes
+
+on:
+  schedule:
+    - cron: '17 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  integration:
+    name: Integration-${{ matrix.arch }}
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Install socat for the serial line of the integration tests
+        run: sudo apt-get update && sudo apt-get install -y socat
+
+      - name: Integration tests, 20 times
+        env:
+          DUTCTL_INTEGRATION: "1"
+        run: go test -race -count=20 ./test/integration/
