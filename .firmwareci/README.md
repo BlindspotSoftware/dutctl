@@ -15,9 +15,27 @@ For detailed information on FirmwareCI, please refer to the [official documentat
 
 ## Design decisions
 
-### One test per module, shared setup on the DUT
-Each dutctl module gets its own test file, so a failure names the module that
-broke instead of one combined run.
+### Only what needs the hardware
+These tests are the last of three layers. The unit tests check the code, and
+the [integration tests](../test/integration) run dutctl against a dutagent on
+the CI runner, with the demo modules and the modules that need no hardware.
+What runs here is what only the tester can show: the Debian package installed
+on the arm64 target and its dutagent started, with an amd64 client on another
+machine reaching the agent over the network, and the modules that drive
+hardware, GPIO, the PDU, the SPI flash and the serial console, with that
+hardware wired up. The serial tests run against a socat pseudo-terminal pair on
+the tester, not a UART, until the tester gets a real one. Corner cases of
+dutctl itself belong in the layers below; corner cases of the hardware belong
+here.
+
+The tester starts dutagent with a systemd unit of its own, which runs it as
+root and reads the configuration from `/etc/dutctl.yaml`. It takes precedence
+over the example unit the package installs, so the example unit's user,
+hardening and device list are not tested here yet.
+
+### One test per hardware feature, shared setup on the DUT
+Each hardware feature gets its own test file, so a failure names the feature
+that broke instead of one combined run.
 
 The setup and tear-down around every test is the same and rather involved:
 
@@ -55,7 +73,7 @@ Another huge advantage is, that with this approach, that run-time dependencies a
 │   └── post.yaml           tear-down applied to every test on this DUT
 └── workflows/workflow-rpi-dutctl-tester/
     ├── workflow.yaml
-    └── tests/              one file per dutctl module
+    └── tests/              one file per hardware feature
 ```
 
 ### Taskfile
@@ -77,8 +95,12 @@ The `workflows` directory is where the tests live.
 
 ## Adding a new test
 
-Create a new `.yaml` file in `.firmwareci/workflows/workflow-rpi-dutctl-tester/tests/`.
-Copying an existing test is the quickest start; `gpio.yaml` is a simple one.
+Add a test here only if it needs the tester's hardware; anything else is an
+integration test. Create a new `.yaml` file in
+`.firmwareci/workflows/workflow-rpi-dutctl-tester/tests/`. Copying an existing
+test is the quickest start; `gpio.yaml` is a simple one. Commands the test
+uses go into the agent configuration of the tests,
+[test/test-dutagent-cfg.yaml](../test/test-dutagent-cfg.yaml).
 
 A test needs only `name`, `description` and `stages` — the setup and tear-down
 come from the DUT. Refer to the device through `[[attributes.*]]` rather than
