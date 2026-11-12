@@ -1,7 +1,7 @@
 ---
 version: "3"
 vars:
-  GOLANG_CODE_PATH: "cmd"
+  GOLANG_CODE_PATH: "cmds"
 
 includes:
   fwci:
@@ -18,29 +18,21 @@ tasks:
     desc: Build all binaries
     cmds:
       - task: build:dutctl
-      - task: build:remotelab-server
+      - task: build:dutagent
 
   build:dutctl:
     desc: Build dutctl CLI binary
     cmds:
-      - go build -o bin/dutctl ./cmd/dutctl/
+      - go build -o bin/dutctl ./cmds/dutctl/
     env:
       CGO_ENABLED: 0
-    sources:
-      - ./cmd/dutctl/**/*.go
-    generates:
-      - ./bin/dutctl
 
-  build:remotelab-server:
-    desc: Build remotelab-server binary
+  build:dutagent:
+    desc: Build dutagent binary
     cmds:
-      - go build -o bin/remotelab-server ./cmd/remotelab-server/
+      - go build -o bin/dutagent ./cmds/dutagent/
     env:
       CGO_ENABLED: 0
-    sources:
-      - ./cmd/remotelab-server/**/*.go
-    generates:
-      - ./bin/remotelab-server
 
   goreleaser:build:
     desc: Use goreleaser to build the project
