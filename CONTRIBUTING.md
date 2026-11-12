@@ -153,6 +153,9 @@ You can **bypass commitlint locally** like so: `git commit --no-verify -m"commit
 - Write tests for new features and bug fixes
 - Run tests locally before submitting PRs: `go test ./...`
 - Aim for reasonable test coverage of new code
+- The integration tests in [`test/integration`](test/integration) run the dutctl and dutagent binaries of your checkout
+  against each other, with the [demo modules](pkg/module/demo) instead of hardware. They skip unless enabled:
+  `DUTCTL_INTEGRATION=1 go test -race ./test/integration/`. On Linux only; the serial tests also need `socat`.
 
 ## Style Guides
 

@@ -136,16 +136,11 @@ tasks:
       - go test $(go list ./... | grep -v /integration/) {{.TEST_OPTIONS}} -failfast -race -coverpkg=./... -covermode=atomic -coverprofile=coverage.txt {{.SOURCE_FILES}} -run {{.TEST_PATTERN}} -timeout=5m
 
   test:integration:
-    desc: Setup environment and run integration tests
-    dir: integration
+    desc: Run dutctl against a local dutagent; the serial tests need socat
+    env:
+      DUTCTL_INTEGRATION: "1"
     cmds:
-      # Setup integration environment
-      - ./integration.sh
-      # Spin up docker
-      - docker-compose up -d remotelab-server
-      - docker-compose up dutctl
-      # Shutdown
-      - docker-compose down
+      - go test -race -count=1 ./test/integration/
 
   #================
   # Manual testing
