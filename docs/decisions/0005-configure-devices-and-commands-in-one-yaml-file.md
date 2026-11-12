@@ -63,7 +63,7 @@ valid and an invalid file.
 ## More information
 
 - [docs/dutagent-config.md](../dutagent-config.md): the configuration grammar.
-- [contrib/dutagent-cfg-example.yaml](../../contrib/dutagent-cfg-example.yaml):
+- [pkg/module/demo/demo-example-cfg.yml](../../pkg/module/demo/demo-example-cfg.yml):
   an example file.
 - [pkg/dut/config.go](../../pkg/dut/config.go): decoding and validation.
 - [ADR-0028](0028-tier-the-public-interfaces-for-v1-0-0.md): the configuration grammar
@@ -84,5 +84,6 @@ valid and an invalid file.
   - 2026-03: the rule that exactly one main module per command receives the
     user's arguments was replaced
     ([ADR-0016](0016-route-arguments-through-passthrough-or-templates.md)).
+  - 2026-11: the example file moved from `contrib/` to the demo modules.
 
 Recorded retroactively in October 2026.

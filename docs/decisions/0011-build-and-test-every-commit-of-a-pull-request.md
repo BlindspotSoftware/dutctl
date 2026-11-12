@@ -62,9 +62,15 @@ own: a pull request is a series of self-contained commits.
   rules, which commitlint also checks on every commit.
 - [ADR-0020](0020-test-dutctl-on-real-hardware-in-firmwareci.md): the tests on real
   hardware, which run on the result of a pull request, not per commit.
-- [.github/workflows/go.yml](../../.github/workflows/go.yml): the jobs "Get
-  Commits to Test" and "Build & Test".
+- [.github/workflows/go.yml](../../.github/workflows/go.yml): the jobs
+  "List-Commits", "Unit", "Integration" and "All-Checks".
 - Later changes:
   - 2026-07: the tests began to run with the race detector.
+  - 2026-11: the integration tests began to run on every commit too, in a
+    job of their own beside the unit tests. Each commit's checks are named
+    after the job, the architecture and the commit, and All-Checks, passing
+    only when all of them pass, became the required check. The arm64 leg runs
+    on an arm64 runner. Every commit is also linted for the findings it
+    brings, not yet as part of the required check.
 
 Recorded retroactively in October 2026.
