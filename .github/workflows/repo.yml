@@ -140,3 +140,12 @@ jobs:
             esac
           done
           exit $status
+
+  # Every Go file starts with the license header that .licenserc.json names.
+  license-headers:
+    name: License headers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: kt3k/license_checker@v1.0.6
