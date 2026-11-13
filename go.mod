@@ -10,7 +10,7 @@ require (
 	github.com/stianeikeland/go-rpio/v4 v4.6.0
 	go.bug.st/serial v1.8.0
 	golang.org/x/crypto v0.58.0
-	golang.org/x/mod v0.42.0
+	golang.org/x/mod v0.43.0
 	golang.org/x/sys v0.50.0
 	golang.org/x/term v0.48.0
 	google.golang.org/protobuf v1.36.12
