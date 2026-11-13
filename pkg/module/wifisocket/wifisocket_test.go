@@ -8,6 +8,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/BlindspotSoftware/dutctl/internal/test/mock"
 )
 
 func TestMapStateToTasmotaCmd(t *testing.T) {
@@ -61,6 +63,22 @@ func TestInitControlURL(t *testing.T) {
 	}
 	if !strings.HasSuffix(w.controlURL.String(), "/cm") {
 		t.Fatalf("controlURL must end with /cm: %s", w.controlURL.String())
+	}
+}
+
+// TestRunRejectsCommand checks that a missing or unknown command fails the run
+// with the available commands, before the module talks to the socket.
+func TestRunRejectsCommand(t *testing.T) {
+	for _, args := range [][]string{nil, {"bogus"}} {
+		w := &WifiSocket{Host: "socket.invalid"}
+		if err := w.Init(t.Context()); err != nil {
+			t.Fatalf("Init failed: %v", err)
+		}
+
+		err := w.Run(t.Context(), &mock.Session{}, args...)
+		if err == nil || !strings.Contains(err.Error(), commands) {
+			t.Fatalf("Run(%q) = %v, want an error naming %q", args, err, commands)
+		}
 	}
 }
 

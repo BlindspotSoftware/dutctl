@@ -44,6 +44,7 @@ const (
 	off            = "off"
 	toggle         = "toggle"
 	status         = "status"
+	commands       = "on, off, toggle, status" // commands lists what Run accepts, for its errors
 )
 
 func (w *WifiSocket) Help() string {
@@ -104,18 +105,16 @@ func (w *WifiSocket) Deinit(_ context.Context) error {
 }
 
 // Run dispatches the first argument as a socket command: on, off, toggle, or
-// status. An empty or unknown command is reported to the session and returns
-// nil; only failures talking to the device return a non-nil error. Init must
-// have run successfully first, otherwise Run returns an error.
+// status. A missing or unknown command returns an error that names the
+// available commands, as does a failure talking to the device. Init must have
+// run successfully first, otherwise Run returns an error.
 func (w *WifiSocket) Run(ctx context.Context, s module.Session, args ...string) error {
 	if w.client == nil {
 		return fmt.Errorf("wifisocket client not initialized")
 	}
 
 	if len(args) == 0 {
-		s.Println("No command specified. Call 'help' for usage.")
-
-		return nil
+		return fmt.Errorf("no command specified, available commands: %s", commands)
 	}
 
 	cmd := strings.ToLower(args[0])
@@ -128,10 +127,7 @@ func (w *WifiSocket) Run(ctx context.Context, s module.Session, args ...string) 
 		return w.status(ctx, s)
 
 	default:
-		s.Println("Unknown command: " + cmd)
-		s.Println("Available commands: on, off, toggle, status")
-
-		return nil
+		return fmt.Errorf("unknown command %q, available commands: %s", cmd, commands)
 	}
 }
 
