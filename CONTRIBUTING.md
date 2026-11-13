@@ -66,6 +66,9 @@ This is my commit message
 
 Signed-off-by: Random J Developer <random@developer.example.org>
 ```
+
+Every commit needs this line: the Conventional Commits check rejects a commit without it.
+
 > [!TIP]
 > Use the '-s' flag on git commits to append this automatically.
 

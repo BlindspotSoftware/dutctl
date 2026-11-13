@@ -111,7 +111,7 @@ jobs:
         run: task misc:dummy-binary-for-flashing
 
       - name: Upload to FirmwareCI
-        uses: docker://firmwareci/action:v6.0
+        uses: docker://firmwareci/action:v6.1
         with:
           TOKEN: "${{ secrets.FWCI_TOKEN }}"
           WORKFLOW_NAME: Hardware-Integration
