@@ -112,8 +112,8 @@ through pipes and checks the bytes in both directions.
   protocol, and [docs/module_guide.md](../module_guide.md#console) the module
   contract. [cmds/dutctl/console.go](../../cmds/dutctl/console.go) and
   [session/console.go](../../internal/dutagent/session/console.go) hold the
-  two ends, and [pkg/module/dummy](../../pkg/module/dummy) the `dummy-console`
-  example.
+  two ends, and [pkg/module/demo](../../pkg/module/demo) the console examples
+  `wrap-prompt` and `wrap-raw`.
 - [ADR-0003](0003-run-a-command-over-one-bidirectional-stream.md),
   [ADR-0004](0004-compile-modules-into-the-agent-behind-a-session.md) and
   [ADR-0007](0007-route-module-input-and-output-through-a-session.md): the Run stream, and
@@ -124,3 +124,5 @@ through pipes and checks the bytes in both directions.
   stable with v1.0.0, after this change.
 - [ADR-0030](0030-run-one-command-at-a-time-per-device.md): an open console keeps the
   device busy for every other command.
+- [ADR-0036](0036-run-a-users-different-commands-side-by-side.md): a user's
+  different commands run beside an open console.

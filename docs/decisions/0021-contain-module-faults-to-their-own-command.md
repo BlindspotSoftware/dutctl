@@ -94,5 +94,8 @@ module with a device that does not exist. Tests in
   - 2026-10: `Init`, `Run` and `Deinit` all went through one `catchPanic`,
     when the Run handler became straight-line code
     ([ADR-0029](0029-run-the-run-rpc-as-straight-line-code.md)).
+  - 2026-11: the doc comment of `Init` in `pkg/module/module.go` began to
+    state the rule: `Init` checks the configuration, tools and hardware
+    attached to the agent, and does not contact the device or its BMC.
 
 Recorded retroactively in October 2026.

@@ -90,6 +90,9 @@ forced releases and the lock state in List.
   longer ends it.
 - [ADR-0032](0032-stop-the-agent-in-stages.md): a stopping agent waits for the
   reservations to end.
+- [ADR-0036](0036-run-a-users-different-commands-side-by-side.md): each run
+  holds the device through a lease of its own, which a forced unlock and the
+  end of a reservation leave alone.
 - [internal/dutagent/locker](../../internal/dutagent/locker) keeps the locks;
   [docs/dutagent-shutdown.md](../dutagent-shutdown.md) shows how they end.
 - Later changes:
