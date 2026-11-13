@@ -147,20 +147,16 @@ func (b *Button) Init(ctx context.Context) error {
 
 	log.FromContext(ctx).Debug(fmt.Sprintf("initializing pin %d to idle", b.Pin))
 
-	if b.ActiveLow {
-		// with active low, idle is high
-		return b.High(b.Pin)
-	}
-
-	return b.Low(b.Pin)
+	return b.idle()
 }
 
+// Deinit leaves the button released.
 func (b *Button) Deinit(_ context.Context) error {
 	if b.gpio == nil {
 		return nil
 	}
 
-	return b.Low(b.Pin)
+	return b.idle()
 }
 
 func (b *Button) Run(ctx context.Context, s module.Session, args ...string) error {
@@ -201,6 +197,16 @@ func (b *Button) Run(ctx context.Context, s module.Session, args ...string) erro
 	s.Printf("%s: pressed for %s\n", b.label(), duration)
 
 	return nil
+}
+
+// idle drives the pin to the level of a released button: high if the button is
+// active low, low otherwise.
+func (b *Button) idle() error {
+	if b.ActiveLow {
+		return b.High(b.Pin)
+	}
+
+	return b.Low(b.Pin)
 }
 
 // sleepCtx pauses for d, returning ctx.Err() if ctx is done first. A non-positive
@@ -308,12 +314,13 @@ func (s *Switch) Init(ctx context.Context) error {
 	return s.off()
 }
 
+// Deinit leaves the switch off.
 func (s *Switch) Deinit(_ context.Context) error {
 	if s.gpio == nil {
 		return nil
 	}
 
-	return s.Low(s.Pin)
+	return s.off()
 }
 
 //nolint:cyclop,funlen // on/off/toggle branches each set state and log; long but linear and readable.

@@ -132,7 +132,7 @@ func TestButtonDeinit(t *testing.T) {
 				ActiveLow: true,
 			},
 			expectFunc: func(mock *MockGpio) bool {
-				return mock.LowCalled
+				return mock.HighCalled && !mock.LowCalled
 			},
 		},
 		{
@@ -485,6 +485,15 @@ func TestSwitchDeinit(t *testing.T) {
 			swtch: Switch{},
 			expectFunc: func(mock *MockGpio) bool {
 				return mock.LowCalled
+			},
+		},
+		{
+			name: "Deinit with ActiveLow",
+			swtch: Switch{
+				ActiveLow: true,
+			},
+			expectFunc: func(mock *MockGpio) bool {
+				return mock.HighCalled && !mock.LowCalled
 			},
 		},
 	}

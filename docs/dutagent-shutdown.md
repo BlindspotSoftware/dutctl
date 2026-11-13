@@ -84,7 +84,7 @@ flowchart TB
   W1{{"locker empty<br/>no device busy, nothing reserved"}}
   S2["<b>Stage 2 · Abort</b><br/>aborts all running commands<br/>reservations end<br/>waits without a bound for all modules"]
   W2{{"all modules returned"}}
-  DEINIT["<b>Deinit all modules</b><br/>at most 15 s<br/>e.g. GPIO pins to low, delete flash images"]
+  DEINIT["<b>Deinit all modules</b><br/>at most 15 s<br/>e.g. GPIO switches off, delete flash images"]
   EXIT(["<b>Exit</b><br/>0, or 1 after a failure"])
   NOW(["<b>Gone at once</b><br/>no Deinit, all locks gone<br/>hardware stays as it is"])
   USR["<b>User consoles</b><br/>commands end, unlock<br/>or a reservation expires, default 30 min"]
@@ -144,8 +144,8 @@ runs out of time, the agent exits with 1 and logs "UNKNOWN STATE".
 Deinit never runs at the end of a command, on a stop signal during stage 2 or
 `SIGQUIT`, or on `SIGKILL`, the OOM killer, a crash or a power loss. Then only
 Init at the next start brings the hardware back to its initial state. What
-Deinit does, for example: drive GPIO pins low, which can switch a device off;
-delete flash images; close IPMI connections.
+Deinit does, for example: release GPIO buttons and switch GPIO switches off,
+which can switch a device off; delete flash images; close IPMI connections.
 
 ## All causes
 
