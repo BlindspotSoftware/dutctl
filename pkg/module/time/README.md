@@ -1,4 +1,4 @@
-The _agent_ package is a collection of the following dutagent modules:
+The _time_ package is a collection of the following dutagent modules:
 
 - [Wait](#Wait)
 
