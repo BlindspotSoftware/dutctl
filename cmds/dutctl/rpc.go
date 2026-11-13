@@ -307,15 +307,7 @@ func (app *application) runRPC(ctx context.Context, device, command string, cmdA
 		errCh:  make(chan error, numWorkers),
 	}
 
-	err := r.send(&pb.RunRequest{
-		Msg: &pb.RunRequest_Command{
-			Command: &pb.Command{
-				Device:  device,
-				Command: command,
-				Args:    cmdArgs,
-			},
-		},
-	})
+	err := r.sendCommand(device, command, cmdArgs)
 	if err != nil {
 		return err
 	}
@@ -337,6 +329,26 @@ func (app *application) runRPC(ctx context.Context, device, command string, cmdA
 	case err := <-r.errCh:
 		return err
 	}
+}
+
+// sendCommand starts the run on the agent. Connect reports a stream that
+// failed, to an agent that cannot be reached for one, as io.EOF on Send;
+// Receive tells why, so the caller gets the agent's code.
+func (r *run) sendCommand(device, command string, cmdArgs []string) error {
+	err := r.send(&pb.RunRequest{
+		Msg: &pb.RunRequest_Command{
+			Command: &pb.Command{
+				Device:  device,
+				Command: command,
+				Args:    cmdArgs,
+			},
+		},
+	})
+	if errors.Is(err, io.EOF) {
+		_, err = r.stream.Receive()
+	}
+
+	return err
 }
 
 // receiveLoop is the receive routine: it renders the agent's responses, drives
