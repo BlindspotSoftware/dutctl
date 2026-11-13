@@ -211,8 +211,8 @@ Module logging is for the **admin/operator** (the person who wrote the config an
 **Three logging regions, enforced by `forbidigo`** (see the "slog logging buckets" block in [`.golangci.yml`](.golangci.yml)) — you don't have to decide the idiom, the linter guides you:
 
 - **Client** (`cmds/dutctl` and its output rendering): `slog.Debug`/`slog.Warn` only — its two-channel output model. `slog.Info`/`Error`/… are rejected.
-- **Agent/server setup** (process bootstrap, module `Init`/`Deinit` lifecycle summaries, the frozen-logger objects): no request context, so log through the `slog` package directly (`slog.Info`, `slog.Error`, …).
-- **Agent/server request path** (RPC handlers, broker/workers, relay, modules): obtain the logger from the request context — `log.FromContext(ctx).X` — never bare `slog`.
+- **Agent/server setup** (process bootstrap, the frozen-logger objects): no request context, so log through the `slog` package directly (`slog.Info`, `slog.Error`, …).
+- **Agent/server request path** (RPC handlers, broker/workers, relay, modules, and the module `Init`/`Deinit` lifecycle): obtain the logger from the context — `log.FromContext(ctx).X` — never bare `slog`.
 
 The default (any file not explicitly listed as a client or setup file in the exclusions) is the strictest request-path rule, so new code is nudged toward `log.FromContext(ctx)` automatically.
 
@@ -223,7 +223,7 @@ Levels:
 - `Info` — normal operational milestones; a few lines per request (request received/finished, running a module, listening).
 - `Debug` — internal tracing (per-message traffic, worker start/stop, module init/deinit).
 
-An error returned up the call stack is logged once where it becomes terminal (the RPC handler), not at every hop. Module bodies should not log lifecycle markers (`"Run called"`); the framework logs the transition and sets the scope.
+**Log an error once**, where it becomes terminal — on the agent, the RPC handler — not at every hop it passes on the way up. A lower layer may log one detail line in its own scope when the handler's summary would lose what only that layer knows, such as which module failed; a comment marks the line as deliberate ([ADR-0025](docs/decisions/0025-map-errors-to-connect-codes-only-in-rpc-handlers.md#decision-outcome)). Module bodies should not log lifecycle markers (`"Run called"`); the framework logs the transition and sets the scope.
 
 ### Documentation Style Guide
 

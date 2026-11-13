@@ -15,8 +15,8 @@
 // signatures, and each component then logs only its own concern while the
 // surrounding attributes and scope are already attached.
 //
-// FromContext falls back to slog.Default(), so code that has no request context
-// (process bootstrap, module Init/Deinit) still logs through the same backend.
+// FromContext falls back to slog.Default(), so code that has no request context,
+// such as process bootstrap, still logs through the same backend.
 //
 // # Scope
 //
