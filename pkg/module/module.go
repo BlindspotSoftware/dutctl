@@ -41,20 +41,24 @@ type Module interface {
 	// of this method to provide a generic help message for all possible configurations,
 	// but rather usage information for the current configuration.
 	Help() string
-	// Init is called once when the dutagent service is started.
-	// It's a good place to establish connections or allocate resources and check whether
-	// the module is configured and functional. It is also called when a command containing this
-	// module is called as a dry-run to check the configuration.
+	// Init is called once when the dutagent service is started, and by
+	// dutagent -dry-run, which initializes the modules and exits. Init checks
+	// whether the module is configured and functional: it validates the options,
+	// allocates resources, and checks what the module needs on the agent, such
+	// as a tool on the PATH, a key file or hardware attached to the agent, so
+	// that a dry run reveals what is missing. It does not contact the device
+	// under test or its BMC, which may be off when the agent starts: no dial, no
+	// serial port, no BMC session. A module connects to them when a command runs.
 	//
 	// A non-nil error marks the module as non-functional. The agent aggregates Init
 	// errors across all modules rather than failing on the first, and reports them
 	// together (at startup, and for a dry-run). The error is treated opaquely.
 	//
 	// The context carries a logger scoped to this module; obtain it with
-	// log.FromContext(ctx). It is done 5 minutes after the agent began to
-	// initialize the modules, or earlier when the agent is asked to stop during
-	// startup. Init should then return promptly: the agent's startup, and with it
-	// an orderly stop, waits for it.
+	// log.FromContext(ctx). It has a deadline, currently 5 minutes after the
+	// agent began to initialize the modules, and is done earlier when the agent
+	// is asked to stop during startup. Init should then return promptly: the
+	// agent's startup, and with it an orderly stop, waits for it.
 	Init(ctx context.Context) error
 	// Deinit is called when the module is unloaded by dutagent or an internal error occurs.
 	// It is used to clean up any resources that were allocated during the Init phase and
@@ -69,8 +73,8 @@ type Module interface {
 	// hardware as it was left.
 	//
 	// The context carries a logger scoped to this module; obtain it with log.FromContext(ctx).
-	// It is done 15 seconds after deinitialization began; the agent then exits without
-	// waiting for the modules that have not returned.
+	// It has a deadline, currently 15 seconds after deinitialization began; the agent
+	// then exits without waiting for the modules that have not returned.
 	Deinit(ctx context.Context) error
 	// Run is the entry point and executes the module with the given arguments.
 	//
