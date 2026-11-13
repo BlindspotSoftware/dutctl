@@ -52,6 +52,6 @@ rules:
 # Require signed-off commits
 
   signed-off-by: 
-    - 1 # 0 disables the rule. For 1 it will be considered a warning for 2 an error
-    - always 
+    - 2 # 0 disables the rule. For 1 it will be considered a warning for 2 an error
+    - always
     - 'Signed-off-by:'

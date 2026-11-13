@@ -54,7 +54,7 @@ linters:
     - godoclint
     - godot
     #- godox - allow "TODO" and "FIXME" comments until v1.0
-    - goheader
+    #- goheader - the "License headers" check in the Repo workflow checks the headers
     - gomoddirectives
     - gomodguard_v2
     - goprintffuncname
