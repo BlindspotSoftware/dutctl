@@ -143,6 +143,21 @@ func (s *SSH) Run(ctx context.Context, sesh module.Session, args ...string) erro
 		return fmt.Errorf("failed to dial SSH server: %w", err)
 	}
 
+	// The SSH handshake and command run are not ctx-aware on their own; closing
+	// the connection on cancellation unblocks a blocked handshake, NewSession or
+	// CombinedOutput. The watcher exits when Run returns, so it does not outlive
+	// the call.
+	runDone := make(chan struct{})
+	defer close(runDone)
+
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = conn.Close()
+		case <-runDone:
+		}
+	}()
+
 	sshConn, chans, reqs, err := ssh.NewClientConn(conn, s.addr, s.config)
 	if err != nil {
 		_ = conn.Close()
@@ -152,20 +167,6 @@ func (s *SSH) Run(ctx context.Context, sesh module.Session, args ...string) erro
 
 	client := ssh.NewClient(sshConn, chans, reqs)
 	defer client.Close()
-
-	// The SSH handshake and command run are not ctx-aware on their own; closing
-	// the client on cancellation unblocks a blocked NewSession/CombinedOutput.
-	// The watcher exits when Run returns, so it does not outlive the call.
-	runDone := make(chan struct{})
-	defer close(runDone)
-
-	go func() {
-		select {
-		case <-ctx.Done():
-			_ = client.Close()
-		case <-runDone:
-		}
-	}()
 
 	session, err := client.NewSession()
 	if err != nil {
