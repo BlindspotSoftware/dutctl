@@ -73,5 +73,10 @@ should meet real users before v1.0.0 promises to keep them stable.
     Latest.
   - 2026-08: the `go install` commands in the README were pinned to the exact
     release tag, which release-please updates with each release.
+  - 2026-11: after 1.0.0-alpha.5, the pre-releases became betas, as the
+    release plan foresaw. `prerelease-type` changed to `beta`, and a
+    `Release-As: v1.0.0-beta.1` footer set the first beta once, because
+    release-please only counts up the number of a version that already has a
+    pre-release suffix.
 
 Recorded retroactively in October 2026.

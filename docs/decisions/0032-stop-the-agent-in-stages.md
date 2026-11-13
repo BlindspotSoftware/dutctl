@@ -100,6 +100,8 @@ close modes, and `cmds/dutagent/lifecycle_test.go` the bound on Deinit.
   through their contexts.
 - [ADR-0031](0031-keep-a-device-busy-until-its-modules-return.md): a run ends
   only once its modules have returned.
+- [ADR-0036](0036-run-a-users-different-commands-side-by-side.md): a stopping
+  agent waits for the lease of every run.
 - [cmds/dutagent/shutdown.go](../../cmds/dutagent/shutdown.go) holds the
   stages, and [internal/dutagent/locker](../../internal/dutagent/locker) the
   drain and close modes.

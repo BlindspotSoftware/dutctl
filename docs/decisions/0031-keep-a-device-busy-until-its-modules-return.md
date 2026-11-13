@@ -93,6 +93,9 @@ and `TestWarnUntilReturned` keep the rule, and so does
   a time.
 - [ADR-0032](0032-stop-the-agent-in-stages.md): the stop stages wait for the
   modules as well.
+- [ADR-0036](0036-run-a-users-different-commands-side-by-side.md): a user's
+  different commands run side by side, each with a lease of its own, and the
+  device stays busy until the last lease ends.
 - [docs/dutagent-shutdown.md](../dutagent-shutdown.md) lists how a command ends
   and what that means for its device. [docs/module_guide.md](../module_guide.md)
   and [pkg/module/module.go](../../pkg/module/module.go) state the module

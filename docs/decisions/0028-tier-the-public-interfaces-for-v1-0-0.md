@@ -79,5 +79,8 @@ rules, but no CI job runs them yet.
 - [ADR-0034](0034-version-the-relay-protocol-as-alpha.md): moves the relay
   service out of `dutctl.v1`, the package of the RPC protocol, into an alpha
   package.
+- Later changes:
+  - 2026-11: the beta phase began with 1.0.0-beta.1, and the README marks it
+    as the current phase.
 
 Recorded retroactively in October 2026.
