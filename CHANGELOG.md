@@ -1,5 +1,59 @@
 # Changelog
 
+## [1.0.0-beta.2](https://github.com/BlindspotSoftware/dutctl/compare/v1.0.0-beta.1...v1.0.0-beta.2) (2026-11-13)
+
+
+### ⚠ BREAKING CHANGES
+
+* the modules dummy-status, dummy-console and dummy-ft are gone, and a configuration that uses them no longer loads. Use wrap-print, wrap-raw, wrap-upload and wrap-download instead. The example configuration moved from contrib/ into the demo package.
+
+### Features
+
+* replace the dummy modules with wrap modules and a simulated board ([4950152](https://github.com/BlindspotSoftware/dutctl/commit/4950152b63d6d69c8433833f4f378a26ad0c3ba9))
+
+
+### Bug Fixes
+
+* close the flash image file after every transfer ([eb6cd0a](https://github.com/BlindspotSoftware/dutctl/commit/eb6cd0ab9f8f72be1be1b4def51939dcd1aa8a2a))
+* end a cancelled ssh command during the handshake ([0dd8bf8](https://github.com/BlindspotSoftware/dutctl/commit/0dd8bf84fe7cbeb9bc516d46e74cb808ca30e0f2))
+* fail an ipmi or wifisocket command the module does not know ([90617a0](https://github.com/BlindspotSoftware/dutctl/commit/90617a0f22e0f9516e73dcb1646bfbf6d08d5c57))
+* fail an upload of the file module whose file does not close ([20614e8](https://github.com/BlindspotSoftware/dutctl/commit/20614e87bb9ce704af03dec5887cef2c87b8d35e))
+* forward a quiet shell command's stderr ([4caf5cf](https://github.com/BlindspotSoftware/dutctl/commit/4caf5cf8ce772a6f0aa50f3ce06d5b00e1288dca))
+* give every flash run an image file of its own ([c0337b6](https://github.com/BlindspotSoftware/dutctl/commit/c0337b6bf676e601a011719fd76160b0a74cf3dd))
+* keep every oneline record on one line ([3a0e871](https://github.com/BlindspotSoftware/dutctl/commit/3a0e8711b110b0cb01b90bfd81572ecbfcbcb34e))
+* leave an active-low gpio button released when the agent stops ([7f1e54d](https://github.com/BlindspotSoftware/dutctl/commit/7f1e54d87b48117e97353a9e49269d3636de3760))
+* log the address the RPC service bound, once it is bound ([0a8c019](https://github.com/BlindspotSoftware/dutctl/commit/0a8c01935c72da48486c98094bf3ca8ea6b2a0c1))
+* remove the file the dummy file transfer module saves ([6f9c63a](https://github.com/BlindspotSoftware/dutctl/commit/6f9c63a044a621c71e8d20a367937bc8b16d26ca))
+* remove the image of a flash-emulate run when the run ends ([11b6f42](https://github.com/BlindspotSoftware/dutctl/commit/11b6f42fb19c869427830f45372e3ac581e19fe7))
+* show the configured duration in the help of time-wait ([fc2ed2e](https://github.com/BlindspotSoftware/dutctl/commit/fc2ed2e82ca5137b90542f8362579881869b9827))
+
+
+### Documentation
+
+* ask modules to keep the files of a run in a directory of its own ([fb30713](https://github.com/BlindspotSoftware/dutctl/commit/fb30713a96079d1cd58aa00bd7ea3924a3344d42))
+* follow the moved example configuration and workflows in the decision records ([f8876c4](https://github.com/BlindspotSoftware/dutctl/commit/f8876c4704961803fe0accaebc6c12c559d15c25))
+* link the later decisions that the decision records lacked ([9e45803](https://github.com/BlindspotSoftware/dutctl/commit/9e4580372ef8c36bfd474ebcfee3d6804dd34bb9))
+* record the decision to keep the files of a run in a directory of its own ([d6bb2d9](https://github.com/BlindspotSoftware/dutctl/commit/d6bb2d955396ab4b099fa1107e8ada699b09b55c))
+* record the decision to pre-review pull requests with Copilot ([af53c0a](https://github.com/BlindspotSoftware/dutctl/commit/af53c0a9595c80cd0de103d95f7d48d98f7567b5))
+* say what a module's Init checks and what it leaves alone ([14cae86](https://github.com/BlindspotSoftware/dutctl/commit/14cae865fa7ed20810f3915f98b7c4a006200f35))
+* say what becomes of input the user sends before a console opens ([d3c54a5](https://github.com/BlindspotSoftware/dutctl/commit/d3c54a55b7dfabaceeaec4850dc71631509df414))
+* update the logging guide for the module lifecycle and errors ([b547bee](https://github.com/BlindspotSoftware/dutctl/commit/b547beeb80aef99bad126a692aa10ad8fd38ecce))
+
+
+### Other Work
+
+* build dutctl and dutagent with the Taskfile again ([b0065e6](https://github.com/BlindspotSoftware/dutctl/commit/b0065e698ae5ee7e0fc559b3a1b12a642787c74b))
+* bump golang.org/x/mod from 0.42.0 to 0.43.0 ([7f5d123](https://github.com/BlindspotSoftware/dutctl/commit/7f5d123035301ca65a0bf3edd41d20336ae94ae6))
+* bump golang.org/x/term from 0.47.0 to 0.48.0 ([8a55e7a](https://github.com/BlindspotSoftware/dutctl/commit/8a55e7a4d59dbfbc6df64e4e81597dd596367491))
+* check every agent configuration of the repository in the unit tests ([12bf522](https://github.com/BlindspotSoftware/dutctl/commit/12bf522292d4e80c353557b21f38437883fdb032))
+* check the session, the configuration and the modules end to end ([299baae](https://github.com/BlindspotSoftware/dutctl/commit/299baae2586a9647343508e64cc0bcd22a91e0bb))
+* create the temporary directory the example unit points TMPDIR at ([536ab82](https://github.com/BlindspotSoftware/dutctl/commit/536ab826f26e02e77b65f70e9dc804947b8c1f68))
+* keep the paths of a file transfer in the run's locals ([74fae00](https://github.com/BlindspotSoftware/dutctl/commit/74fae003b20348c2a6ce5eba2d6814c072ef47cc))
+* let the team review the files that steer Copilot's review ([bf90678](https://github.com/BlindspotSoftware/dutctl/commit/bf90678cc3531af94a157f3437332651adeab597))
+* run dutctl against a local dutagent ([78ee6f9](https://github.com/BlindspotSoftware/dutctl/commit/78ee6f96aa364887c30dc59e0e8901ebfcb2c0d7))
+* share the pseudo-terminal helpers between test packages ([539fb47](https://github.com/BlindspotSoftware/dutctl/commit/539fb47b6fc09dd9bf785aba1ed5a2d14b8ef4c1))
+* wrap the errors of the dummy file transfer module ([2dfa269](https://github.com/BlindspotSoftware/dutctl/commit/2dfa26907187a89956d8e3e4ce925528ae77aaad))
+
 ## [1.0.0-beta.1](https://github.com/BlindspotSoftware/dutctl/compare/v1.0.0-alpha.5...v1.0.0-beta.1) (2026-11-05)
 
 
