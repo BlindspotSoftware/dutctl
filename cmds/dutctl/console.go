@@ -50,6 +50,12 @@ type console struct {
 	tty        bool // stdin is a terminal
 	fd         int  // stdin's descriptor, valid when tty
 
+	// onConsole, when set, is told as a console opens, with whether the
+	// terminal went raw for it, and as it closes, once the terminal is back:
+	// a TUI announces the console with it, and rawHint is
+	// then left to it. It is set before the run and called without the lock.
+	onConsole func(open, raw bool)
+
 	mu       sync.Mutex
 	open     bool
 	id       uint32
@@ -86,6 +92,27 @@ func newConsole(stdin io.Reader, stdout, stderr io.Writer, textFormat bool) *con
 	return con
 }
 
+// forRun returns a fresh console over the same streams for the next run, as a
+// console serves one run: once finished, it ignores every open. The line-end
+// wrappers are shared, so the formatter and the log handler that write
+// through them keep their lines at column 0 while the new console is raw.
+func (c *console) forRun() *console {
+	return &console{
+		stdin:      c.stdin,
+		stdout:     c.stdout,
+		stderr:     c.stderr,
+		term:       c.term,
+		outText:    c.outText,
+		errText:    c.errText,
+		outTTY:     c.outTTY,
+		errTTY:     c.errTTY,
+		textFormat: c.textFormat,
+		tty:        c.tty,
+		fd:         c.fd,
+		changed:    make(chan struct{}),
+	}
+}
+
 // rawHint is said once per raw console, on standard error: the one way to end
 // the session from the keyboard.
 const rawHint = "\n[dutctl] raw console: Ctrl-A x ends it, Ctrl-A twice sends Ctrl-A, Ctrl-A e toggles local echo\n"
@@ -106,7 +133,7 @@ func (c *console) opened(consoleID uint32, mode pb.ConsoleMode) bool {
 		return false
 	}
 
-	leftRaw := false
+	wasOpen, leftRaw := c.open, false
 	if c.open {
 		leftRaw = c.closeCurrent()
 	}
@@ -125,11 +152,14 @@ func (c *console) opened(consoleID uint32, mode pb.ConsoleMode) bool {
 
 	c.mu.Unlock()
 
-	if leftRaw {
-		c.endRawLine()
+	if wasOpen {
+		c.afterClose(leftRaw)
 	}
 
-	if enteredRaw {
+	switch {
+	case c.onConsole != nil:
+		c.onConsole(true, enteredRaw)
+	case enteredRaw:
 		// Through the wrapper, so a terminal gets its line ends.
 		fmt.Fprint(c.errText, rawHint)
 	}
@@ -181,11 +211,12 @@ func (c *console) enterRaw() bool {
 // call without an open console.
 func (c *console) closed() {
 	c.mu.Lock()
+	wasOpen := c.open
 	leftRaw := c.closeCurrent()
 	c.mu.Unlock()
 
-	if leftRaw {
-		c.endRawLine()
+	if wasOpen {
+		c.afterClose(leftRaw)
 	}
 }
 
@@ -194,11 +225,24 @@ func (c *console) closed() {
 func (c *console) finish() {
 	c.mu.Lock()
 	c.finished = true
+	wasOpen := c.open
 	leftRaw := c.closeCurrent()
 	c.mu.Unlock()
 
+	if wasOpen {
+		c.afterClose(leftRaw)
+	}
+}
+
+// afterClose completes the close of a console once the lock is released: a
+// line raw mode left is ended, and onConsole is told.
+func (c *console) afterClose(leftRaw bool) {
 	if leftRaw {
 		c.endRawLine()
+	}
+
+	if c.onConsole != nil {
+		c.onConsole(false, leftRaw)
 	}
 }
 

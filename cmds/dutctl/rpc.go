@@ -22,6 +22,7 @@ import (
 	"github.com/BlindspotSoftware/dutctl/internal/rpc"
 	"github.com/BlindspotSoftware/dutctl/pkg/headers"
 	"github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1/dutctlv1connect"
+	"github.com/muesli/cancelreader"
 
 	pb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1"
 )
@@ -317,6 +318,12 @@ type run struct {
 	// the send routine input.
 	sendMu sync.Mutex
 
+	// stdin is the user's input as the send routine reads it: the console's,
+	// wrapped where a read pending at the end of the run can be cancelled.
+	stdin io.Reader
+	// sendDone is closed once the send routine returned.
+	sendDone chan struct{}
+
 	// cancel ends the run, which both routines then leave.
 	cancel context.CancelFunc
 	// errCh takes the failure that ends a routine, with room for both.
@@ -341,48 +348,71 @@ func eofReq(id uint32) *pb.RunRequest {
 	}}}
 }
 
-// runRPC executes command on device, streaming module output, driving the
-// console a module opens and forwarding input and file transfers until the
-// run ends. It returns nil on normal completion, errInterrupted when a signal
-// (Ctrl-C) ended the run, or a wrapped error from a worker goroutine (stream
-// send/receive or file I/O). A connect status from the agent surfaces through
-// the returned error; exit() renders it.
+// runRPC runs command on device for the command line, on a console over the
+// client's streams.
 func (app *application) runRPC(ctx context.Context, device, command string, cmdArgs []string) error {
+	return app.runWith(ctx, app.console.forRun(), app.agent(), device, command, cmdArgs)
+}
+
+// runWith executes command on device at agent, streaming module output,
+// driving the console con, which serves this run only, and forwarding input
+// and file transfers until the run ends. It returns nil on normal
+// completion, errInterrupted when a signal (Ctrl-C) ended the run, or a
+// wrapped error from a worker goroutine (stream send/receive or file I/O). A
+// connect status from the agent surfaces through the returned error; exit()
+// renders it.
+//
+// It returns with the terminal as it found it, the stream closed and no
+// routine left reading the user's input, so the caller may run again on the
+// same streams.
+func (app *application) runWith(ctx context.Context, con *console, agent agentClient, device, command string, cmdArgs []string) error {
 	const numWorkers = 2 // The send and receive worker goroutines
 
-	// ctx is the shared signal context from dispatch, cancelled on SIGINT,
-	// SIGTERM and SIGHUP so a signal terminates gracefully (running the normal
-	// teardown, restoring the terminal and flushing the warning summary)
-	// instead of killing the process. A stream has no overall deadline. runCtx
-	// is the child the workers cancel on completion.
+	// ctx is the caller's signal context, cancelled on SIGINT, SIGTERM and
+	// SIGHUP so a signal terminates gracefully (running the normal teardown,
+	// restoring the terminal and flushing the warning summary) instead of
+	// killing the process. A stream has no overall deadline. runCtx is the
+	// child the workers cancel on completion.
 	runCtx, cancelRunCtx := context.WithCancel(ctx)
 	defer cancelRunCtx()
 
 	// Raw mode ends with the run on every path: a normal end, the escape
 	// sequence, a signal, a lost connection.
-	defer app.console.finish()
+	defer con.finish()
 
-	stream := app.rpcClient.Run(runCtx)
-	stream.RequestHeader().Set(headers.User, app.user)
+	stream := agent.client.Run(runCtx)
+	stream.RequestHeader().Set(headers.User, agent.user)
 
 	r := &run{
 		app:     app,
 		stream:  stream,
-		console: app.console,
+		console: con,
 		metadata: map[string]string{
-			output.MetaServer:  app.serverAddr,
+			output.MetaServer:  agent.addr,
 			output.MetaMsg:     "Run Response",
 			output.MetaDevice:  device,
 			output.MetaCommand: command,
 			output.MetaArgs:    strings.Join(cmdArgs, " "),
 		},
-		cancel: cancelRunCtx,
-		errCh:  make(chan error, numWorkers),
+		stdin:    con.stdin,
+		sendDone: make(chan struct{}),
+		cancel:   cancelRunCtx,
+		errCh:    make(chan error, numWorkers),
 	}
+	defer r.closeStream()
 
 	err := r.sendCommand(device, command, cmdArgs)
 	if err != nil {
 		return err
+	}
+
+	// A terminal or a pipe can be polled, so a read still pending on it when
+	// the run ends can be cancelled; a regular file cannot, and keeps the
+	// plain reader, whose reads do not block for long.
+	input, err := cancelreader.NewReader(con.stdin)
+	if err == nil {
+		r.stdin = input
+		defer r.releaseInput(input)
 	}
 
 	go r.receiveLoop(runCtx)
@@ -422,6 +452,36 @@ func (r *run) sendCommand(device, command string, cmdArgs []string) error {
 	}
 
 	return err
+}
+
+// releaseInput takes the user's input back from the send routine once the run
+// is over, so the next reader of a terminal, the next run or a TUI's prompt,
+// gets every key. The order matters: the stream is closed first, so a routine
+// waiting for a console leaves and a send held by flow control, to an agent
+// that stopped reading, returns; then a read pending on the input is woken and
+// the routine awaited. The receive routine is not awaited; the closed stream
+// ends it. A reader that cannot cancel a pending read, one that is not a file,
+// is left to it.
+func (r *run) releaseInput(input cancelreader.CancelReader) {
+	r.closeStream()
+
+	if input.Cancel() {
+		<-r.sendDone
+	}
+
+	_ = input.Close() // releases the poller only; stdin stays open
+}
+
+// closeStream ends the stream with the run. Go's HTTP/2 client stops watching
+// the run's context once the agent answered, so a cancelled run ends its
+// stream, and the agent its module, only when the client closes it, not
+// before the process exits. The run is cancelled first, so the close does not
+// wait for an answer.
+func (r *run) closeStream() {
+	r.cancel()
+
+	_ = r.stream.CloseRequest()
+	_ = r.stream.CloseResponse()
 }
 
 // receiveLoop is the receive routine: it renders the agent's responses, drives
@@ -583,11 +643,12 @@ func (r *run) consoleOutput(msg *pb.ConsoleOutput) {
 //
 // The routine does not cancel the run when the input ends, so the agent's
 // remaining output is still received; the quit sequence ends the run through
-// the console, with a grace period before the run is cancelled. stdin's Read
-// is not interruptible, so after a run that ended otherwise the routine stays
-// parked in it until the process exits; dutctl runs one command per
-// invocation, so nothing is lost.
+// the console, with a grace period before the run is cancelled. On a terminal
+// or a pipe the read is cancelled when the run ends (see releaseInput); a
+// regular file is read as before.
 func (r *run) sendLoop(ctx context.Context) {
+	defer close(r.sendDone)
+
 	buf := make([]byte, inputChunk)
 
 	var (
@@ -601,7 +662,7 @@ func (r *run) sendLoop(ctx context.Context) {
 			return
 		}
 
-		count, err := r.console.stdin.Read(buf)
+		count, err := r.stdin.Read(buf)
 		if count > 0 {
 			quit, sendErr := r.handleInput(ctx, &esc, &filled, buf[:count])
 			if sendErr != nil {
