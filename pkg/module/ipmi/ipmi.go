@@ -70,6 +70,7 @@ const (
 	cycle          = "cycle"
 	reset          = "reset"
 	status         = "status"
+	commands       = "on, off, cycle, reset, status" // commands lists what Run accepts, for its errors
 )
 
 // Init validates and normalizes the configuration, applying the default port and
@@ -202,14 +203,11 @@ func (i *IPMI) Deinit(ctx context.Context) error {
 }
 
 // Run executes a single IPMI command taken from the first argument: on, off,
-// cycle, reset or status. A missing or unknown command is reported to the
-// session and returns a nil error; a failure talking to the BMC returns an
-// error.
+// cycle, reset or status. A missing or unknown command returns an error that
+// names the available commands, as does a failure talking to the BMC.
 func (i *IPMI) Run(ctx context.Context, s module.Session, args ...string) error {
 	if len(args) == 0 {
-		s.Println("No command specified. Try 'help' for usage.")
-
-		return nil
+		return fmt.Errorf("no command specified, available commands: %s", commands)
 	}
 
 	command := strings.ToLower(args[0])
@@ -220,10 +218,7 @@ func (i *IPMI) Run(ctx context.Context, s module.Session, args ...string) error 
 	case status:
 		return i.handleStatusCommand(ctx, s)
 	default:
-		s.Println("Unknown command: " + command)
-		s.Println("Available commands: on, off, cycle, reset, status")
-
-		return nil
+		return fmt.Errorf("unknown command %q, available commands: %s", command, commands)
 	}
 }
 
