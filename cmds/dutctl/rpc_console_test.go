@@ -159,6 +159,9 @@ func serveAgent(t *testing.T, agent dutctlv1connect.DeviceServiceHandler) *httpt
 	srv.Config.Protocols.SetUnencryptedHTTP2(true)
 	srv.Start()
 	t.Cleanup(srv.Close)
+	// Runs first: a script still waiting for the client after a failed test
+	// would keep Close waiting for good.
+	t.Cleanup(srv.CloseClientConnections)
 
 	return srv
 }
@@ -393,6 +396,60 @@ func TestRunRPCEndsWithoutInputEnd(t *testing.T) {
 
 	if got := stdout.String(); got != "done\n" {
 		t.Errorf("stdout = %q, want \"done\\n\"", got)
+	}
+}
+
+// A run ended by a signal closes its stream, so the agent ends the command
+// although the client process goes on, as a TUI does.
+func TestRunWithInterruptedEndsTheStream(t *testing.T) {
+	handlerDone := make(chan struct{})
+
+	agent := &scriptedAgent{}
+	agent.run = func(stream runStreamServer) error {
+		defer close(handlerDone)
+
+		if _, err := agent.receive(stream); err != nil {
+			return err
+		}
+
+		if err := stream.Send(openRes(1, pb.ConsoleMode_CONSOLE_MODE_LINE)); err != nil {
+			return err
+		}
+
+		_, err := agent.receive(stream) // input that never comes
+
+		return err
+	}
+
+	pr, pw := io.Pipe()
+	t.Cleanup(func() { _ = pw.Close() })
+
+	app, _, _ := newConsoleApp(t, agent, pr, "")
+
+	opened := make(chan struct{}, 1)
+	con := app.console.forRun()
+	con.onConsole = func(open, _ bool) {
+		if open {
+			opened <- struct{}{}
+		}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+
+	go func() { done <- app.runWith(ctx, con, app.agent(), "dev", "cmd", nil) }()
+
+	<-opened
+	cancel() // the signal
+
+	if err := <-done; !errors.Is(err, errInterrupted) {
+		t.Fatalf("runWith = %v, want errInterrupted", err)
+	}
+
+	select {
+	case <-handlerDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the agent's command still runs after the interrupted run returned")
 	}
 }
 

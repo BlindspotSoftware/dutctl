@@ -71,6 +71,18 @@ func Termios(t *testing.T, f *os.File) *unix.Termios {
 	return tio
 }
 
+// SetSize sets the window size of the terminal f, as a terminal emulator does
+// when its window is resized: a program on it then sees cols columns and rows
+// rows. A fresh pseudo-terminal has none.
+func SetSize(t *testing.T, f *os.File, cols, rows uint16) {
+	t.Helper()
+
+	err := unix.IoctlSetWinsize(int(f.Fd()), unix.TIOCSWINSZ, &unix.Winsize{Row: rows, Col: cols})
+	if err != nil {
+		t.Fatalf("TIOCSWINSZ: %v", err)
+	}
+}
+
 // ReadUntil reads from file until want arrived and returns what arrived. The
 // files of a pseudo-terminal are in blocking mode once their Fd was taken, so
 // a deadline would not bound the read: it runs on a goroutine, and the test

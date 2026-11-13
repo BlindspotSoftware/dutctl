@@ -7,6 +7,7 @@ require (
 	github.com/bougou/go-ipmi v0.8.2
 	github.com/go-playground/validator/v10 v10.30.6
 	github.com/google/go-cmp v0.7.0
+	github.com/muesli/cancelreader v0.2.2
 	github.com/stianeikeland/go-rpio/v4 v4.6.0
 	go.bug.st/serial v1.8.0
 	golang.org/x/crypto v0.58.0

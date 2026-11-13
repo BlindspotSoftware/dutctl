@@ -8,12 +8,13 @@ package style
 
 // ANSI color codes.
 const (
-	Reset  = "\033[0m"
-	Gray   = "\033[90m" // muted: context / metadata
-	Cyan   = "\033[36m" // info: file transfer
-	Yellow = "\033[33m" // warning
-	Red    = "\033[31m" // error
-	Green  = "\033[32m" // success
+	Reset   = "\033[0m"
+	Gray    = "\033[90m" // muted: context / metadata
+	Cyan    = "\033[36m" // info: file transfer
+	Yellow  = "\033[33m" // warning
+	Red     = "\033[31m" // error
+	Green   = "\033[32m" // success
+	Magenta = "\033[35m" // the device owns the terminal: a raw console
 )
 
 // Markers prefix a line of certain client output so it is visually
