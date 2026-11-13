@@ -132,6 +132,23 @@ func (a *scriptedAgent) echoUntilEOF(stream runStreamServer, id uint32, mode pb.
 func newConsoleApp(t *testing.T, agent *scriptedAgent, stdin io.Reader, format string) (*application, *bytes.Buffer, *bytes.Buffer) {
 	t.Helper()
 
+	var stdout, stderr bytes.Buffer
+
+	args := []string{"dutctl", "-s", serveAgent(t, agent).Listener.Addr().String(), "-log", "none"}
+	if format != "" {
+		args = append(args, "-f", format)
+	}
+
+	app := newApp(stdin, &stdout, &stderr, func(int) {}, args)
+	app.setupRPCClient()
+
+	return app, &stdout, &stderr
+}
+
+// serveAgent serves agent over h2c, as dutagent does, until the test ends.
+func serveAgent(t *testing.T, agent dutctlv1connect.DeviceServiceHandler) *httptest.Server {
+	t.Helper()
+
 	mux := http.NewServeMux()
 	path, handler := dutctlv1connect.NewDeviceServiceHandler(agent)
 	mux.Handle(path, handler)
@@ -143,17 +160,7 @@ func newConsoleApp(t *testing.T, agent *scriptedAgent, stdin io.Reader, format s
 	srv.Start()
 	t.Cleanup(srv.Close)
 
-	var stdout, stderr bytes.Buffer
-
-	args := []string{"dutctl", "-s", strings.TrimPrefix(srv.URL, "http://"), "-log", "none"}
-	if format != "" {
-		args = append(args, "-f", format)
-	}
-
-	app := newApp(stdin, &stdout, &stderr, func(int) {}, args)
-	app.setupRPCClient()
-
-	return app, &stdout, &stderr
+	return srv
 }
 
 // The client sends nothing before a console opens, marks its input with the
@@ -386,5 +393,27 @@ func TestRunRPCEndsWithoutInputEnd(t *testing.T) {
 
 	if got := stdout.String(); got != "done\n" {
 		t.Errorf("stdout = %q, want \"done\\n\"", got)
+	}
+}
+
+// A run on an agent that cannot be reached says so, with the code the
+// connection failed with, rather than that the stream ended.
+func TestRunRPCAgentUnreachable(t *testing.T) {
+	srv := serveAgent(t, &scriptedAgent{})
+	addr := srv.Listener.Addr().String()
+
+	srv.CloseClientConnections()
+	srv.Close()
+
+	app := newApp(strings.NewReader(""), io.Discard, io.Discard, func(int) {}, []string{"dutctl", "-s", addr, "-log", "none"})
+	app.setupRPCClient()
+
+	err := app.runRPC(context.Background(), "dev", "cmd", nil)
+	if connect.CodeOf(err) != connect.CodeUnavailable {
+		t.Fatalf("runRPC = %v, want an Unavailable error", err)
+	}
+
+	if msg := userFacingError(err, addr); !strings.HasPrefix(msg, "cannot reach dutagent at "+addr) {
+		t.Errorf("the error reads %q", msg)
 	}
 }
