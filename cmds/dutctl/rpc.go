@@ -17,8 +17,11 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"github.com/BlindspotSoftware/dutctl/internal/buildinfo"
 	"github.com/BlindspotSoftware/dutctl/internal/output"
+	"github.com/BlindspotSoftware/dutctl/internal/rpc"
 	"github.com/BlindspotSoftware/dutctl/pkg/headers"
+	"github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1/dutctlv1connect"
 
 	pb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1"
 )
@@ -35,15 +38,58 @@ var errInterrupted = errors.New("interrupted")
 // streaming Run deliberately has no overall deadline (see runRPC).
 const unaryTimeout = 30 * time.Second
 
+// agentClient is one dutagent and the identity the client presents to it. It
+// is a value, so a caller that holds one keeps talking to the same agent as
+// whoever changes theirs. Its unary calls return the agent's answer as data;
+// the command line's xRPC methods print it.
+type agentClient struct {
+	addr   string // the completed dial address, named in the output's metadata
+	user   string // sent with the calls that act for the user: Run, Lock and Unlock
+	client dutctlv1connect.DeviceServiceClient
+}
+
+func newAgentClient(addr, user string) agentClient {
+	return agentClient{
+		addr: addr,
+		user: user,
+		client: rpc.NewDeviceClient(
+			addr,
+			connect.WithInterceptors(rpc.NewVersionAdvisor(buildinfo.Version)),
+		),
+	}
+}
+
+// agent returns the agent the command line talks to.
+func (app *application) agent() agentClient {
+	return agentClient{addr: app.serverAddr, user: app.user, client: app.rpcClient}
+}
+
 func (app *application) listRPC(ctx context.Context) error {
+	devices, err := app.agent().listDevices(ctx)
+	if err != nil {
+		return err
+	}
+
+	app.formatter.WriteContent(output.Content{
+		Type: output.TypeDeviceList,
+		Data: devices,
+		Metadata: map[string]string{
+			output.MetaServer: app.serverAddr,
+			output.MetaMsg:    "List Response",
+		},
+	})
+
+	return nil
+}
+
+// listDevices returns the agent's devices with their lock state.
+func (ac agentClient) listDevices(ctx context.Context) ([]output.DeviceEntry, error) {
 	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
 	defer cancel()
 
-	req := connect.NewRequest(&pb.ListRequest{})
-
-	res, err := app.rpcClient.List(ctx, req)
+	res, err := ac.client.List(ctx, connect.NewRequest(&pb.ListRequest{}))
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	devices := make([]output.DeviceEntry, 0, len(res.Msg.GetDevices()))
@@ -60,16 +106,7 @@ func (app *application) listRPC(ctx context.Context) error {
 		devices = append(devices, entry)
 	}
 
-	app.formatter.WriteContent(output.Content{
-		Type: output.TypeDeviceList,
-		Data: devices,
-		Metadata: map[string]string{
-			output.MetaServer: app.serverAddr,
-			output.MetaMsg:    "List Response",
-		},
-	})
-
-	return nil
+	return devices, nil
 }
 
 // longLockWarnThreshold is the duration above which the client warns that a
@@ -105,6 +142,26 @@ func (app *application) lockRPC(ctx context.Context, device string, cmdArgs []st
 		return err
 	}
 
+	entry, err := app.agent().lockDevice(ctx, device, duration)
+	if err != nil {
+		return err
+	}
+
+	app.formatter.WriteContent(output.Content{
+		Type: output.TypeLockResult,
+		Data: entry,
+		Metadata: map[string]string{
+			output.MetaServer: app.serverAddr,
+			output.MetaMsg:    "Lock Response",
+		},
+	})
+
+	return nil
+}
+
+// lockDevice reserves device for the user for duration, 0 for the agent's
+// default, and returns the lock the agent granted.
+func (ac agentClient) lockDevice(ctx context.Context, device string, duration time.Duration) (output.DeviceEntry, error) {
 	if duration > longLockWarnThreshold {
 		slog.Warn("requested a long lock duration; release the device when you are done", "duration", duration)
 	}
@@ -116,38 +173,23 @@ func (app *application) lockRPC(ctx context.Context, device string, cmdArgs []st
 		Device:          device,
 		DurationSeconds: int64(duration.Seconds()),
 	})
-	req.Header().Set(headers.User, app.user)
+	req.Header().Set(headers.User, ac.user)
 
-	res, err := app.rpcClient.Lock(ctx, req)
+	res, err := ac.client.Lock(ctx, req)
 	if err != nil {
-		return err
+		return output.DeviceEntry{}, err
 	}
 
-	app.formatter.WriteContent(output.Content{
-		Type: output.TypeLockResult,
-		Data: output.DeviceEntry{
-			Name:      res.Msg.GetDevice(),
-			Locked:    true,
-			Owner:     res.Msg.GetLock().GetOwner(),
-			ExpiresAt: res.Msg.GetLock().GetExpiresAt(),
-		},
-		Metadata: map[string]string{
-			output.MetaServer: app.serverAddr,
-			output.MetaMsg:    "Lock Response",
-		},
-	})
-
-	return nil
+	return output.DeviceEntry{
+		Name:      res.Msg.GetDevice(),
+		Locked:    true,
+		Owner:     res.Msg.GetLock().GetOwner(),
+		ExpiresAt: res.Msg.GetLock().GetExpiresAt(),
+	}, nil
 }
 
 func (app *application) unlockRPC(ctx context.Context, device string, force bool) error {
-	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
-	defer cancel()
-
-	req := connect.NewRequest(&pb.UnlockRequest{Device: device, Force: force})
-	req.Header().Set(headers.User, app.user)
-
-	_, err := app.rpcClient.Unlock(ctx, req)
+	err := app.agent().unlockDevice(ctx, device, force)
 	if err != nil {
 		return err
 	}
@@ -164,20 +206,29 @@ func (app *application) unlockRPC(ctx context.Context, device string, force bool
 	return nil
 }
 
-func (app *application) commandsRPC(ctx context.Context, device string) error {
+// unlockDevice releases the user's reservation of device; force releases
+// another user's as well.
+func (ac agentClient) unlockDevice(ctx context.Context, device string, force bool) error {
 	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
 	defer cancel()
 
-	req := connect.NewRequest(&pb.CommandsRequest{Device: device})
+	req := connect.NewRequest(&pb.UnlockRequest{Device: device, Force: force})
+	req.Header().Set(headers.User, ac.user)
 
-	res, err := app.rpcClient.Commands(ctx, req)
+	_, err := ac.client.Unlock(ctx, req)
+
+	return err
+}
+
+func (app *application) commandsRPC(ctx context.Context, device string) error {
+	commands, err := app.agent().deviceCommands(ctx, device)
 	if err != nil {
 		return err
 	}
 
 	app.formatter.WriteContent(output.Content{
 		Type: output.TypeCommandList,
-		Data: res.Msg.GetCommands(),
+		Data: commands,
 		Metadata: map[string]string{
 			output.MetaServer: app.serverAddr,
 			output.MetaMsg:    "Commands Response",
@@ -188,24 +239,28 @@ func (app *application) commandsRPC(ctx context.Context, device string) error {
 	return nil
 }
 
-func (app *application) detailsRPC(ctx context.Context, device, command, keyword string) error {
+// deviceCommands returns the names of device's commands.
+func (ac agentClient) deviceCommands(ctx context.Context, device string) ([]string, error) {
 	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
 	defer cancel()
 
-	req := connect.NewRequest(&pb.DetailsRequest{
-		Device:  device,
-		Command: command,
-		Keyword: keyword,
-	})
+	res, err := ac.client.Commands(ctx, connect.NewRequest(&pb.CommandsRequest{Device: device}))
+	if err != nil {
+		return nil, err
+	}
 
-	res, err := app.rpcClient.Details(ctx, req)
+	return res.Msg.GetCommands(), nil
+}
+
+func (app *application) detailsRPC(ctx context.Context, device, command, keyword string) error {
+	details, err := app.agent().commandDetails(ctx, device, command, keyword)
 	if err != nil {
 		return err
 	}
 
 	app.formatter.WriteContent(output.Content{
 		Type: output.TypeCommandDetail,
-		Data: res.Msg.GetDetails(),
+		Data: details,
 		Metadata: map[string]string{
 			output.MetaServer:  app.serverAddr,
 			output.MetaMsg:     "Details Response",
@@ -216,6 +271,24 @@ func (app *application) detailsRPC(ctx context.Context, device, command, keyword
 	})
 
 	return nil
+}
+
+// commandDetails returns the agent's text on command of device for keyword,
+// the usage for keyword.Help.
+func (ac agentClient) commandDetails(ctx context.Context, device, command, keyword string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
+	defer cancel()
+
+	res, err := ac.client.Details(ctx, connect.NewRequest(&pb.DetailsRequest{
+		Device:  device,
+		Command: command,
+		Keyword: keyword,
+	}))
+	if err != nil {
+		return "", err
+	}
+
+	return res.Msg.GetDetails(), nil
 }
 
 // quitGrace is how long the client waits, after the user ended a raw console
