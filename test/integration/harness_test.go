@@ -16,8 +16,8 @@
 // need socat, and skip without it. CI runs them for every commit.
 //
 // The name of every test starts with its area, TestRPC, TestSession,
-// TestConfig, TestModules or TestSerial, so that a failure says what broke and
-// -run '^TestSerial' runs one area.
+// TestConfig, TestModules, TestSerial or TestTUI, so that a failure
+// says what broke and -run '^TestSerial' runs one area.
 //
 // With DUTCTL_INTEGRATION_COVERDIR set to an absolute directory, the binaries
 // are built with coverage of all packages of the module and write their
@@ -64,6 +64,9 @@ const (
 	// testUser is $USER for the client, so that its default identity is
 	// testUser@<host>.
 	testUser = "integration"
+	// termCols and termRows are the size of a client's terminal.
+	termCols = 100
+	termRows = 30
 )
 
 // binaries are dutagent and dutctl, built once for all tests.
@@ -647,9 +650,19 @@ type terminal struct {
 func (a *agent) startOnTerminal(t *testing.T, args ...string) *terminal {
 	t.Helper()
 
+	return a.startOnTerminalEnv(t, nil, args...)
+}
+
+// startOnTerminalEnv is startOnTerminal with env added to the client's
+// environment, such as a TERM.
+func (a *agent) startOnTerminalEnv(t *testing.T, env []string, args ...string) *terminal {
+	t.Helper()
+
 	master, slave := pty.Open(t)
+	pty.SetSize(t, slave, termCols, termRows)
 
 	cmd := newClientCmd(t, a.dir, a.home, []string{"-s", a.addr}, args...)
+	cmd.Env = append(cmd.Env, env...)
 	cmd.Stdin, cmd.Stdout = slave, slave
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true, Setctty: true, Ctty: 0}
 

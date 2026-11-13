@@ -93,6 +93,11 @@ type cliHandler struct {
 	buf      *[]string   // accumulated warning lines, shared via pointer
 	attrs    []slog.Attr
 	groups   []string
+
+	// muted paints the lines that have no colour of their own gray: the
+	// TUI sets it, where no line of the client's may read like
+	// a module's output.
+	muted bool
 }
 
 // Ensure implementing the slog.Handler interface.
@@ -129,7 +134,7 @@ func (h *cliHandler) Handle(_ context.Context, rec slog.Record) error {
 	defer h.mu.Unlock()
 
 	if h.mode == logModeDebug {
-		fmt.Fprintln(h.w, line) // live, temporal order
+		fmt.Fprintln(h.w, h.mute(line)) // live, temporal order
 
 		return nil
 	}
@@ -215,8 +220,13 @@ func (h *cliHandler) Flush() {
 	fmt.Fprintln(h.w, style.Colorize(h.useColor, style.Yellow, header))
 
 	for _, line := range *h.buf {
-		fmt.Fprintf(h.w, "  - %s\n", line)
+		fmt.Fprintln(h.w, h.mute("  - "+line))
 	}
 
 	*h.buf = (*h.buf)[:0]
+}
+
+// mute paints s gray when the handler is muted and colours.
+func (h *cliHandler) mute(s string) string {
+	return style.Colorize(h.useColor && h.muted, style.Gray, s)
 }

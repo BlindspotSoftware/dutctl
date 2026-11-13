@@ -9,6 +9,8 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+
+	"github.com/BlindspotSoftware/dutctl/internal/style"
 )
 
 func TestParseLogMode(t *testing.T) {
@@ -114,6 +116,27 @@ func TestCLIHandler_NoneMode_Silent(t *testing.T) {
 
 	if buf.Len() != 0 {
 		t.Errorf("none mode produced output:\n%s", buf.String())
+	}
+}
+
+// In the TUI the lines without a colour of their own are gray, so they do not
+// read like a module's output; on the command line they stay as they are.
+func TestCLIHandler_Muted(t *testing.T) {
+	for _, mode := range []logMode{logModeWarn, logModeDebug} {
+		for _, muted := range []bool{false, true} {
+			var buf bytes.Buffer
+
+			handler := newCLIHandler(&buf, mode, true)
+			handler.muted = muted
+
+			slog.New(handler).Warn("w1")
+			handler.Flush()
+
+			last := strings.Split(strings.TrimSuffix(buf.String(), "\n"), "\n")
+			if gray := strings.HasPrefix(last[len(last)-1], style.Gray); gray != muted {
+				t.Errorf("mode %v, muted %v: the last line %q", mode, muted, last[len(last)-1])
+			}
+		}
 	}
 }
 

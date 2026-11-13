@@ -212,10 +212,17 @@ func TestDispatch(t *testing.T) {
 		wantCmdHits  []string
 		wantDetailHi []detailsCall
 		wantUnlock   []unlockCall
+		tui          bool // the application can open the TUI
 	}{
 		{
 			name:        "no args defaults to list",
 			args:        nil,
+			wantListHit: 1,
+		},
+		{
+			name:        "no args on a pipe lists although a TUI is there",
+			args:        nil,
+			tui:         true,
 			wantListHit: 1,
 		},
 		{
@@ -280,6 +287,14 @@ func TestDispatch(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			fake := &fakeDeviceServiceClient{listDevices: tt.listDevices}
 			app := newTestApp(t, fake, tt.args...)
+
+			if tt.tui {
+				app.tui = func() error {
+					t.Error("the TUI opened on a pipe")
+
+					return nil
+				}
+			}
 
 			err := app.dispatch()
 
@@ -479,4 +494,36 @@ func equalUnlock(a, b []unlockCall) bool {
 	}
 
 	return true
+}
+
+// A bare dutctl opens the TUI only on a terminal for input and output,
+// with text output and a terminal that can draw it.
+func TestOpensTUI(t *testing.T) {
+	tests := []struct {
+		name          string
+		inTTY, outTTY bool
+		format, term  string
+		want          bool
+	}{
+		{"terminal", true, true, "", "xterm-256color", true},
+		{"explicit text", true, true, "text", "xterm", true},
+		{"piped input", false, true, "", "xterm", false},
+		{"piped output", true, false, "", "xterm", false},
+		{"json", true, true, "json", "xterm", false},
+		{"dumb terminal", true, true, "", "dumb", false},
+		{"no TERM", true, true, "", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("TERM", tt.term)
+
+			app := newTestApp(t, &fakeDeviceServiceClient{})
+			app.console.tty, app.console.outTTY, app.outputFormat = tt.inTTY, tt.outTTY, tt.format
+
+			if got := app.opensTUI(); got != tt.want {
+				t.Errorf("opensTUI() = %v, want %v", got, tt.want)
+			}
+		})
+	}
 }

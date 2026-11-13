@@ -24,6 +24,10 @@ This client app, thought, has no knowledge about the connected DUT's and their a
 information is provided by the agent on request. Who can use a device when, and what is up to you when you run several
 commands on one device at once, is described in [device-access.md](./device-access.md).
 
+Run without arguments on a terminal, dutctl opens a TUI (terminal user interface) that walks from hosts to devices to
+commands, fetching each level from the agent, and remembers your recent devices in a history file of its own; see
+[dutctl-tui.md](./dutctl-tui.md). In a pipe or a script, a bare dutctl lists the devices.
+
 ## DUT Agent (DA)
 The DUT Agent is a service designed to run on a single board computer, which can handle the wiring to the DUT (power
 control, reset, flasher, serial console, etc.) The specifics and supported operation for the wired DUTs are feed to the

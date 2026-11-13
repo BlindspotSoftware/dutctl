@@ -15,6 +15,7 @@ const (
 	Red     = "\033[31m" // error
 	Green   = "\033[32m" // success
 	Magenta = "\033[35m" // the device owns the terminal: a raw console
+	Blue    = "\033[94m" // the terminal edits the line: a line console; bright, plain blue is hard to read on dark
 )
 
 // Markers prefix a line of certain client output so it is visually

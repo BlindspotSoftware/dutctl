@@ -25,9 +25,27 @@ import (
 type crlfWriter struct {
 	w  io.Writer
 	on atomic.Bool
+	// lineOpen, when set, tells whether the last write left its line open,
+	// ended by anything but '\n'. The writers to one terminal share it, so the
+	// TUI can start a line of its own at column 0 after a run's output.
+	lineOpen *atomic.Bool
 
 	mu     sync.Mutex // serialises writes and guards lastCR
 	lastCR bool       // the previous write ended in CR, so a leading LF is not bare
+}
+
+// endLine ends the line a write to the terminal left open.
+func (c *crlfWriter) endLine() {
+	if c.lineOpen != nil && c.lineOpen.Load() {
+		_, _ = c.Write([]byte{'\n'})
+	}
+}
+
+// lineEnded records that a write past the writer ended the terminal's line.
+func (c *crlfWriter) lineEnded() {
+	if c.lineOpen != nil {
+		c.lineOpen.Store(false)
+	}
 }
 
 // enable turns the conversion on or off.
@@ -42,6 +60,10 @@ func (c *crlfWriter) Write(data []byte) (int, error) {
 	prevCR := c.lastCR
 	if len(data) > 0 {
 		c.lastCR = data[len(data)-1] == '\r'
+
+		if c.lineOpen != nil {
+			c.lineOpen.Store(data[len(data)-1] != '\n')
+		}
 	}
 
 	if !c.on.Load() || !bytes.ContainsRune(data, '\n') {
