@@ -145,9 +145,9 @@ func (f *TextFormatter) Flush() {
 
 // Helper methods for different content types
 
-// humanDuration renders dur as a compact "1h30m"-style string, rounded to the
+// HumanDuration renders dur as a compact "1h30m"-style string, rounded to the
 // minute. A non-positive duration renders as "0m".
-func humanDuration(dur time.Duration) string {
+func HumanDuration(dur time.Duration) string {
 	dur = dur.Round(time.Minute)
 	if dur <= 0 {
 		return "0m"
@@ -184,15 +184,15 @@ func humanBytes(byteCount int) string {
 	return fmt.Sprintf("%.1f %ciB", float64(byteCount)/float64(div), "KMGTPE"[exp])
 }
 
-// lockAnnotation renders the bracketed lock note for a locked device, e.g.
+// LockAnnotation renders the bracketed lock note for a locked device, e.g.
 // ` [locked by "alice@host" for 25m]`. A lock with no expiry (ExpiresAt of 0),
 // such as a device busy with a running command, renders as "in use" instead.
-func lockAnnotation(entry DeviceEntry) string {
+func LockAnnotation(entry DeviceEntry) string {
 	if entry.ExpiresAt == 0 {
 		return fmt.Sprintf(" [in use by %q]", entry.Owner)
 	}
 
-	remaining := humanDuration(time.Until(time.Unix(entry.ExpiresAt, 0)))
+	remaining := HumanDuration(time.Until(time.Unix(entry.ExpiresAt, 0)))
 
 	return fmt.Sprintf(" [locked by %q for %s]", entry.Owner, remaining)
 }
@@ -213,7 +213,7 @@ func (f *TextFormatter) writeDeviceListTo(content Content, writer io.Writer) {
 		if device.Locked {
 			// The device name is the payload; the lock note is secondary context,
 			// so it is muted (gray).
-			annotation := style.Colorize(f.useColor, style.Gray, lockAnnotation(device))
+			annotation := style.Colorize(f.useColor, style.Gray, LockAnnotation(device))
 			fmt.Fprintf(writer, "- %s%s\n", device.Name, annotation)
 		} else {
 			fmt.Fprintf(writer, "- %s\n", device.Name)
@@ -240,7 +240,7 @@ func (f *TextFormatter) writeLockResultTo(content Content, writer io.Writer) {
 	case entry.ExpiresAt == 0:
 		msg = fmt.Sprintf("Device %q in use by %q", entry.Name, entry.Owner)
 	default:
-		remaining := humanDuration(time.Until(time.Unix(entry.ExpiresAt, 0)))
+		remaining := HumanDuration(time.Until(time.Unix(entry.ExpiresAt, 0)))
 		msg = fmt.Sprintf("Device %q locked by %q for %s", entry.Name, entry.Owner, remaining)
 	}
 

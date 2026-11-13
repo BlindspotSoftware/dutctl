@@ -175,10 +175,7 @@ type application struct {
 }
 
 func (app *application) setupRPCClient() {
-	app.rpcClient = rpc.NewDeviceClient(
-		app.serverAddr,
-		connect.WithInterceptors(rpc.NewVersionAdvisor(buildinfo.Version)),
-	)
+	app.rpcClient = newAgentClient(app.serverAddr, app.user).client
 }
 
 // errInvalidCmdline is returned by dispatch for a malformed command line.

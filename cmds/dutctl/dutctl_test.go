@@ -16,6 +16,7 @@ import (
 	"connectrpc.com/connect"
 
 	"github.com/BlindspotSoftware/dutctl/internal/output"
+	"github.com/BlindspotSoftware/dutctl/pkg/headers"
 	pb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1"
 	"github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1/dutctlv1connect"
 )
@@ -23,17 +24,31 @@ import (
 // fakeDeviceServiceClient is a hand-written test double for
 // dutctlv1connect.DeviceServiceClient. Only the unary RPCs are
 // implemented; Run returns nil because the streaming path is not
-// exercised in these tests.
+// exercised in these tests. Each unary call answers with the configured
+// response or error.
 type fakeDeviceServiceClient struct {
 	listDevices []string
+	listLocks   map[string]*pb.LockState // the lock List reports per device name
 	listErr     error
 	listCalls   int
 
+	commands      []string
+	commandsErr   error
 	commandsCalls []string
 
+	details      string
+	detailsErr   error
 	detailsCalls []detailsCall
 
+	lock     *pb.LockState // the lock Lock grants
+	lockErr  error
+	lockReqs []*pb.LockRequest
+
+	unlockErr   error
 	unlockCalls []unlockCall
+
+	// users records the user header of every Lock and Unlock call.
+	users []string
 
 	// respectCtx makes the unary methods return ctx.Err() when the received
 	// context is already done, mimicking how connect aborts a cancelled or
@@ -76,7 +91,7 @@ func (f *fakeDeviceServiceClient) List(
 
 	devices := make([]*pb.DeviceInfo, 0, len(f.listDevices))
 	for _, name := range f.listDevices {
-		devices = append(devices, &pb.DeviceInfo{Name: name})
+		devices = append(devices, &pb.DeviceInfo{Name: name, Lock: f.listLocks[name]})
 	}
 
 	return connect.NewResponse(&pb.ListResponse{Devices: devices}), nil
@@ -93,7 +108,11 @@ func (f *fakeDeviceServiceClient) Commands(
 
 	f.commandsCalls = append(f.commandsCalls, req.Msg.GetDevice())
 
-	return connect.NewResponse(&pb.CommandsResponse{}), nil
+	if f.commandsErr != nil {
+		return nil, f.commandsErr
+	}
+
+	return connect.NewResponse(&pb.CommandsResponse{Commands: f.commands}), nil
 }
 
 func (f *fakeDeviceServiceClient) Details(
@@ -111,7 +130,11 @@ func (f *fakeDeviceServiceClient) Details(
 		keyword: req.Msg.GetKeyword(),
 	})
 
-	return connect.NewResponse(&pb.DetailsResponse{}), nil
+	if f.detailsErr != nil {
+		return nil, f.detailsErr
+	}
+
+	return connect.NewResponse(&pb.DetailsResponse{Details: f.details}), nil
 }
 
 func (f *fakeDeviceServiceClient) Run(
@@ -121,7 +144,7 @@ func (f *fakeDeviceServiceClient) Run(
 }
 
 func (f *fakeDeviceServiceClient) Lock(
-	ctx context.Context, _ *connect.Request[pb.LockRequest],
+	ctx context.Context, req *connect.Request[pb.LockRequest],
 ) (*connect.Response[pb.LockResponse], error) {
 	f.recordCtx(ctx)
 
@@ -129,7 +152,14 @@ func (f *fakeDeviceServiceClient) Lock(
 		return nil, ctx.Err()
 	}
 
-	return connect.NewResponse(&pb.LockResponse{}), nil
+	f.lockReqs = append(f.lockReqs, req.Msg)
+	f.users = append(f.users, req.Header().Get(headers.User))
+
+	if f.lockErr != nil {
+		return nil, f.lockErr
+	}
+
+	return connect.NewResponse(&pb.LockResponse{Device: req.Msg.GetDevice(), Lock: f.lock}), nil
 }
 
 func (f *fakeDeviceServiceClient) Unlock(
@@ -145,6 +175,11 @@ func (f *fakeDeviceServiceClient) Unlock(
 		device: req.Msg.GetDevice(),
 		force:  req.Msg.GetForce(),
 	})
+	f.users = append(f.users, req.Header().Get(headers.User))
+
+	if f.unlockErr != nil {
+		return nil, f.unlockErr
+	}
 
 	return connect.NewResponse(&pb.UnlockResponse{}), nil
 }
