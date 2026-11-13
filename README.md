@@ -68,6 +68,9 @@ go install github.com/BlindspotSoftware/dutctl/cmds/dutagent@v1.0.0-beta.1
    # Check out the usage information to learn how:
    dutctl -h
    ```
+   On a terminal, a bare `dutctl` opens a TUI (terminal user interface) instead: type to filter, Enter to open a host,
+   a device or a command, Esc to go up, ctrl+d to quit. In a pipe or a script it lists the devices as `dutctl list`
+   does. See [docs/dutctl-tui.md](docs/dutctl-tui.md).
 
 ## Release Plan
 

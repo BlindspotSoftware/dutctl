@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 
 	"golang.org/x/term"
 
@@ -81,6 +82,16 @@ func newConsole(stdin io.Reader, stdout, stderr io.Writer, textFormat bool) *con
 		changed:    make(chan struct{}),
 	}
 	con.fd, con.tty = ttyFd(stdin)
+
+	// The writers to the terminal share whether its line is open.
+	lineOpen := new(atomic.Bool)
+	if con.outTTY {
+		con.outText.lineOpen = lineOpen
+	}
+
+	if con.errTTY {
+		con.errText.lineOpen = lineOpen
+	}
 
 	switch {
 	case con.outTTY:
@@ -271,9 +282,12 @@ func (c *console) closeCurrent() bool {
 
 // endRawLine starts a fresh line after raw mode: whatever the far end left
 // behind, the next line, the epilogue or the shell's prompt, starts at
-// column 0. Called without the lock, as every write is.
+// column 0, and no text writer ends that line again. Called without the lock,
+// as every write is.
 func (c *console) endRawLine() {
 	fmt.Fprint(c.term, "\r\n")
+	c.outText.lineEnded()
+	c.errText.lineEnded()
 }
 
 // current returns the id of the console that is open now, if any. It does not

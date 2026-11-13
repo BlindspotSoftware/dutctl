@@ -6,8 +6,30 @@ package main
 
 import (
 	"bytes"
+	"fmt"
+	"sync/atomic"
 	"testing"
 )
+
+// The writers to one terminal share whether its line is open: endLine ends a
+// line that either of them left open, and only such a line.
+func TestCRLFWriterEndLine(t *testing.T) {
+	var out bytes.Buffer
+
+	open := new(atomic.Bool)
+	stdout, stderr := &crlfWriter{w: &out, lineOpen: open}, &crlfWriter{w: &out, lineOpen: open}
+
+	fmt.Fprint(stdout, "power: on")
+	stdout.endLine()
+	fmt.Fprint(stderr, "warning\n")
+	stdout.endLine()
+	fmt.Fprint(stderr, "50%\r")
+	stdout.endLine()
+
+	if want := "power: on\nwarning\n50%\r\n"; out.String() != want {
+		t.Errorf("wrote %q, want %q", out.String(), want)
+	}
+}
 
 func TestCRLFWriter(t *testing.T) {
 	tests := []struct {

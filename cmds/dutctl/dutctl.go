@@ -31,7 +31,8 @@ const usageAbstract = `dutctl - The client application of the DUT Control system
 
 const usageSynopsis = `
 SYNOPSIS:
-	dutctl [options] [list]
+	dutctl [options]
+	dutctl [options] list
 	dutctl [options] <device>
 	dutctl [options] <device> <command> [args...]
 	dutctl [options] <device> <command> help
@@ -74,7 +75,9 @@ toggles local echo for a device that does not echo. Piped input is forwarded
 as it is read, and its end is passed on. A raw console needs the text output
 format.
 
-When dutctl is run without any positional arguments, it defaults to the list command.
+When dutctl is run without any positional arguments on a terminal, it opens the
+TUI: a prompt that walks from hosts to devices to commands and runs them there.
+Elsewhere, or with a structured output format, it defaults to the list command.
 `
 
 // Usage strings for the command-line flags, shown in the OPTIONS section of dutctl -h.
@@ -118,6 +121,10 @@ func newApp(stdin io.Reader, stdout, stderr io.Writer, exitFunc func(int), args 
 	fs.Parse(args[1:])
 	app.args = fs.Args()
 
+	fs.Visit(func(f *flag.Flag) { app.serverGiven = app.serverGiven || f.Name == "s" })
+
+	app.tui = app.runTUI
+
 	// The console a module may open owns the streams: it switches a terminal
 	// to raw mode for a raw console, and it wraps the client's own text so
 	// that lines stay at column 0 while raw. The probes for colour run on the
@@ -157,6 +164,7 @@ type application struct {
 
 	// flags
 	serverAddr        string
+	serverGiven       bool // -s was on the command line: the TUI starts at that host
 	outputFormat      string
 	verbose           bool
 	noColor           bool
@@ -172,6 +180,10 @@ type application struct {
 	// buffered warning summary must be flushed explicitly and Flush is not part
 	// of the slog.Handler interface reachable through slog.Default().
 	logHandler *cliHandler
+
+	// tui runs the TUI; nil keeps a bare dutctl at list, as in
+	// tests that build the application by hand.
+	tui func() error
 }
 
 func (app *application) setupRPCClient() {
@@ -213,6 +225,12 @@ func (app *application) start() {
 // It returns errInvalidCmdline for a malformed command line (exit() renders it
 // with the usage synopsis), or the error returned by the dispatched RPC.
 func (app *application) dispatch() error {
+	// The TUI has signal handling of its own: a Ctrl-C that ends a run must
+	// not end the session.
+	if len(app.args) == 0 && app.tui != nil && app.opensTUI() {
+		return app.tui()
+	}
+
 	// A single signal context for the whole invocation: Ctrl-C / SIGTERM cancels
 	// the in-flight RPC so the client tears down cleanly (flushing the warning
 	// summary) instead of being killed. Every RPC path shares it — unary calls
@@ -222,6 +240,16 @@ func (app *application) dispatch() error {
 	defer stop()
 
 	return asInterrupt(ctx, app.route(ctx))
+}
+
+// opensTUI reports whether a bare dutctl opens the TUI: on a terminal,
+// for both input and output, with text output, and a terminal that can draw
+// it. A pipe, a structured format or a dumb terminal keeps the list, so
+// scripts never see the TUI.
+func (app *application) opensTUI() bool {
+	term := os.Getenv("TERM")
+
+	return app.console.tty && app.console.outTTY && output.IsText(app.outputFormat) && term != "" && term != "dumb"
 }
 
 // route selects and runs the RPC for app.args. It returns errInvalidCmdline for a
