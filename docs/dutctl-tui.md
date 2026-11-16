@@ -20,6 +20,11 @@ always did, and every form with arguments behaves exactly as before.
 With `-s` the TUI starts at that host's devices; without, it starts at your
 recent devices and hosts. The TUI connects only when you ask it to.
 
+While the TUI is a preview, it says so each time it opens: it prints the
+`SYNOPSIS:` of `dutctl -h`, then a yellow `▌ EXPERIMENTAL` notice right above
+its greeting. dutctl works as before whenever it gets arguments, and
+`dutctl list` prints what a bare `dutctl` printed.
+
 ## Levels
 
 The prompt shows where you are: `dutctl ›`, then `lab:2024 ›`, then

@@ -69,6 +69,10 @@ func (app *application) runTUI() error {
 		})
 	}
 
+	// Straight to the terminal before the program starts, so it comes first
+	// whatever the renderer does.
+	app.splash(app.console.outText)
+
 	// Diagnostics must not write over the live view: they go above it, or
 	// straight to the terminal while a run holds it.
 	diag := newSwitchWriter(app.console.errText)

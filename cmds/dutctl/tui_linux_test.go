@@ -153,7 +153,8 @@ func (s *tuiTerm) read() {
 	}
 }
 
-// text returns the terminal's scrollback and screen.
+// text returns the terminal's scrollback and screen after the splash, which
+// holds words the TUI shows too; nothing until the splash is out.
 func (s *tuiTerm) text() (string, chan struct{}) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -166,7 +167,9 @@ func (s *tuiTerm) text() (string, chan struct{}) {
 
 	out.WriteString(s.emu.String())
 
-	return out.String(), s.changed
+	_, after, _ := strings.Cut(out.String(), splashNotice[strings.LastIndex(splashNotice, "\n")+1:])
+
+	return after, s.changed
 }
 
 // waitFor waits until the terminal shows each of wants.
