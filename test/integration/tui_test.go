@@ -31,8 +31,12 @@ func newTUIScreen() *tuiScreen {
 	return &tuiScreen{emu: emu}
 }
 
-// shows returns a match for waitMatch: the scrollback and the screen hold
-// every one of wants.
+// splashEnd ends the splash the TUI prints first, whose synopsis holds words
+// the TUI shows too.
+const splashEnd = "see `dutctl -h` for details."
+
+// shows returns a match for waitMatch: the scrollback and the screen after
+// the splash hold every one of wants.
 func (s *tuiScreen) shows(wants ...string) func(string) bool {
 	return func(output string) bool {
 		_, _ = s.emu.WriteString(output[s.fed:])
@@ -45,8 +49,13 @@ func (s *tuiScreen) shows(wants ...string) func(string) bool {
 
 		text.WriteString(s.emu.String())
 
+		_, tui, splashed := strings.Cut(text.String(), splashEnd)
+		if !splashed {
+			return false
+		}
+
 		for _, want := range wants {
-			if !strings.Contains(text.String(), want) {
+			if !strings.Contains(tui, want) {
 				return false
 			}
 		}
@@ -104,7 +113,7 @@ func TestTUI(t *testing.T) {
 	res := asJSON.wait(t)
 	mustSucceed(t, res)
 
-	if !strings.Contains(res.stdout, `"contentType": "device-list"`) {
+	if !strings.Contains(res.stdout, `"contentType": "device-list"`) || strings.Contains(res.stdout, splashEnd) {
 		t.Errorf("a bare dutctl -f json on a terminal printed:\n%s", res.stdout)
 	}
 }
