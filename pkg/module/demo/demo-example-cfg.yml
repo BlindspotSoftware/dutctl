@@ -1,4 +1,4 @@
-version: 1.0.0-beta.1
+version: 1.0.0-beta.2
 devices:
   agent:
     desc: >-
@@ -23,20 +23,28 @@ devices:
             args:
               - Hello, ${who}!
       prompt:
-        desc: Answer a question in a line console, where your terminal edits the line and Enter sends it
+        desc: >-
+          Answer a question in a line console, where your terminal edits the
+          line and Enter sends it
         uses:
           - module: wrap-prompt
       keys:
-        desc: Show the bytes your keys send in a raw console, where every key arrives at once; a lone Ctrl-D ends it
+        desc: >-
+          Show the bytes your keys send in a raw console, where every key
+          arrives at once; a lone Ctrl-D ends it
         uses:
           - module: wrap-raw
       upload:
-        desc: Send a file from your machine to the module, which tells its size and checksum
+        desc: >-
+          Send a file from your machine to the module, which tells its size and
+          checksum
         uses:
           - module: wrap-upload
             passthrough: true
       download:
-        desc: Receive a file the module makes, saved on your machine under the name you pass
+        desc: >-
+          Receive a file the module makes, saved on your machine under the name
+          you pass
         uses:
           - module: wrap-download
             passthrough: true
@@ -74,7 +82,7 @@ devices:
         uses:
           - module: demo-switch
             args:
-              - "on"
+              - 'on'
             with:
               line: write-protect
       unprotect:
@@ -82,7 +90,7 @@ devices:
         uses:
           - module: demo-switch
             args:
-              - "off"
+              - 'off'
             with:
               line: write-protect
       console:
@@ -90,7 +98,9 @@ devices:
         uses:
           - module: demo-console
       reboot:
-        desc: Power-cycle the board and watch it boot, until it prints its welcome line
+        desc: >-
+          Power-cycle the board and watch it boot, until it prints its welcome
+          line
         uses:
           - module: demo-switch
             args:
@@ -112,7 +122,7 @@ devices:
               - Updating the board with ${image}.
           - module: demo-switch
             args:
-              - "off"
+              - 'off'
             with:
               line: power
           - module: demo-flash
@@ -121,11 +131,14 @@ devices:
               - ${image}
           - module: demo-switch
             args:
-              - "on"
+              - 'on'
             with:
               line: power
       flash:
-        desc: Write an image to the flash (write <image>) or read the flash into a file (read <file>); a write needs the board off and the flash unprotected
+        desc: >-
+          Write an image to the flash (write <image>) or read the flash into a
+          file (read <file>); a write needs the board off and the flash
+          unprotected
         uses:
           - module: demo-flash
             passthrough: true
