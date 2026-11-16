@@ -29,3 +29,11 @@ devices:
               pin: 11
               label: Light
               initial: 'on'
+      powered:
+        desc: Tell whether the rocket is powered
+        uses:
+          - module: gpio-sensor
+            with:
+              pin: 22
+              label: Power good
+              pull: down

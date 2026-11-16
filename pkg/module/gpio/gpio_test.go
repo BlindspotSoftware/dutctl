@@ -17,6 +17,11 @@ type MockGpio struct {
 	LowCalled    bool
 	HighCalled   bool
 	ToggleCalled bool
+	InputCalled  bool
+	ReadCalled   bool
+
+	inputPull pull  // pull passed to Input
+	level     State // level Read returns
 
 	err error
 }
@@ -43,6 +48,22 @@ func (m *MockGpio) Toggle(pin Pin) error {
 		return m.err
 	}
 	return nil
+}
+
+func (m *MockGpio) Input(pin Pin, p pull) error {
+	m.InputCalled = true
+	m.inputPull = p
+
+	return m.err
+}
+
+func (m *MockGpio) Read(pin Pin) (State, error) {
+	m.ReadCalled = true
+	if m.err != nil {
+		return Low, m.err
+	}
+
+	return m.level, nil
 }
 
 func mockBackend(_ string) gpio {
