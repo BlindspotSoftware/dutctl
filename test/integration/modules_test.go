@@ -10,10 +10,16 @@ package integration
 // act on the agent's own machine.
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -134,7 +140,127 @@ func TestModulesFile(t *testing.T) {
 		t.Errorf("the downloaded file holds %q (%v)", got, err)
 	}
 
+	// A file the client cannot send leaves the destination as it was.
 	mustFail(t, agt.dutctl(t, "host", "upload", "missing.txt"), 1, `"missing.txt"`)
+
+	got, err = os.ReadFile(filepath.Join(files, "uploaded.txt"))
+	if err != nil || string(got) != "from the client\n" {
+		t.Errorf("after the failed upload, the destination holds %q (%v)", got, err)
+	}
+}
+
+// Every transfer carries the SHA-256 of its file, and the client shows it. An
+// upload damaged in transit fails the check on the agent, and the file is not
+// written.
+func TestModulesFileChecksum(t *testing.T) {
+	t.Parallel()
+
+	agt, files := hostAgent(t)
+
+	const upload = "checksummed by the file module\n"
+
+	err := os.WriteFile(filepath.Join(agt.dir, "local.txt"), []byte(upload), 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wantUp := sha256Hex(upload)
+
+	// The proxy damages the file's content but leaves the stream intact, as a
+	// faulty router does: nothing below the checksum notices.
+	damaged := *agt
+	damaged.addr = corruptingProxy(t, agt.addr, []byte("checksummed"))
+
+	res := damaged.dutctl(t, "host", "upload", "local.txt")
+	mustFail(t, res, 1, "file corrupted in transit")
+
+	if !strings.Contains(res.stderr, "want "+wantUp) {
+		t.Errorf("the error names no expected digest %s:\n%s", wantUp, res.stderr)
+	}
+
+	_, err = os.Stat(filepath.Join(files, "uploaded.txt"))
+	if !os.IsNotExist(err) {
+		t.Errorf("the damaged upload was written (%v)", err)
+	}
+
+	res = agt.dutctl(t, "host", "upload", "local.txt")
+	mustSucceed(t, res)
+	inOrder(t, res.stdout, `sent "local.txt" (`, "sha256 "+wantUp[:12])
+
+	const download = "checksummed by the agent\n"
+
+	err = os.WriteFile(filepath.Join(files, "source.txt"), []byte(download), 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	res = agt.dutctl(t, "host", "download", "fetched.txt")
+	mustSucceed(t, res)
+	inOrder(t, res.stdout, `received "fetched.txt" (`, "sha256 "+sha256Hex(download)[:12])
+}
+
+func sha256Hex(s string) string {
+	sum := sha256.Sum256([]byte(s))
+
+	return hex.EncodeToString(sum[:])
+}
+
+// corruptingProxy forwards connections to target and flips a byte of the first
+// marker a client sends, once across all connections. Every byte keeps its
+// place, so the stream stays well-formed and only the payload is wrong.
+func corruptingProxy(t *testing.T, target string, marker []byte) string {
+	t.Helper()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() { _ = ln.Close() })
+
+	var done atomic.Bool
+
+	go func() {
+		for {
+			client, err := ln.Accept()
+			if err != nil {
+				return
+			}
+
+			go proxyConn(client, target, marker, &done)
+		}
+	}()
+
+	return ln.Addr().String()
+}
+
+func proxyConn(client net.Conn, target string, marker []byte, done *atomic.Bool) {
+	defer client.Close()
+
+	agent, err := net.Dial("tcp", target)
+	if err != nil {
+		return
+	}
+	defer agent.Close()
+
+	go func() {
+		_, _ = io.Copy(client, agent)
+		_ = client.Close()
+	}()
+
+	buf := make([]byte, 64*1024)
+
+	for {
+		n, err := client.Read(buf)
+
+		if i := bytes.Index(buf[:n], marker); i >= 0 && done.CompareAndSwap(false, true) {
+			buf[i] ^= 0x20
+		}
+
+		if _, werr := agent.Write(buf[:n]); werr != nil || err != nil {
+			return
+		}
+	}
 }
 
 func TestModulesTimeWait(t *testing.T) {

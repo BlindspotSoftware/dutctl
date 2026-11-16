@@ -57,7 +57,8 @@ also of the same type, overlap with it.
 - [MOD-9] A run's scratch files go into a directory made with `os.MkdirTemp("", "<module>-")` in
   `Run`, held in a local and removed in a `defer`, so it also goes after an error, a cancellation
   or a panic. Never a fixed path such as `./image`, and never create `$TMPDIR` itself: it must
-  exist. Close every file `Run` opens; a failed `Close` of a file it wrote is a failed write.
+  exist. Close every file `Run` opens, except one that `SendFile` accepted: the session closes it.
+  A failed `Close` of a file it wrote is a failed write.
   Destinations named by the user or the configuration are not scratch files.
   → https://github.com/BlindspotSoftware/dutctl/blob/main/docs/decisions/0037-keep-the-files-of-a-run-in-a-directory-of-its-own.md#decision-outcome
 - [MOD-10] `Run` reports every failure, missing or unknown arguments included, by returning an

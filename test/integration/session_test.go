@@ -11,8 +11,12 @@ package integration
 // reaches the module, as pkg/module documents it.
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -332,13 +336,17 @@ func TestSessionFileTransfer(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// The module's line and the client's report of the transfer take different
+	// paths, so either may come first.
 	res := agt.dutctl(t, "agent", "upload", "fw.bin")
 	mustSucceed(t, res)
-	inOrder(t, res.stdout, `sent "fw.bin"`, "Received fw.bin: 13 bytes, sha256 ")
+	inOrder(t, res.stdout, `sent "fw.bin"`)
+	inOrder(t, res.stdout, "Received fw.bin: 13 bytes, sha256 ")
 
 	res = agt.dutctl(t, "agent", "download", "note.txt")
 	mustSucceed(t, res)
-	inOrder(t, res.stdout, `received "note.txt"`, "Sent note.txt: 48 bytes.")
+	inOrder(t, res.stdout, `received "note.txt"`)
+	inOrder(t, res.stdout, "Sent note.txt: 48 bytes.")
 
 	got, err := os.ReadFile(filepath.Join(agt.dir, "note.txt"))
 	if err != nil || string(got) != "This file was sent by the wrap-download module.\n" {
@@ -346,15 +354,40 @@ func TestSessionFileTransfer(t *testing.T) {
 	}
 }
 
-// A file the user cannot provide ends the run with an error on the client,
-// and the module's request fails.
+// A file larger than a chunk reaches the module while it arrives, and the
+// module's output goes on meanwhile.
+func TestSessionLargeFileTransfer(t *testing.T) {
+	t.Parallel()
+
+	agt := startAgent(t, repoFile(t, tour))
+
+	data := bytes.Repeat([]byte("0123456789abcdef"), 3<<20/16) // 3 MiB, 4 chunks
+
+	err := os.WriteFile(filepath.Join(agt.dir, "big.bin"), data, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sum := sha256.Sum256(data)
+
+	res := agt.dutctl(t, "agent", "upload", "big.bin")
+	mustSucceed(t, res)
+	inOrder(t, res.stdout,
+		"Received 1 MiB of big.bin.",
+		"Received 2 MiB of big.bin.",
+		"Received 3 MiB of big.bin.",
+		fmt.Sprintf("Received big.bin: %d bytes, sha256 %s.", len(data), hex.EncodeToString(sum[:])))
+}
+
+// A file the user cannot provide fails the module's request, and the run ends
+// with an error that names the file.
 func TestSessionFileTheUserCannotProvide(t *testing.T) {
 	t.Parallel()
 
 	agt := startAgent(t, repoFile(t, tour))
 
 	mustFail(t, agt.dutctl(t, "demo-board", "flash", "write", "missing.bin"), 1, `"missing.bin"`)
-	agt.waitRecord(t, "request cancelled", "rpc", "Run")
+	agt.waitRecord(t, "request finished with error", "rpc", "Run")
 
 	// The flash still holds what it held, and the device is free.
 	res := agt.dutctl(t, "demo-board", "flash", "read", "copy.bin")

@@ -68,14 +68,17 @@ func moduleError(err error) error {
 
 // brokerError maps a terminal broker error to the connect error that fails the
 // Run: a client protocol violation (session.ErrBadFileTransfer) is
-// CodeInvalidArgument, an already-typed connect error (e.g. CodeCanceled on
-// client disconnect) keeps its code, and anything else is an internal fault.
+// CodeInvalidArgument, a transfer the transport damaged (session.ErrFileCorrupt)
+// is CodeDataLoss, an already-typed connect error (e.g. CodeCanceled on client
+// disconnect) keeps its code, and anything else is an internal fault.
 func brokerError(err error) error {
 	var connectErr *connect.Error
 
 	switch {
 	case errors.Is(err, session.ErrBadFileTransfer):
 		return connect.NewError(connect.CodeInvalidArgument, err)
+	case errors.Is(err, session.ErrFileCorrupt):
+		return connect.NewError(connect.CodeDataLoss, err)
 	case errors.As(err, &connectErr):
 		return err
 	default:

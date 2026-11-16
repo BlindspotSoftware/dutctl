@@ -17,14 +17,6 @@ Links point to the ADR's Decision outcome.
   Governs `protobuf/`, `internal/rpc`, `go.mod`. connect-go, not grpc-go, with the gRPC protocol
   over h2c on plain `net/http` servers. After a `.proto` change, run buf lint and buf generate and
   commit the generated code under `protobuf/gen`.
-- **ADR-0003 Run a command over one bidirectional stream**
-  → https://github.com/BlindspotSoftware/dutctl/blob/main/docs/decisions/0003-run-a-command-over-one-bidirectional-stream.md#decision-outcome
-  Governs `protobuf/dutctl/v1`, `cmds/dutagent/run.go`, `cmds/dutctl/rpc.go`,
-  `internal/dutagent/session`. Discovery RPCs are unary; a command runs over one bidirectional
-  Run stream whose first request carries the command. The module on the agent starts every file
-  transfer, one at a time; a file moves whole in one message and is held in memory on both sides.
-  The agent fails a run on a file it did not request. The stream ends when the agent's handler
-  returns; there is no end-of-run message.
 - **ADR-0004 Compile modules into the agent behind a Session**
   → https://github.com/BlindspotSoftware/dutctl/blob/main/docs/decisions/0004-compile-modules-into-the-agent-behind-a-session.md#decision-outcome
   Governs `pkg/module`, `cmds/dutagent/modules.go`. A module is a Go package under
@@ -35,9 +27,9 @@ Links point to the ADR's Decision outcome.
 - **ADR-0007 Route module input and output through a session**
   → https://github.com/BlindspotSoftware/dutctl/blob/main/docs/decisions/0007-route-module-input-and-output-through-a-session.md#decision-outcome
   Governs `internal/dutagent/session`, `internal/chanio`, `pkg/module`. Per run, a broker builds
-  the Session from unbuffered channels, one per kind of message (only a single file's channel holds
-  one message), with one worker per direction, and reaches the stream only through its `Stream`
-  interface. Modules never see the stream, protobuf messages or connect. The Print family and
+  the Session from unbuffered channels, one per kind of message, with one worker per direction,
+  and reaches the stream only through its `Stream` interface; file transfers follow ADR-0039.
+  Modules never see the stream, protobuf messages or connect. The Print family and
   `OpenConsole` return no error: a failed delivery fails the run instead. `RequestFile` and
   `SendFile` return an error, and after a teardown console input ends and writes fail with
   `io.ErrClosedPipe`.
@@ -53,6 +45,20 @@ Links point to the ADR's Decision outcome.
   in package `dutctl.relay.v1alpha1`, outside the compatibility promise; `dutctl.v1` keeps only
   `DeviceService` and its messages. Once the relay is ready for the promise, its protocol moves to
   `dutctl.relay.v1`.
+- **ADR-0039 Transfer files in chunks over the Run stream**
+  → https://github.com/BlindspotSoftware/dutctl/blob/main/docs/decisions/0039-transfer-files-in-chunks-over-the-run-stream.md#decision-outcome
+  Governs `protobuf/dutctl/v1`, `cmds/dutagent/run.go`, `internal/dutagent/session`,
+  `cmds/dutctl`, `pkg/module`. Discovery and locking RPCs are unary; a command runs over one
+  bidirectional Run stream whose first request carries the command, and which ends when the
+  agent's handler returns, with no end-of-run message. The module on the agent starts every file
+  transfer. `FileTransferRequest`, `FileChunk` and `FileTransferResponse` move a file in chunks
+  of at most 1 MiB, under an ID unique within the run. An upload sends a chunk only after the
+  agent acknowledged the last one; a download streams, and the client confirms the complete file.
+  `RequestFile` and `SendFile` take a context that bounds the transfer. `SendFile` takes the size
+  and returns before the bytes are sent; the session then owns the reader and closes it, also
+  during a read to end a cancelled download, and the run waits for its downloads after its modules
+  returned. The client writes a download to a
+  temporary file and moves it into place once it is complete.
 
 ## Configuration and command line
 
@@ -272,6 +278,7 @@ Links point to the ADR's Decision outcome.
 
 ## Superseded: never cite as current
 
+- ADR-0003 Run a command over one bidirectional stream: superseded by ADR-0039.
 - ADR-0006 Drive the Run handler with a generic state machine: superseded by ADR-0029.
 - ADR-0012 Make the CLIs, config and RPC stable with v1.0.0: superseded by ADR-0028.
 - ADR-0030 Run one command at a time per device: superseded by ADR-0036.
