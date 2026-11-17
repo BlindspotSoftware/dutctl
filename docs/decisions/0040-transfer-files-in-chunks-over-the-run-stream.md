@@ -43,13 +43,17 @@ transfer.
   the stream bounds how far the agent runs ahead. The client confirms the
   complete file.
 - `RequestFile` and `SendFile` take a context that bounds the transfer; the
-  session sets no limit of its own. `SendFile` takes the file size and
-  returns before the bytes are sent; the session then owns the reader and
-  closes it, also during a read, to end a cancelled download.
-- Because `SendFile` returns early, a run waits for its downloads after its
-  modules have returned, and the device stays busy until they are done
-  ([ADR-0031](0031-keep-a-device-busy-until-its-modules-return.md)). Uploads
-  are dropped at that point, as no module is left to read them.
+  session sets no limit of its own. `SendFile` takes the file size, reads the
+  module's reader on the module's goroutine and returns once the client has
+  confirmed the file, or with the reason it did not arrive. The module keeps
+  its reader and closes it. A module can run a call that waits on a goroutine
+  of its own, but it cannot wait for a call that returned early.
+- The session carries any number of transfers at once. A module that moves
+  several files at a time calls `RequestFile` or `SendFile` from goroutines of
+  its own, and waits for them before `Run` returns.
+- No download outlives its `SendFile`, so a run ends once its modules have
+  returned ([ADR-0031](0031-keep-a-device-busy-until-its-modules-return.md)).
+  An upload that no module read is dropped then.
 - The client writes a download to a temporary file next to the destination and
   moves it into place when it is complete, so a broken download leaves the
   destination as it was. A failed download fails the run on the client.
@@ -78,20 +82,22 @@ one at a time. Its other points stay in force:
 - Good, because module output and console input keep flowing during a
   transfer.
 - Good, because a module bounds a transfer the way it bounds a subprocess.
+- Good, because a module learns whether its download arrived, and closes its
+  reader itself, as it does every other file.
 - Bad, because agents and clients from before and after the change cannot
   transfer files with each other, so both are updated together. Breaking
   changes ship in the alphas
   ([ADR-0013](0013-release-v1-0-0-as-alpha-pre-releases.md)).
 - Bad, because an upload costs one round trip per chunk.
-- Bad, because the module does not learn whether a download arrived:
-  `SendFile` has returned by then. The client reports the outcome instead.
+- Bad, because a module that does something else while a file moves starts a
+  goroutine for the transfer.
 
 ### Confirmation
 
-`TestRunFinishesDownloadAfterModuleReturns` and
+`TestRunEndsOnceTheClientHasTheDownload` and
 `TestRunDropsUploadWhenModuleReturns` in
-[cmds/dutagent/run_test.go](../../cmds/dutagent/run_test.go) cover the run's
-wait for its transfers. The tests in
+[cmds/dutagent/run_test.go](../../cmds/dutagent/run_test.go) cover how a run
+ends with its transfers. `TestSendFilesSideBySide` and the other tests in
 [internal/dutagent/session/filetransfer_test.go](../../internal/dutagent/session/filetransfer_test.go)
 and [cmds/dutctl/file_transfer_test.go](../../cmds/dutctl/file_transfer_test.go)
 cover both ends of the protocol.
