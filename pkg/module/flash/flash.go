@@ -325,21 +325,15 @@ func downloadImage(ctx context.Context, sesh module.Session, local, remote strin
 	if err != nil {
 		return fmt.Errorf("open flash image on dutagent after read operation: %w", err)
 	}
+	defer file.Close()
 
 	fileInfo, err := file.Stat()
 	if err != nil {
-		file.Close()
-
 		return fmt.Errorf("stat flash image on dutagent after read operation: %w", err)
 	}
 
-	// SendFile takes ownership of the file on success: the transfer is chunked
-	// and finishes after this returns, so the session closes it, not us. On error
-	// ownership stays here.
 	err = sesh.SendFile(ctx, remote, fileInfo.Size(), file)
 	if err != nil {
-		file.Close()
-
 		return fmt.Errorf("send flash image to client after read operation: %w", err)
 	}
 

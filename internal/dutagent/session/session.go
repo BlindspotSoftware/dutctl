@@ -22,20 +22,11 @@ import (
 // chunkSize is the maximum size of a single file chunk (1MB).
 const chunkSize = 1024 * 1024
 
-// Errors returned by RequestFile and SendFile when the session can no longer
-// carry a new transfer. Both are terminal for the module: there is no client
-// left to serve the transfer, so a module should return them rather than retry.
-var (
-	// ErrSessionShuttingDown reports that graceful shutdown has begun. New
-	// transfers are refused from this point because toClientWorker no longer
-	// announces uploads, so a transfer registered now would be counted by
-	// transferWg and never completed, wedging WaitForTransfers.
-	ErrSessionShuttingDown = errors.New("session is shutting down")
-
-	// ErrSessionClosed reports that the broker's workers have been torn down,
-	// so nothing remains to carry a transfer.
-	ErrSessionClosed = errors.New("session is closed")
-)
+// ErrSessionClosed is returned by RequestFile and SendFile once the broker's
+// workers have been torn down, so nothing remains to carry a transfer. It is
+// terminal for the module: there is no client left to serve the transfer, so a
+// module should return it rather than retry.
+var ErrSessionClosed = errors.New("session is closed")
 
 // uploadState represents an active upload from client to agent (a file the
 // module requested via RequestFile). Chunks arriving from the client are written
@@ -79,40 +70,39 @@ func (u *uploadState) close(err error) {
 }
 
 // downloadState represents an active download from agent to client (a file the
-// module handed to SendFile). Chunks are read from reader and streamed out.
+// module hands to SendFile). SendFile reads the file and hands it over a chunk
+// at a time; toClientWorker sends each chunk.
 type downloadState struct {
 	transferID string
 	metadata   *pb.FileMetadata
 
-	// mu serializes the reads of reader and guards chunkNumber and offset.
-	mu          sync.Mutex
-	reader      io.Reader
-	closer      io.Closer // optional closer for the reader (e.g. *os.File)
-	chunkNumber int32
-	offset      int64 // bytes already sent; the next chunk's chunk_offset
+	// mu guards chunk and failErr.
+	mu sync.Mutex
+	// chunk is the chunk SendFile handed over that toClientWorker has not sent
+	// yet, nil while there is none.
+	chunk *pb.FileChunk
+	// failErr is why SendFile gave the download up, for toClientWorker to tell
+	// the client.
+	failErr error
 
-	// closed is set once close has run, which closeOnce makes happen once.
-	closed    atomic.Bool
+	// sent wakes SendFile once toClientWorker has sent its chunk. Buffered to
+	// one, as SendFile hands over one chunk at a time.
+	sent chan struct{}
+
+	// done is closed once the download ended, and err is its outcome then: nil
+	// once the client confirmed the file, or why the file did not arrive.
+	done      chan struct{}
+	err       error
 	closeOnce sync.Once
 
-	// done is closed once the transfer is released, freeing the context watcher.
-	done chan struct{}
-
-	awaitingFinalAck bool  // waiting for the client's TRANSFER_COMPLETE; guarded by downloadMutex
-	abortErr         error // why the module's context ended the download; guarded by downloadMutex
+	awaitingFinalAck bool // waiting for the client's TRANSFER_COMPLETE; guarded by downloadMutex
 }
 
-// close releases the download's reader once. It does not wait for a Read in
-// progress: closing the reader is what ends a Read that blocks, as one on a
-// pipe does, and SendFile requires Close to be safe during a Read.
-func (d *downloadState) close() {
+// finish ends the download with err, unless it ended already. Once it
+// returns, err holds the outcome.
+func (d *downloadState) finish(err error) {
 	d.closeOnce.Do(func() {
-		d.closed.Store(true)
-
-		if d.closer != nil {
-			_ = callSource(d.closer.Close)
-		}
-
+		d.err = err
 		close(d.done)
 	})
 }
@@ -156,24 +146,16 @@ type backend struct {
 	// the session, which is also the client's scope for it.
 	lastTransferID atomic.Uint64
 
-	// fileTransferNotifyCh wakes toClientWorker when a new transfer is registered
-	// so it can announce it and start streaming. Buffered to one; a pending signal
-	// coalesces with a fresh one.
+	// fileTransferNotifyCh wakes toClientWorker when a transfer has work for it:
+	// one to announce, a chunk to send or acknowledge, or a failure to report.
+	// Buffered to one; a pending signal coalesces with a fresh one.
 	fileTransferNotifyCh chan struct{}
 
 	// sendMu serializes all sends on the bidirectional stream. The connect
 	// BidiStream forbids concurrent Send calls, and both workers send responses
-	// (toClientWorker streams downloads; fromClientWorker acks uploads), so every
-	// send goes through sendToClient under this lock.
+	// (toClientWorker streams downloads; fromClientWorker answers transfer
+	// requests), so every send goes through sendToClient under this lock.
 	sendMu sync.Mutex
-
-	// Graceful-shutdown state. Shutdown marks the session done accepting module
-	// output while letting in-flight transfers finish; transferWg reaches zero
-	// once every registered transfer has been removed.
-	shutdownCh     chan struct{}
-	shutdownMutex  sync.Mutex
-	isShuttingDown bool
-	transferWg     sync.WaitGroup
 }
 
 // logger returns the session's scoped logger, falling back to the default if
@@ -187,19 +169,12 @@ func (s *backend) logger() *slog.Logger {
 }
 
 // Print, Printf and Println forward a message to the client. The send is
-// abandoned if the session has been torn down (done closed) or graceful shutdown
-// has begun (shutdownCh closed), so a module that keeps printing after its
-// workers are gone is not wedged. The output is dropped, matching the fact that
-// there is no longer a client to receive it.
-//
-// Shutdown is checked here rather than in toClientWorker: once the worker has
-// taken a message off printCh the Print call has already returned successfully,
-// and discarding it at that point loses a line the module was told was
-// delivered. Refusing it at the source keeps that contract.
+// abandoned if the session has been torn down (done closed), so a module that
+// keeps printing after its workers are gone is not wedged. The output is
+// dropped, matching the fact that there is no longer a client to receive it.
 func (s *backend) Print(a ...any) {
 	select {
 	case s.printCh <- fmt.Sprint(a...):
-	case <-s.shutdownCh:
 	case <-s.done:
 	}
 }
@@ -207,7 +182,6 @@ func (s *backend) Print(a ...any) {
 func (s *backend) Printf(format string, a ...any) {
 	select {
 	case s.printCh <- fmt.Sprintf(format, a...):
-	case <-s.shutdownCh:
 	case <-s.done:
 	}
 }
@@ -215,7 +189,6 @@ func (s *backend) Printf(format string, a ...any) {
 func (s *backend) Println(a ...any) {
 	select {
 	case s.printCh <- fmt.Sprintln(a...):
-	case <-s.shutdownCh:
 	case <-s.done:
 	}
 }
@@ -225,15 +198,18 @@ func (s *backend) Println(a ...any) {
 // reader blocks until chunks are delivered (or the transfer is aborted).
 //
 // ctx bounds the transfer: cancelling it aborts the transfer and fails the
-// reader. The session imposes no limit of its own.
+// reader, as the end of the session does. The session imposes no limit of its
+// own.
 //
-// It returns ErrSessionShuttingDown or ErrSessionClosed if the session can no
-// longer carry a transfer; both are terminal, so a module should return the
-// error rather than retry.
+// It returns ErrSessionClosed if the session can no longer carry a transfer.
 func (s *backend) RequestFile(ctx context.Context, name string) (io.Reader, error) {
 	err := ctx.Err()
 	if err != nil {
 		return nil, err
+	}
+
+	if s.isClosed() {
+		return nil, ErrSessionClosed
 	}
 
 	transferID := s.newTransferID()
@@ -255,25 +231,41 @@ func (s *backend) RequestFile(ctx context.Context, name string) (io.Reader, erro
 		done:      make(chan struct{}),
 	}
 
-	err = s.register(func() {
-		s.uploadMutex.Lock()
-		s.activeUploads[transferID] = state
-		s.uploadMutex.Unlock()
-	})
-	if err != nil {
-		writer.CloseWithError(err)
+	s.uploadMutex.Lock()
+	s.activeUploads[transferID] = state
+	s.uploadMutex.Unlock()
 
-		return nil, err
-	}
-
-	s.watchTransferCtx(ctx, state.done, func() {
-		s.logger().Debug("upload aborted by context", "transfer_id", transferID, "err", ctx.Err())
-		s.removeUpload(transferID, "")
-	})
+	go s.watchUpload(ctx, state)
 
 	s.notifyFileTransfer()
 
 	return state.reader, nil
+}
+
+// watchUpload drops the upload once ctx or the session ends, which fails the
+// module's reader and ends a deliverChunk blocked in the pipe. It returns once
+// the upload ended, so it never outlives it.
+func (s *backend) watchUpload(ctx context.Context, state *uploadState) {
+	select {
+	case <-ctx.Done():
+		s.logger().Debug("upload aborted by context", "transfer_id", state.transferID, "err", ctx.Err())
+	case <-s.done:
+	case <-state.done:
+		return
+	}
+
+	s.removeUpload(state.transferID, "")
+}
+
+// isClosed reports whether the broker's workers are gone. The done of a
+// backend built directly in a test is nil and never closes.
+func (s *backend) isClosed() bool {
+	select {
+	case <-s.done:
+		return true
+	default:
+		return false
+	}
 }
 
 // newTransferID returns an ID no other transfer of this session has.
@@ -281,72 +273,24 @@ func (s *backend) newTransferID() string {
 	return strconv.FormatUint(s.lastTransferID.Add(1), 10)
 }
 
-// watchTransferCtx aborts a transfer when ctx is cancelled. Stops on whichever
-// comes first, so it never outlives the transfer it guards.
-func (s *backend) watchTransferCtx(ctx context.Context, done <-chan struct{}, abort func()) {
-	if ctx.Done() == nil {
-		return
-	}
-
-	go func() {
-		select {
-		case <-ctx.Done():
-			abort()
-		case <-done:
-		}
-	}()
-}
-
-// register runs add, which inserts a transfer into its map, and accounts for
-// it on transferWg, but only while the session can still carry the transfer.
-// The check and the accounting happen under shutdownMutex so Shutdown cannot
-// land between them and strand a counted transfer that will never be announced.
-//
-// Lock order is shutdownMutex → upload/downloadMutex. Nothing acquires them the
-// other way round: processFileTransfers releases shutdownMutex (via
-// IsShuttingDown) before taking the map locks.
-func (s *backend) register(add func()) error {
-	s.shutdownMutex.Lock()
-	defer s.shutdownMutex.Unlock()
-
-	if s.isShuttingDown {
-		return ErrSessionShuttingDown
-	}
-
-	// A nil done channel (a backend built directly in a test) is never ready,
-	// leaving registration unrestricted.
-	select {
-	case <-s.done:
-		return ErrSessionClosed
-	default:
-	}
-
-	// Count the transfer before publishing it: a sweep that removes it calls
-	// Done, which must not run before this Add.
-	s.transferWg.Add(1)
-
-	add()
-
-	return nil
-}
-
 // SendFile streams r to the client under the given name. size is the total file
-// size in bytes. It returns immediately; the download proceeds chunk by chunk in
-// toClientWorker. If r implements io.Closer, the session takes ownership and
-// closes it when the transfer completes, but only on a nil return; on error the
-// caller keeps r and closes it.
+// size in bytes. It reads r on the calling goroutine and returns once the client
+// has confirmed the file, or with the reason the file did not arrive. The
+// caller keeps r. Several calls from goroutines of the module stream their
+// files side by side.
 //
-// ctx bounds the transfer, and still does after SendFile returns: cancelling it
-// closes r and aborts the transfer, which toClientWorker then reports to the
-// client. The module is not notified.
+// ctx bounds the transfer: cancelling it ends the transfer between two reads
+// of r, and the client is told why.
 //
-// It returns ErrSessionShuttingDown or ErrSessionClosed if the session can no
-// longer carry a transfer; both are terminal, so a module should return the
-// error rather than retry.
+// It returns ErrSessionClosed if the session can no longer carry a transfer.
 func (s *backend) SendFile(ctx context.Context, name string, size int64, r io.Reader) error {
 	err := ctx.Err()
 	if err != nil {
 		return err
+	}
+
+	if s.isClosed() {
+		return ErrSessionClosed
 	}
 
 	transferID := s.newTransferID()
@@ -361,32 +305,112 @@ func (s *backend) SendFile(ctx context.Context, name string, size int64, r io.Re
 			Name: name,
 			Size: size,
 		},
-		reader:      r,
-		chunkNumber: 0,
-		done:        make(chan struct{}),
+		sent: make(chan struct{}, 1),
+		done: make(chan struct{}),
 	}
 
-	if c, ok := r.(io.Closer); ok {
-		state.closer = c
-	}
-
-	err = s.register(func() {
-		s.downloadMutex.Lock()
-		s.activeDownloads[transferID] = state
-		s.downloadMutex.Unlock()
-	})
-	if err != nil {
-		return err
-	}
-
-	s.watchTransferCtx(ctx, state.done, func() {
-		s.logger().Debug("download aborted by context", "transfer_id", transferID, "err", ctx.Err())
-		s.abortDownload(transferID, fmt.Errorf("the module cancelled the transfer: %w", context.Cause(ctx)))
-	})
+	s.downloadMutex.Lock()
+	s.activeDownloads[transferID] = state
+	s.downloadMutex.Unlock()
 
 	s.notifyFileTransfer()
 
-	return nil
+	return s.streamDownload(ctx, state, r)
+}
+
+// streamDownload reads r a chunk at a time and hands each chunk to
+// toClientWorker, reading the next once the last one went out. After the final
+// chunk it waits for the client's confirmation. It returns the outcome.
+func (s *backend) streamDownload(ctx context.Context, state *downloadState, r io.Reader) error {
+	var offset int64
+
+	for number := int32(0); ; number++ {
+		buf := make([]byte, chunkSize)
+		read, readErr := r.Read(buf)
+
+		// A reader may return data together with io.EOF, so check it before the error.
+		// errors.Is, not ==: SendFile takes any io.Reader, and a wrapped EOF is a
+		// clean end of file, not a read failure.
+		final := errors.Is(readErr, io.EOF)
+		if readErr != nil && !final {
+			return s.failDownload(state, fmt.Errorf("error reading file: %w", readErr))
+		}
+
+		state.mu.Lock()
+		state.chunk = &pb.FileChunk{
+			TransferId:  state.transferID,
+			ChunkNumber: number,
+			ChunkData:   buf[:read],
+			ChunkOffset: offset,
+			IsFinal:     final,
+		}
+		state.mu.Unlock()
+
+		s.notifyFileTransfer()
+
+		// Track the real offset rather than number*chunkSize: a short read is
+		// legal and leaves chunks smaller than the maximum.
+		offset += int64(read)
+
+		// After the final chunk only the end of the download counts.
+		sent := state.sent
+		if final {
+			sent = nil
+		}
+
+		ended, err := s.awaitDownload(ctx, state, sent)
+		if ended {
+			return err
+		}
+	}
+}
+
+// awaitDownload waits until toClientWorker has sent the chunk handed over, if
+// sent is not nil, or until the download ended. A cancelled ctx or the end of
+// the session ends the download first. It reports whether the download ended,
+// and the outcome then.
+func (s *backend) awaitDownload(ctx context.Context, state *downloadState, sent <-chan struct{}) (bool, error) {
+	select {
+	case <-sent:
+		return false, nil
+	case <-state.done:
+		return true, state.err
+	case <-ctx.Done():
+		return true, s.failDownload(state, fmt.Errorf("the module cancelled the transfer: %w", context.Cause(ctx)))
+	case <-s.done:
+		return true, s.endDownload(state, ErrSessionClosed)
+	}
+}
+
+// failDownload gives the download up with err. toClientWorker tells the client,
+// unless the client has not heard of the download yet, and ends it. failDownload
+// waits for that, so that the client hears why before the run ends, and returns
+// the outcome, which the client may have settled first.
+func (s *backend) failDownload(state *downloadState, err error) error {
+	state.mu.Lock()
+	state.failErr = err
+	state.mu.Unlock()
+
+	s.notifyFileTransfer()
+
+	select {
+	case <-state.done:
+		return state.err
+	case <-s.done:
+		return s.endDownload(state, err)
+	}
+}
+
+// endDownload drops the download and ends it with err, unless it ended
+// already. It returns the outcome.
+func (s *backend) endDownload(state *downloadState, err error) error {
+	s.downloadMutex.Lock()
+	delete(s.activeDownloads, state.transferID)
+	s.downloadMutex.Unlock()
+
+	state.finish(err)
+
+	return state.err
 }
 
 // notifyFileTransfer signals toClientWorker that file-transfer work is available.
@@ -395,75 +419,6 @@ func (s *backend) notifyFileTransfer() {
 	case s.fileTransferNotifyCh <- struct{}{}:
 	default:
 	}
-}
-
-// getNextChunk returns the next chunk for a download transfer, a flag for whether
-// it is the final chunk, and any read error.
-func (s *backend) getNextChunk(transferID string) (*pb.FileChunk, bool, error) {
-	s.downloadMutex.RLock()
-	state, exists := s.activeDownloads[transferID]
-	s.downloadMutex.RUnlock()
-
-	if !exists {
-		return nil, false, fmt.Errorf("download not found: %s", transferID)
-	}
-
-	state.mu.Lock()
-	defer state.mu.Unlock()
-
-	if state.closed.Load() {
-		return nil, false, fmt.Errorf("download closed: %s", transferID)
-	}
-
-	chunkData := make([]byte, chunkSize)
-
-	var bytesRead int
-
-	err := callSource(func() error {
-		var readErr error
-
-		bytesRead, readErr = state.reader.Read(chunkData)
-
-		return readErr
-	})
-	chunkData = chunkData[:bytesRead]
-
-	// A reader may return data together with io.EOF, so check n before the error.
-	// errors.Is, not ==: SendFile takes any io.Reader, and a wrapped EOF is a
-	// clean end of file, not a read failure.
-	isFinal := errors.Is(err, io.EOF)
-	if err != nil && !isFinal {
-		return nil, false, err
-	}
-
-	chunk := &pb.FileChunk{
-		TransferId:  transferID,
-		ChunkNumber: state.chunkNumber,
-		ChunkData:   chunkData,
-		ChunkOffset: state.offset,
-		IsFinal:     isFinal,
-	}
-
-	state.chunkNumber++
-	// Track the real offset rather than chunkNumber*chunkSize: a short read is
-	// legal and leaves chunks smaller than the maximum.
-	state.offset += int64(bytesRead)
-
-	return chunk, isFinal, nil
-}
-
-// callSource calls call, which calls the Read or Close of the reader a module
-// handed to SendFile. That runs on a worker or a context watcher, outside the
-// recover around Run, so a panic in the module's code fails the transfer
-// instead of ending the agent with every run on it.
-func callSource(call func() error) (err error) {
-	defer func() {
-		if v := recover(); v != nil {
-			err = fmt.Errorf("the module's reader panicked: %v", v)
-		}
-	}()
-
-	return call()
 }
 
 // registerUploadChunk validates a chunk received from the client and hands it
@@ -568,25 +523,13 @@ func (s *backend) getActiveDownloads() []string {
 	return transferIDs
 }
 
-// removeDownload removes a completed download from tracking, closing its reader
-// if it owns one. Idempotent.
-func (s *backend) removeDownload(transferID string) {
-	s.downloadMutex.Lock()
-	state, exists := s.activeDownloads[transferID]
-
-	if exists {
-		delete(s.activeDownloads, transferID)
+// removeDownload drops a download and ends it with err, which SendFile then
+// returns, unless it ended already. Idempotent.
+func (s *backend) removeDownload(transferID string, err error) {
+	state := s.getDownload(transferID)
+	if state != nil {
+		_ = s.endDownload(state, err)
 	}
-
-	s.downloadMutex.Unlock()
-
-	if !exists {
-		return
-	}
-
-	state.close()
-
-	s.transferWg.Done()
 }
 
 // getUpload retrieves upload state for a transfer ID, or nil.
@@ -617,8 +560,6 @@ func (s *backend) removeUpload(transferID, clientReason string) {
 	state.close(err)
 
 	delete(s.activeUploads, transferID)
-
-	s.transferWg.Done()
 }
 
 // getDownload retrieves download state for a transfer ID, or nil.
@@ -650,118 +591,5 @@ func (s *backend) markDownloadAwaitingAck(transferID string) {
 
 	if state, exists := s.activeDownloads[transferID]; exists {
 		state.awaitingFinalAck = true
-	}
-}
-
-// abortDownload ends a download whose context ended. It closes the reader,
-// which ends a Read in progress, and leaves the transfer to toClientWorker to
-// report, so that the client's run fails instead of ending without the file.
-func (s *backend) abortDownload(transferID string, err error) {
-	s.downloadMutex.Lock()
-
-	state, exists := s.activeDownloads[transferID]
-	if exists && state.abortErr == nil {
-		state.abortErr = err
-	}
-
-	s.downloadMutex.Unlock()
-
-	if !exists {
-		return
-	}
-
-	state.close()
-	s.notifyFileTransfer()
-}
-
-// downloadAbortErr returns why the download was aborted, or nil.
-func (s *backend) downloadAbortErr(transferID string) error {
-	s.downloadMutex.RLock()
-	defer s.downloadMutex.RUnlock()
-
-	if state, exists := s.activeDownloads[transferID]; exists {
-		return state.abortErr
-	}
-
-	return nil
-}
-
-// IsShuttingDown reports whether the session is in graceful shutdown.
-func (s *backend) IsShuttingDown() bool {
-	s.shutdownMutex.Lock()
-	defer s.shutdownMutex.Unlock()
-
-	return s.isShuttingDown
-}
-
-// Shutdown begins graceful shutdown once the modules have returned: module
-// output stops being forwarded, and the workers keep streaming downloads until
-// they complete. Uploads are dropped, as no module is left to read them; one
-// left in place would keep WaitForTransfers waiting forever.
-func (s *backend) Shutdown() {
-	s.shutdownMutex.Lock()
-	defer s.shutdownMutex.Unlock()
-
-	if s.isShuttingDown {
-		return
-	}
-
-	s.logger().Debug("session initiating graceful shutdown")
-
-	s.isShuttingDown = true
-	close(s.shutdownCh)
-
-	// Lock order shutdownMutex, then uploadMutex: see register.
-	s.abortUploads(errors.New("transfer aborted: the module returned"))
-}
-
-// WaitForTransfers blocks until every active transfer has completed.
-func (s *backend) WaitForTransfers() {
-	s.transferWg.Wait()
-}
-
-// abortTransfers tears down every still-active transfer and balances the
-// transfer wait group. It is called once the stream workers have exited (e.g.
-// the client disconnected mid-transfer) so a half-finished transfer cannot wedge
-// WaitForTransfers, and therefore graceful shutdown, forever.
-func (s *backend) abortTransfers() {
-	// Under shutdownMutex, as register is: a transfer either registers before
-	// the sweep, which then releases it, or finds the workers done and is
-	// refused. Lock order shutdownMutex → upload/downloadMutex, as there.
-	s.shutdownMutex.Lock()
-
-	s.abortUploads(errors.New("transfer aborted: stream closed"))
-
-	// Detach the downloads under the locks, then close them outside: a module's
-	// Close may be slow, and registration must not wait for it.
-	s.downloadMutex.Lock()
-
-	downloads := make([]*downloadState, 0, len(s.activeDownloads))
-	for id, state := range s.activeDownloads {
-		downloads = append(downloads, state)
-
-		delete(s.activeDownloads, id)
-	}
-
-	s.downloadMutex.Unlock()
-	s.shutdownMutex.Unlock()
-
-	for _, state := range downloads {
-		state.close()
-		s.transferWg.Done()
-	}
-}
-
-// abortUploads releases every upload with err, failing the module's reader and
-// any worker blocked writing a chunk into it.
-func (s *backend) abortUploads(err error) {
-	s.uploadMutex.Lock()
-	defer s.uploadMutex.Unlock()
-
-	for id, state := range s.activeUploads {
-		state.close(err)
-
-		delete(s.activeUploads, id)
-		s.transferWg.Done()
 	}
 }

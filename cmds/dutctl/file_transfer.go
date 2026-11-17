@@ -516,8 +516,8 @@ func (m *clientFileTransferManager) finishDownload(state *clientFileTransferStat
 }
 
 // handleFileTransferResponse handles a FileTransferResponse from the agent. It
-// returns an error for a download that failed on the agent: the module's
-// SendFile returned long before, so the run would otherwise succeed without the
+// returns an error for a download that failed on the agent: a module may ignore
+// the error its SendFile returns, and the run would then succeed without the
 // file. A failed upload fails the module that requested it, which reports why.
 func (m *clientFileTransferManager) handleFileTransferResponse(ftRes *pb.FileTransferResponse) error {
 	transferID := ftRes.GetTransferId()

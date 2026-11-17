@@ -235,11 +235,9 @@ func TestRunSuccess(t *testing.T) {
 	}
 }
 
-// SendFile returns before the file is sent, so a download still streams after
-// its module returned. The run must carry it to the end before it stops the
-// workers and cancels the modules' context, which bounds the transfer. Otherwise
-// the client gets a truncated file and the run still reports success.
-func TestRunFinishesDownloadAfterModuleReturns(t *testing.T) {
+// SendFile returns once the client has confirmed the download, so the module,
+// and with it the run, ends only when the whole file has arrived.
+func TestRunEndsOnceTheClientHasTheDownload(t *testing.T) {
 	content := bytes.Repeat([]byte("firmware"), 300_000) // 2.4 MB, three chunks
 
 	svc := newRunService(func(ctx context.Context, s module.Session, _ ...string) error {
@@ -253,6 +251,12 @@ func TestRunFinishesDownloadAfterModuleReturns(t *testing.T) {
 	go func() { done <- svc.run(context.Background(), stream, "alice") }()
 
 	final := stream.awaitSent(t, func(res *pb.RunResponse) bool { return res.GetFileChunk().GetIsFinal() })
+
+	select {
+	case err := <-done:
+		t.Fatalf("run returned %v before the client confirmed the download", err)
+	case <-time.After(50 * time.Millisecond):
+	}
 
 	stream.push(&pb.RunRequest{Msg: &pb.RunRequest_FileTransferResponse{
 		FileTransferResponse: &pb.FileTransferResponse{

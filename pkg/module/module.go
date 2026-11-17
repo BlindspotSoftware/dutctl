@@ -96,8 +96,8 @@ type Module interface {
 	// such as a package variable or a library's global state. Keep the files
 	// of a run in a directory of its own, made with os.MkdirTemp under the
 	// agent's temporary directory, and remove it before Run returns. Close
-	// every file Run opens, except one that SendFile accepted, and treat a
-	// failed close of a file it wrote as a failed write.
+	// every file Run opens, and treat a failed close of a file it wrote as a
+	// failed write.
 	Run(ctx context.Context, s Session, args ...string) error
 }
 
@@ -111,8 +111,9 @@ type Module interface {
 // opaquely (no sentinel to match) and typically means the client declined the file
 // or the transfer stream failed.
 //
-// OpenConsole, Print, RequestFile and SendFile must be called only from the module's
-// Run goroutine.
+// OpenConsole and Print must be called only from the module's Run goroutine.
+// RequestFile and SendFile may also be called from goroutines that Run starts,
+// to move several files at once; Run waits for them before it returns.
 type Session interface {
 	// Print sends a message to the client. Implementations should wrap [fmt.Sprint].
 	// The message is displayed in the console or GUI of the client.
@@ -171,18 +172,13 @@ type Session interface {
 	// SendFile sends a file to the client. size is the total file size in bytes,
 	// which the agent announces to the client.
 	//
-	// It returns as soon as the transfer is registered; the bytes are streamed
-	// afterwards, so r must stay readable beyond this call. If r implements
-	// io.Closer the session takes ownership and closes it when the transfer
-	// completes, but only on a nil return. On error the caller still owns r and
-	// must close it.
+	// It reads r to its end on the calling goroutine and returns once the client
+	// has confirmed the whole file, or with the reason the file did not arrive.
+	// The caller keeps r and closes it.
 	//
-	// ctx bounds the transfer, and still does after SendFile returns: cancelling
-	// it closes r and aborts the transfer, which fails the run on the client.
-	// The session reads r on a goroutine of its own and closes it from another,
-	// so Close must be safe during a Read and end it, as it is for an *os.File
-	// or an io.PipeReader. A Read of an r without Close must not block, since
-	// nothing could end it.
+	// ctx bounds the transfer: cancelling it ends the transfer between two reads
+	// of r, which fails the run on the client. A Read that blocks is the
+	// caller's to end, as for any reader it reads itself.
 	SendFile(ctx context.Context, name string, size int64, r io.Reader) error
 }
 

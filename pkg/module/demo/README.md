@@ -112,7 +112,7 @@ against them:
 | The session is torn down, a write fails with io.ErrClosedPipe       | Raw, Console                  |
 | Stdin.Close ends a read on another goroutine                        | Console                       |
 | RequestFile, a file the user cannot provide                         | Upload, Flash                 |
-| SendFile                                                            | Download, Flash               |
+| SendFile, which returns once the user has the file                  | Download, Flash               |
 | An error returned by Run                                            | Fault, Switch, Flash          |
 | A panic in Run, recovered by the agent                              | Fault                         |
 | The context ends when the command is cancelled                      | Switch                        |

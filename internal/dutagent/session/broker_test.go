@@ -315,9 +315,8 @@ func TestBrokerSessionCallsUnblockAfterTeardown(t *testing.T) {
 		t.Errorf("stdin io.ReadAll err = %v, want nil (EOF terminates ReadAll)", stdinErr)
 	}
 
-	// RequestFile and SendFile refuse outright once the workers are gone. Letting
-	// them register would account for a transfer on transferWg that nothing can
-	// ever carry or release, so the refusal is what keeps the count balanced.
+	// RequestFile and SendFile refuse outright once the workers are gone, as
+	// nothing is left to carry the transfer.
 	if !errors.Is(reqErr, ErrSessionClosed) {
 		t.Errorf("RequestFile err = %v, want ErrSessionClosed", reqErr)
 	}

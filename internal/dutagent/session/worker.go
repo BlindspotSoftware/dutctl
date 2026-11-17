@@ -53,7 +53,8 @@ var ErrStreamClosed = errors.New("stream closed")
 // sendToClient serializes all sends on the bidirectional stream. The connect
 // BidiStream is not safe for concurrent Send calls, and both workers send
 // responses (toClientWorker streams downloads and module output;
-// fromClientWorker acks uploads), so every send goes through this lock.
+// fromClientWorker answers transfer requests), so every send goes through this
+// lock.
 //
 // A Send on an already-closed stream can panic. That is recovered into
 // ErrStreamClosed rather than a nil error: reporting success for a message that
@@ -90,9 +91,9 @@ func (s *backend) sendOrStop(stream Stream, res *pb.RunResponse) (bool, error) {
 	}
 }
 
-// sendDownloadError reports a download read error to the client and drops the
-// transfer. The read error itself is not fatal to the run. Only a failure to
-// deliver the report is, and that is returned.
+// sendDownloadError reports why SendFile gave a download up to the client and
+// ends the download. The failure itself is not fatal to the run. Only a failure
+// to deliver the report is, and that is returned.
 func sendDownloadError(
 	stream Stream,
 	s *backend,
@@ -100,14 +101,14 @@ func sendDownloadError(
 	downloadMetadataSent map[string]bool,
 	err error,
 ) error {
-	s.logger().Warn("error getting chunk for download", "transfer_id", transferID, "err", err)
+	s.logger().Warn("download failed", "transfer_id", transferID, "err", err)
 
 	res := &pb.RunResponse{
 		Msg: &pb.RunResponse_FileTransferResponse{
 			FileTransferResponse: &pb.FileTransferResponse{
 				TransferId:        transferID,
 				Status:            pb.FileTransferResponse_STATUS_ERROR,
-				ErrorMessage:      fmt.Sprintf("error reading file: %v", err),
+				ErrorMessage:      err.Error(),
 				NextChunkExpected: 0,
 			},
 		},
@@ -115,7 +116,7 @@ func sendDownloadError(
 
 	sendErr := s.sendToClient(stream, res)
 
-	s.removeDownload(transferID)
+	s.removeDownload(transferID, err)
 	delete(downloadMetadataSent, transferID)
 
 	return sendErr
@@ -160,35 +161,38 @@ func sendDownloadMetadata(
 }
 
 // handleDownloadFileTransfer advances a single download: announce its metadata,
-// then stream one chunk. It reports whether a message was sent.
+// then send the chunk SendFile handed over, or report why SendFile gave the
+// download up. It reports whether a message was sent.
 //
-// A send error is returned rather than logged and shrugged off. The chunk has
-// already been consumed from the module's reader by then, so there is nothing to
-// retry; carrying on would silently drop those bytes and leave the transfer
-// stalled with no further wake-up and nothing on the error channel.
+// A send error is returned rather than logged and shrugged off: carrying on
+// would leave SendFile waiting for a chunk that never went out, with nothing on
+// the error channel.
 func handleDownloadFileTransfer(
 	stream Stream,
 	s *backend,
 	transferID string,
 	downloadMetadataSent map[string]bool,
 ) (bool, error) {
-	// Skip while waiting for the client's acknowledgment of the final chunk.
-	if s.isDownloadAwaitingAck(transferID) {
+	download := s.getDownload(transferID)
+	if download == nil {
 		return false, nil
 	}
 
-	// A download the module's context ended is reported, so the client's run
-	// fails instead of ending without the file. One the client has not heard of
-	// yet is only dropped.
-	abortErr := s.downloadAbortErr(transferID)
-	if abortErr != nil && !downloadMetadataSent[transferID] {
-		s.removeDownload(transferID)
+	download.mu.Lock()
+	failErr := download.failErr
+	download.mu.Unlock()
+
+	// A failed download is reported, so the client's run fails instead of
+	// ending without the file. One the client has not heard of yet is only
+	// dropped.
+	if failErr != nil && !downloadMetadataSent[transferID] {
+		s.removeDownload(transferID, failErr)
 
 		return false, nil
 	}
 
-	if abortErr != nil {
-		return true, sendDownloadError(stream, s, transferID, downloadMetadataSent, abortErr)
+	if failErr != nil {
+		return true, sendDownloadError(stream, s, transferID, downloadMetadataSent, failErr)
 	}
 
 	// Announce the transfer before streaming any chunk.
@@ -196,31 +200,37 @@ func handleDownloadFileTransfer(
 		return sendDownloadMetadata(stream, s, transferID, downloadMetadataSent)
 	}
 
-	chunk, isFinal, err := s.getNextChunk(transferID)
-	if err != nil {
-		// An abort closes the reader under a Read; report the abort, not the
-		// error the closed reader returned.
-		return true, sendDownloadError(stream, s, transferID, downloadMetadataSent, cmp.Or(s.downloadAbortErr(transferID), err))
-	}
+	return sendDownloadChunk(stream, s, download)
+}
+
+// sendDownloadChunk sends the chunk SendFile handed over, if there is one, and
+// wakes SendFile to read the next. It reports whether it sent one.
+func sendDownloadChunk(stream Stream, s *backend, download *downloadState) (bool, error) {
+	download.mu.Lock()
+	chunk := download.chunk
+	download.chunk = nil
+	download.mu.Unlock()
 
 	if chunk == nil {
 		return false, nil
 	}
 
-	res := &pb.RunResponse{
-		Msg: &pb.RunResponse_FileChunk{FileChunk: chunk},
-	}
-
 	// Wait for the confirmation before the final chunk goes out: the client
 	// may confirm before Send returns, and a confirmation that finds the
 	// download not waiting for it is dropped.
-	if isFinal {
-		s.markDownloadAwaitingAck(transferID)
+	if chunk.GetIsFinal() {
+		s.markDownloadAwaitingAck(download.transferID)
 	}
 
-	sendErr := s.sendToClient(stream, res)
+	sendErr := s.sendToClient(stream, &pb.RunResponse{Msg: &pb.RunResponse_FileChunk{FileChunk: chunk}})
 	if sendErr != nil {
 		return false, sendErr
+	}
+
+	// SendFile hands over one chunk at a time, so the buffer of one has room.
+	select {
+	case download.sent <- struct{}{}:
+	default:
 	}
 
 	return true, nil
@@ -267,13 +277,8 @@ func processFileTransfers(stream Stream, s *backend, downloadMetadataSent map[st
 }
 
 // announceUpload sends the FileTransferRequest of one upload that has not been
-// announced yet, unless the session is shutting down. It reports whether it
-// sent one.
+// announced yet. It reports whether it sent one.
 func announceUpload(stream Stream, s *backend) (bool, error) {
-	if s.IsShuttingDown() {
-		return false, nil
-	}
-
 	for _, transferID := range s.getActiveUploads() {
 		upload := s.getUpload(transferID)
 		if upload == nil {
@@ -414,8 +419,7 @@ func advanceFileTransfers(
 
 // toClientWorker sends module output and download chunks to the client. It
 // loops until ctx is cancelled (returning nil) or a stream send fails
-// (returning that error). While the session is shutting down, module output is
-// refused at its source, but file transfers keep flowing until they complete.
+// (returning that error).
 //
 // It sends everything but fromClientWorker's answers to the client's transfer
 // messages, so the order it receives in is the order the client sees: a
@@ -684,23 +688,20 @@ func fromClientWorker(ctx context.Context, stream Stream, s *backend) error {
 				reason := cmp.Or(ftRes.GetErrorMessage(), "no reason given")
 
 				switch ftRes.GetStatus() {
-				case pb.FileTransferResponse_STATUS_ERROR:
-					s.removeDownload(transferID)
-					s.removeUpload(transferID, reason)
 				case pb.FileTransferResponse_STATUS_TRANSFER_COMPLETE:
 					if s.isDownloadAwaitingAck(transferID) {
-						s.removeDownload(transferID)
+						s.removeDownload(transferID, nil)
 					}
-				case pb.FileTransferResponse_STATUS_TRANSFER_REJECTED:
-					// A rejection can answer either direction: the client cannot read
-					// a file it was asked to upload, or cannot write a download. Drop
+				case pb.FileTransferResponse_STATUS_ERROR, pb.FileTransferResponse_STATUS_TRANSFER_REJECTED:
+					// Either can answer either direction: the client cannot read a
+					// file it was asked to upload, or cannot write a download. Drop
 					// both, or the agent keeps streaming a file the client has already
 					// refused.
-					l.Warn("client rejected transfer",
-						"transfer_id", transferID, "reason", reason)
+					l.Warn("client failed transfer",
+						"transfer_id", transferID, "status", ftRes.GetStatus(), "reason", reason)
 
 					s.removeUpload(transferID, reason)
-					s.removeDownload(transferID)
+					s.removeDownload(transferID, fmt.Errorf("client could not receive the file: %s", reason))
 				case pb.FileTransferResponse_STATUS_UNSPECIFIED,
 					pb.FileTransferResponse_STATUS_ACCEPTED,
 					pb.FileTransferResponse_STATUS_CHUNK_RECEIVED:

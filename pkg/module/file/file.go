@@ -302,14 +302,10 @@ func downloadFile(ctx context.Context, sesh module.Session, src, dest string) er
 	if err != nil {
 		return fmt.Errorf("failed to open source file %q: %w", src, err)
 	}
+	defer srcFile.Close()
 
-	// SendFile takes ownership of the file on success: the transfer is chunked
-	// and proceeds after this returns, so the session closes it and we must NOT
-	// defer Close. On error ownership stays here.
 	err = sesh.SendFile(ctx, dest, fileInfo.Size(), srcFile)
 	if err != nil {
-		srcFile.Close()
-
 		return fmt.Errorf("failed to send file to client: %w", err)
 	}
 

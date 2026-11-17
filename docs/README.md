@@ -125,7 +125,7 @@ Note that while a console is open, a file transfer waits behind the module's rea
 FileTransferRequest in the download direction, which names the destination path on the client, and then streams the
 file as FileChunk messages. The client writes them to a temporary file next to the destination and moves it into place
 when the final chunk has arrived, so a broken download leaves the destination as it was. It then confirms the download
-with a FileTransferResponse with the status TRANSFER_COMPLETE.
+with a FileTransferResponse with the status TRANSFER_COMPLETE, and only then does the module's `SendFile` return.
 
 **File upload to the agent**: A module requests a file with `RequestFile`. The agent sends a FileTransferRequest in the
 upload direction, which names the path on the client. The client answers with a FileTransferRequest that carries the

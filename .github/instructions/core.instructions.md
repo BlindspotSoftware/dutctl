@@ -32,9 +32,10 @@ superseding ADR or is breaking.
 - [CORE-3] `Broker.Start` sets the fields that the module-facing methods read without a lock (the
   channels, `done`, `log`) before it starts the workers, and nothing reassigns them later. The
   fields that `backend.mu` guards, `currentConsole` and `lastConsoleID`, are read and written
-  only under it. `register` and the teardown sweeps take `shutdownMutex` before the transfer maps'
-  locks, and a transfer is counted on `transferWg` before it is published. A download's `mu`
-  serializes the reads of the module's reader; closing the reader never waits for it.
+  only under it. `SendFile` reads the module's reader on the module's goroutine and hands
+  `toClientWorker` one chunk at a time; the session never reads or closes that reader on a
+  goroutine of its own. An upload ends when its context or the session ends, through a watcher
+  that ends with the upload.
   → https://github.com/BlindspotSoftware/dutctl/blob/main/internal/dutagent/session/session.go
 - [CORE-4] A module has one console at a time: a second `OpenConsole` ends the first. Input or
   control that is not marked for the open console is dropped, never kept for a later one. A

@@ -15,6 +15,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/BlindspotSoftware/dutctl/pkg/module"
+
 	pb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1"
 )
 
@@ -60,12 +62,12 @@ func (s *uploadStream) Receive() (*pb.RunRequest, error) {
 	}}}, nil
 }
 
-// TestUploadWriteUnblocksOnCancel guards the cancellation watchdog in
-// Broker.Start. An upload chunk is written into an io.Pipe that only the module
-// drains, so a module that abandons its reader leaves deliverChunk blocked in a
-// write no context can interrupt. Only abortTransfers releases it, by closing
-// the pipe; without it the goroutine leaks and the upload is never released.
-func TestUploadWriteUnblocksOnCancel(t *testing.T) {
+// TestUploadEndsWithTheSession: an upload chunk is written into an io.Pipe that
+// only the module drains, so a module that abandons its reader leaves
+// deliverChunk blocked in a write no context can interrupt. The end of the
+// session must drop the upload, which closes the pipe, also when the module
+// gave RequestFile a context that never ends.
+func TestUploadEndsWithTheSession(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	stream := &uploadStream{idCh: make(chan string, 1), stop: make(chan struct{})}
 
@@ -74,70 +76,56 @@ func TestUploadWriteUnblocksOnCancel(t *testing.T) {
 	b := &Broker{}
 	sess, _ := b.Start(ctx, stream)
 
-	if _, err := sess.RequestFile(ctx, "image.bin"); err != nil {
+	reader, err := sess.RequestFile(context.Background(), "image.bin")
+	if err != nil {
 		t.Fatalf("RequestFile: %v", err)
 	}
 
 	// Give the announced transfer time to reach deliverChunk and block there;
-	// the module deliberately never reads the returned reader.
+	// the module deliberately does not read the returned reader yet.
 	time.Sleep(200 * time.Millisecond)
 
 	cancel()
 
-	stopped := make(chan struct{})
+	_ = b.Stop()
 
-	go func() { _ = b.Stop(); b.WaitForTransfersToComplete(); close(stopped) }()
+	deadline := time.After(5 * time.Second)
 
-	select {
-	case <-stopped:
-	case <-time.After(5 * time.Second):
-		t.Fatal("the abandoned upload was not released after cancel")
+	for len(b.session.getActiveUploads()) != 0 {
+		select {
+		case <-deadline:
+			t.Fatal("the abandoned upload was not dropped when the session ended")
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+
+	if _, err := io.ReadAll(reader); err == nil {
+		t.Error("the reader of a dropped upload reported a clean end")
 	}
 }
 
-// TestRequestFileRefusedDuringShutdown guards the transferWg accounting.
-// processFileTransfers stops announcing uploads once shutdown begins, so a
-// transfer registered after that point could never be announced, completed or
-// released, and runInSession waits on transferWg before stopping the workers,
-// leaving nothing to break the wait.
-func TestRequestFileRefusedDuringShutdown(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+// sendFileAsync calls SendFile on a goroutine, as a module waiting for its
+// download, and delivers what it returns.
+func sendFileAsync(ctx context.Context, sess module.Session, name string, size int64, r io.Reader) <-chan error {
+	result := make(chan error, 1)
 
-	stream := &testStream{recvBlock: true, unblockCh: make(chan struct{})}
+	go func() { result <- sess.SendFile(ctx, name, size, r) }()
 
-	b := &Broker{}
-	sess, _ := b.Start(ctx, stream)
+	return result
+}
 
-	b.Shutdown()
-
-	_, err := sess.RequestFile(ctx, "image.bin")
-	if !errors.Is(err, ErrSessionShuttingDown) {
-		t.Errorf("RequestFile err = %v, want ErrSessionShuttingDown", err)
-	}
-
-	src := &closeSpyReader{Reader: bytes.NewReader([]byte("data")), closed: make(chan struct{})}
-
-	sendErr := sess.SendFile(ctx, "out.bin", 4, src)
-	if !errors.Is(sendErr, ErrSessionShuttingDown) {
-		t.Errorf("SendFile err = %v, want ErrSessionShuttingDown", sendErr)
-	}
-
-	// On an error the caller keeps the reader, and closes it itself.
-	select {
-	case <-src.closed:
-		t.Error("SendFile closed a reader it refused")
-	default:
-	}
-
-	done := make(chan struct{})
-
-	go func() { b.WaitForTransfersToComplete(); close(done) }()
+// awaitResult returns what SendFile returned, failing the test if it does not
+// return in time.
+func awaitResult(t *testing.T, result <-chan error) error {
+	t.Helper()
 
 	select {
-	case <-done:
+	case err := <-result:
+		return err
 	case <-time.After(5 * time.Second):
-		t.Fatal("WaitForTransfers blocked on a transfer registered after shutdown")
+		t.Fatal("SendFile did not return; the download never ended")
+
+		return nil
 	}
 }
 
@@ -191,9 +179,9 @@ func (s *rejectStream) Receive() (*pb.RunRequest, error) {
 }
 
 // TestDownloadRejectionStopsStreaming: a client that cannot save a download
-// answers TRANSFER_REJECTED, and the agent must drop the download. Handling the
-// status for uploads alone lets the agent stream the whole file to a client that
-// has already refused it.
+// answers TRANSFER_REJECTED, and the agent must drop the download and return
+// the client's reason from SendFile. Handling the status for uploads alone lets
+// the agent stream the whole file to a client that has already refused it.
 func TestDownloadRejectionStopsStreaming(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -207,32 +195,21 @@ func TestDownloadRejectionStopsStreaming(t *testing.T) {
 	b := &Broker{}
 	sess, _ := b.Start(ctx, stream)
 
-	if err := sess.SendFile(ctx, "out.bin", size, bytes.NewReader(make([]byte, size))); err != nil {
-		t.Fatalf("SendFile: %v", err)
+	err := awaitResult(t, sendFileAsync(ctx, sess, "out.bin", size, bytes.NewReader(make([]byte, size))))
+	if err == nil || !strings.Contains(err.Error(), "no space left on device") {
+		t.Errorf("SendFile err = %v, want the client's reason", err)
 	}
-
-	time.Sleep(500 * time.Millisecond)
 
 	if left := b.session.getActiveDownloads(); len(left) != 0 {
 		t.Errorf("download still active after rejection: %v", left)
 	}
 
 	stream.mu.Lock()
-	settled := stream.chunks
+	after := stream.chunks
 	stream.mu.Unlock()
 
 	// A chunk already in flight when the rejection is processed is acceptable;
 	// continuing to stream is not.
-	time.Sleep(300 * time.Millisecond)
-
-	stream.mu.Lock()
-	after := stream.chunks
-	stream.mu.Unlock()
-
-	if after != settled {
-		t.Errorf("agent kept streaming after rejection: %d chunks, then %d", settled, after)
-	}
-
 	if after > 4 {
 		t.Errorf("agent sent %d chunks after the client rejected the download", after)
 	}
@@ -243,6 +220,10 @@ func TestDownloadRejectionStopsStreaming(t *testing.T) {
 type scriptedStream struct {
 	mu   sync.Mutex
 	sent []*pb.RunResponse
+
+	// confirm makes the stream confirm each download once its final chunk
+	// arrived, as the client does.
+	confirm bool
 
 	reply chan *pb.RunRequest
 	stop  chan struct{}
@@ -259,6 +240,14 @@ func (s *scriptedStream) Send(res *pb.RunResponse) error {
 	s.mu.Lock()
 	s.sent = append(s.sent, res)
 	s.mu.Unlock()
+
+	if c := res.GetFileChunk(); s.confirm && c.GetIsFinal() {
+		s.reply <- &pb.RunRequest{Msg: &pb.RunRequest_FileTransferResponse{
+			FileTransferResponse: &pb.FileTransferResponse{
+				TransferId: c.GetTransferId(), Status: pb.FileTransferResponse_STATUS_TRANSFER_COMPLETE,
+			},
+		}}
+	}
 
 	return nil
 }
@@ -314,6 +303,27 @@ func awaitAnnouncement(t *testing.T, s *scriptedStream, dir pb.FileTransferReque
 	}
 }
 
+// awaitFinalChunk waits until the agent has sent a download's final chunk, and
+// returns every chunk it sent.
+func awaitFinalChunk(t *testing.T, s *scriptedStream) []*pb.FileChunk {
+	t.Helper()
+
+	deadline := time.After(10 * time.Second)
+
+	for {
+		cs := s.downloadChunks()
+		if len(cs) > 0 && cs[len(cs)-1].GetIsFinal() {
+			return cs
+		}
+
+		select {
+		case <-deadline:
+			t.Fatalf("download did not finish; %d chunks sent", len(cs))
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+}
+
 func awaitStatus(t *testing.T, s *scriptedStream, want pb.FileTransferResponse_Status) {
 	t.Helper()
 
@@ -335,8 +345,8 @@ func awaitStatus(t *testing.T, s *scriptedStream, want pb.FileTransferResponse_S
 }
 
 // TestDownloadHappyPath covers the agent's download state machine end to end:
-// announce, stream every chunk in order, mark the last one final, and release
-// the transfer only once the client confirms completion.
+// announce, stream every chunk in order, mark the last one final, and return
+// from SendFile only once the client confirms completion.
 func TestDownloadHappyPath(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -356,32 +366,15 @@ func TestDownloadHappyPath(t *testing.T) {
 
 	// A short reader: legal per io.Reader, and the case that breaks a chunk_offset
 	// computed as chunkNumber*chunkSize rather than from the bytes actually sent.
-	src := io.NopCloser(&shortReader{src: bytes.NewReader(content), max: chunkSize / 3})
+	src := &shortReader{src: bytes.NewReader(content), max: chunkSize / 3}
 
-	if err := sess.SendFile(ctx, "out.bin", size, src); err != nil {
-		t.Fatalf("SendFile: %v", err)
-	}
+	result := sendFileAsync(ctx, sess, "out.bin", size, src)
 
 	id := awaitAnnouncement(t, stream, pb.FileTransferRequest_DIRECTION_DOWNLOAD)
 
 	// The agent streams without waiting for the client, until it marks a chunk
 	// final.
-	deadline := time.After(10 * time.Second)
-
-	for {
-		cs := stream.downloadChunks()
-		if len(cs) > 0 && cs[len(cs)-1].GetIsFinal() {
-			break
-		}
-
-		select {
-		case <-deadline:
-			t.Fatalf("download did not finish; %d chunks sent", len(cs))
-		case <-time.After(5 * time.Millisecond):
-		}
-	}
-
-	chunks := stream.downloadChunks()
+	chunks := awaitFinalChunk(t, stream)
 
 	var (
 		got    []byte
@@ -409,7 +402,14 @@ func TestDownloadHappyPath(t *testing.T) {
 		t.Error("last chunk not marked final")
 	}
 
-	// The transfer stays registered until the client confirms.
+	// SendFile waits, and the transfer stays registered, until the client
+	// confirms.
+	select {
+	case err := <-result:
+		t.Fatalf("SendFile returned %v before the client confirmed", err)
+	default:
+	}
+
 	if left := b.session.getActiveDownloads(); len(left) != 1 {
 		t.Errorf("download released before the client confirmed: %v", left)
 	}
@@ -420,14 +420,12 @@ func TestDownloadHappyPath(t *testing.T) {
 		},
 	}}
 
-	done := make(chan struct{})
+	if err := awaitResult(t, result); err != nil {
+		t.Errorf("SendFile: %v", err)
+	}
 
-	go func() { b.WaitForTransfersToComplete(); close(done) }()
-
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("transfer never released after TRANSFER_COMPLETE")
+	if left := b.session.getActiveDownloads(); len(left) != 0 {
+		t.Errorf("download still registered after TRANSFER_COMPLETE: %v", left)
 	}
 }
 
@@ -474,7 +472,7 @@ func (s *fastAckStream) Receive() (*pb.RunRequest, error) {
 
 // TestDownloadConfirmedDuringFinalSend: the client may confirm a download
 // before the agent's Send of the final chunk returns. The agent must already
-// wait for the confirmation then, or it drops it and the run never ends.
+// wait for the confirmation then, or it drops it and SendFile never returns.
 func TestDownloadConfirmedDuringFinalSend(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -489,18 +487,8 @@ func TestDownloadConfirmedDuringFinalSend(t *testing.T) {
 	b := &Broker{}
 	sess, _ := b.Start(ctx, stream)
 
-	if err := sess.SendFile(ctx, "out.bin", 3, strings.NewReader("abc")); err != nil {
-		t.Fatalf("SendFile: %v", err)
-	}
-
-	done := make(chan struct{})
-
-	go func() { b.WaitForTransfersToComplete(); close(done) }()
-
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("the agent dropped the confirmation; the download never ended")
+	if err := awaitResult(t, sendFileAsync(ctx, sess, "out.bin", 3, strings.NewReader("abc"))); err != nil {
+		t.Errorf("SendFile: %v", err)
 	}
 }
 
@@ -661,106 +649,52 @@ func TestRequestFileContextBoundsTransfer(t *testing.T) {
 	if left := b.session.getActiveUploads(); len(left) != 0 {
 		t.Errorf("upload still registered after cancellation: %v", left)
 	}
-
-	done := make(chan struct{})
-
-	go func() { b.WaitForTransfersToComplete(); close(done) }()
-
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("cancelled transfer was never released from the wait group")
-	}
 }
 
-// panicReader is a module's reader that panics, on Read and on Close.
-type panicReader struct{}
+// failingReader returns data, then fails with err.
+type failingReader struct {
+	data []byte
+	err  error
+}
 
-func (panicReader) Read([]byte) (int, error) { panic("module bug in Read") }
-func (panicReader) Close() error             { panic("module bug in Close") }
+func (r *failingReader) Read(p []byte) (int, error) {
+	if len(r.data) == 0 {
+		return 0, r.err
+	}
 
-// TestSendFileReaderPanicFailsOnlyTheTransfer: the session reads and closes a
-// module's reader on its own goroutines, outside the recover around Run. A
-// panic there must fail the download, not end the agent.
-func TestSendFileReaderPanicFailsOnlyTheTransfer(t *testing.T) {
+	n := copy(p, r.data)
+	r.data = r.data[n:]
+
+	return n, nil
+}
+
+// TestSendFileReadErrorFailsTheDownload: a reader that fails ends the download
+// on both ends. SendFile returns the error to the module, and the client is
+// told, so its run fails instead of waiting for a file that will not come.
+func TestSendFileReadErrorFailsTheDownload(t *testing.T) {
 	stream := newScriptedStream()
 	defer close(stream.stop)
 
 	b := &Broker{}
 	sess, _ := b.Start(context.Background(), stream)
 
-	if err := sess.SendFile(context.Background(), "out.bin", 4, panicReader{}); err != nil {
-		t.Fatalf("SendFile: %v", err)
+	broken := errors.New("input/output error")
+	src := &failingReader{data: []byte("firm"), err: broken}
+
+	if err := awaitResult(t, sendFileAsync(context.Background(), sess, "out.bin", 8, src)); !errors.Is(err, broken) {
+		t.Errorf("SendFile err = %v, want %v", err, broken)
 	}
 
 	awaitStatus(t, stream, pb.FileTransferResponse_STATUS_ERROR)
 
-	done := make(chan struct{})
-
-	go func() { b.WaitForTransfersToComplete(); close(done) }()
-
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("the failed download was never released")
+	if left := b.session.getActiveDownloads(); len(left) != 0 {
+		t.Errorf("download still registered after it failed: %v", left)
 	}
 }
 
-// TestSendFileCancelEndsABlockedRead: a module's reader may block in Read, as
-// a pipe does until its writer writes. Cancelling the transfer's context closes
-// the reader, which ends the Read; the agent tells the client and releases the
-// download, so that neither side waits for a file that will not come.
-func TestSendFileCancelEndsABlockedRead(t *testing.T) {
-	stream := newScriptedStream()
-	defer close(stream.stop)
-
-	b := &Broker{}
-	sess, _ := b.Start(context.Background(), stream)
-
-	pr, pw := io.Pipe() // nobody writes, so a Read blocks
-	defer pw.Close()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	if err := sess.SendFile(ctx, "out.bin", 4, pr); err != nil {
-		t.Fatalf("SendFile: %v", err)
-	}
-
-	awaitAnnouncement(t, stream, pb.FileTransferRequest_DIRECTION_DOWNLOAD)
-	time.Sleep(50 * time.Millisecond) // let the worker enter its Read
-	cancel()
-
-	awaitStatus(t, stream, pb.FileTransferResponse_STATUS_ERROR)
-
-	done := make(chan struct{})
-
-	go func() { b.WaitForTransfersToComplete(); close(done) }()
-
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("the cancelled download was never released")
-	}
-}
-
-// closeSpyReader reports whether the session closed it, which is the contract
-// SendFile documents for a reader it has taken ownership of.
-type closeSpyReader struct {
-	*bytes.Reader
-	closed chan struct{}
-	once   sync.Once
-}
-
-func (r *closeSpyReader) Close() error {
-	r.once.Do(func() { close(r.closed) })
-
-	return nil
-}
-
-// TestSendFileContextBoundsTransfer: cancelling after SendFile has returned
-// still aborts the in-flight download and closes the reader. SendFile is
-// fire-and-forget, so the context is the only handle the module keeps on it.
+// TestSendFileContextBoundsTransfer: cancelling the context ends a download
+// that the client has not confirmed. SendFile returns the context's cause, and
+// the client is told, so that neither side waits for the other.
 func TestSendFileContextBoundsTransfer(t *testing.T) {
 	stream := newScriptedStream()
 	defer close(stream.stop)
@@ -768,41 +702,70 @@ func TestSendFileContextBoundsTransfer(t *testing.T) {
 	b := &Broker{}
 	sess, _ := b.Start(context.Background(), stream)
 
-	const size = 32 * 1024 * 1024
-
-	src := &closeSpyReader{
-		Reader: bytes.NewReader(make([]byte, size)),
-		closed: make(chan struct{}),
-	}
-
 	transferCtx, cancelTransfer := context.WithCancel(context.Background())
 
-	if err := sess.SendFile(transferCtx, "out.bin", size, src); err != nil {
-		t.Fatalf("SendFile: %v", err)
-	}
+	result := sendFileAsync(transferCtx, sess, "out.bin", 4, strings.NewReader("data"))
 
-	awaitAnnouncement(t, stream, pb.FileTransferRequest_DIRECTION_DOWNLOAD)
-
-	// SendFile has already returned; the context is still in charge.
+	// The client got the whole file but never confirms it.
+	awaitFinalChunk(t, stream)
 	cancelTransfer()
 
-	select {
-	case <-src.closed:
-	case <-time.After(5 * time.Second):
-		t.Fatal("cancelling the context did not close the reader the session owned")
+	if err := awaitResult(t, result); !errors.Is(err, context.Canceled) {
+		t.Errorf("SendFile err = %v, want context.Canceled", err)
 	}
 
-	deadline := time.After(5 * time.Second)
+	awaitStatus(t, stream, pb.FileTransferResponse_STATUS_ERROR)
 
-	for {
-		if len(b.session.getActiveDownloads()) == 0 {
-			break
+	if left := b.session.getActiveDownloads(); len(left) != 0 {
+		t.Errorf("download still registered after cancellation: %v", left)
+	}
+}
+
+// TestSendFilesSideBySide: a module may send several files at once from
+// goroutines of its own. Each SendFile returns once the client confirmed its
+// file, and every file arrives whole.
+func TestSendFilesSideBySide(t *testing.T) {
+	stream := newScriptedStream()
+	stream.confirm = true
+
+	defer close(stream.stop)
+
+	b := &Broker{}
+	sess, _ := b.Start(context.Background(), stream)
+
+	files := map[string][]byte{
+		"a.bin": bytes.Repeat([]byte("a"), 2*chunkSize+1),
+		"b.bin": bytes.Repeat([]byte("b"), 2*chunkSize+1),
+	}
+
+	results := make(map[string]<-chan error, len(files))
+	for name, content := range files {
+		results[name] = sendFileAsync(context.Background(), sess, name, int64(len(content)), bytes.NewReader(content))
+	}
+
+	for name, result := range results {
+		if err := awaitResult(t, result); err != nil {
+			t.Errorf("SendFile(%s): %v", name, err)
+		}
+	}
+
+	names := map[string]string{}
+	got := map[string][]byte{}
+
+	for _, res := range stream.responses() {
+		if r := res.GetFileTransferRequest(); r != nil {
+			names[r.GetTransferId()] = r.GetMetadata().GetPath()
 		}
 
-		select {
-		case <-deadline:
-			t.Fatal("download still registered after cancellation")
-		case <-time.After(5 * time.Millisecond):
+		if c := res.GetFileChunk(); c != nil {
+			name := names[c.GetTransferId()]
+			got[name] = append(got[name], c.GetChunkData()...)
+		}
+	}
+
+	for name, content := range files {
+		if !bytes.Equal(got[name], content) {
+			t.Errorf("%s arrived with %d bytes, want %d", name, len(got[name]), len(content))
 		}
 	}
 }
