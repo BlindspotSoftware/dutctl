@@ -113,8 +113,6 @@ func (app *application) runTUI() error {
 // signals turns bubbletea's answer to SIGINT and SIGTERM into a quit the
 // TUI sees: it erases its frame and exits as interrupted. A quit the TUI
 // asked for passes. It runs on the event loop, as Update does.
-//
-//nolint:ireturn // tea.WithFilter's filter returns the message as the interface
 func (m *model) signals(_ tea.Model, msg tea.Msg) tea.Msg {
 	switch msg.(type) {
 	case tea.InterruptMsg:
@@ -371,8 +369,6 @@ type (
 )
 
 // Update handles a message. Bubbletea's Model interface fixes its signature.
-//
-//nolint:ireturn // tea.Model's Update returns the model as the interface
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 

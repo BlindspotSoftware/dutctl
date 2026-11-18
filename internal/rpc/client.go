@@ -25,8 +25,6 @@ func NewDeviceClient(addr string, opts ...connect.ClientOption) dutctlv1connect.
 
 // NewRelayClient returns a RelayService client for the server at addr, speaking
 // gRPC over HTTP/2 cleartext (h2c).
-//
-//nolint:ireturn // returns the connect-generated RelayServiceClient interface by design
 func NewRelayClient(addr string, opts ...connect.ClientOption) relayv1alpha1connect.RelayServiceClient {
 	return relayv1alpha1connect.NewRelayServiceClient(newH2CClient(), baseURL(addr), clientOptions(opts)...)
 }
