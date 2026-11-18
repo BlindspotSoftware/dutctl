@@ -56,8 +56,9 @@ transfer.
   module; taking them back after a release would.
 - No download outlives its `SendFile`, so a run ends once its modules have
   returned ([ADR-0031](0031-keep-a-device-busy-until-its-modules-return.md)).
-  An upload that its module did not read to the end is dropped when the module
-  returns.
+  An upload ends with the context the module passed to `RequestFile`. The
+  context of `Run` ends when `Run` returns, so an upload on it that the module
+  did not read to the end is dropped then.
 - The client writes a download to a temporary file next to the destination and
   moves it into place when it is complete, so a broken download leaves the
   destination as it was. A failed download fails the run on the client.
