@@ -70,8 +70,6 @@ const (
 )
 
 // binaries are dutagent and dutctl, built once for all tests.
-//
-//nolint:gochecknoglobals // built once per test binary, shared by the tests
 var binaries struct {
 	once   sync.Once
 	dir    string
