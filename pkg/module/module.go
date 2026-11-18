@@ -117,8 +117,8 @@ type Module interface {
 //
 // A session carries one file transfer at a time: while one runs, RequestFile
 // and SendFile return an error. An upload runs until its reader has returned
-// io.EOF or an error, until its ctx ends, or until Run returns; a download runs
-// until SendFile returns.
+// io.EOF or an error, or until its ctx ends, as Run's context does when Run
+// returns; a download runs until SendFile returns.
 type Session interface {
 	// Print sends a message to the client. Implementations should wrap [fmt.Sprint].
 	// The message is displayed in the console or GUI of the client.
