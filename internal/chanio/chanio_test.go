@@ -334,8 +334,8 @@ func TestChanReader_LeftoverDoesNotWait(t *testing.T) {
 // together with the EOF. This is what unwedges a module parked reading stdin
 // when its session is torn down.
 func TestChanReaderDoneUnblocksRead(t *testing.T) {
-	ch := make(chan []byte)     // never fed, never closed
-	done := make(chan struct{}) //nolint:varnamelen // done is the conventional name
+	ch := make(chan []byte) // never fed, never closed
+	done := make(chan struct{})
 
 	r, err := NewChanReader(ch, done, nil)
 	if err != nil {
@@ -382,8 +382,8 @@ func TestChanReaderDoneUnblocksRead(t *testing.T) {
 // io.ErrClosedPipe. This is what unwedges a module parked writing stdout/stderr
 // when its session is torn down.
 func TestChanWriterDoneUnblocksWrite(t *testing.T) {
-	ch := make(chan []byte)     // no receiver
-	done := make(chan struct{}) //nolint:varnamelen // done is the conventional name
+	ch := make(chan []byte) // no receiver
+	done := make(chan struct{})
 
 	w, err := NewChanWriter(ch, done)
 	if err != nil {
