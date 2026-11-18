@@ -5,7 +5,7 @@ go 1.26.7
 require (
 	charm.land/bubbles/v2 v2.2.1
 	charm.land/bubbletea/v2 v2.1.1
-	charm.land/lipgloss/v2 v2.1.0
+	charm.land/lipgloss/v2 v2.1.1
 	connectrpc.com/connect v1.21.1
 	github.com/bougou/go-ipmi v0.8.2
 	github.com/charmbracelet/colorprofile v0.4.3
