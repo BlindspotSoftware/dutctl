@@ -48,20 +48,24 @@ transfer.
   confirmed the file, or with the reason it did not arrive. The module keeps
   its reader and closes it. A module can run a call that waits on a goroutine
   of its own, but it cannot wait for a call that returned early.
-- The session carries any number of transfers at once. A module that moves
-  several files at a time calls `RequestFile` or `SendFile` from goroutines of
-  its own, and waits for them before `Run` returns.
+- A session carries one transfer at a time: `RequestFile` and `SendFile`
+  return an error while another transfer of the session runs. No module moves
+  two files at once, and runs of other commands or devices transfer side by
+  side, each in its own session. The protocol keeps its transfer IDs, so a
+  later release can allow several transfers in a session without breaking a
+  module; taking them back after a release would.
 - No download outlives its `SendFile`, so a run ends once its modules have
   returned ([ADR-0031](0031-keep-a-device-busy-until-its-modules-return.md)).
-  An upload that no module read is dropped then.
+  An upload that its module did not read to the end is dropped when the module
+  returns.
 - The client writes a download to a temporary file next to the destination and
   moves it into place when it is complete, so a broken download leaves the
   destination as it was. A failed download fails the run on the client.
 - The client still reads and writes the paths the agent names
   ([ADR-0014](0014-let-the-agent-access-client-files-the-user-did-not-name.md)).
 
-This supersedes ADR-0003, which moved a file whole in one message, and only
-one at a time. Its other points stay in force:
+This supersedes ADR-0003, which moved a file whole in one message. Its other
+points stay in force:
 
 - Discovery and locking use unary RPCs: `List`, `Commands`, `Details`, `Lock`
   and `Unlock`.
@@ -91,13 +95,16 @@ one at a time. Its other points stay in force:
 - Bad, because an upload costs one round trip per chunk.
 - Bad, because a module that does something else while a file moves starts a
   goroutine for the transfer.
+- Bad, because a module moves one file at a time.
 
 ### Confirmation
 
-`TestRunEndsOnceTheClientHasTheDownload` and
-`TestRunDropsUploadWhenModuleReturns` in
+`TestRunEndsOnceTheClientHasTheDownload`,
+`TestRunDropsUploadWhenModuleReturns` and
+`TestRunEndsAnUnreadUploadWithItsModule` in
 [cmds/dutagent/run_test.go](../../cmds/dutagent/run_test.go) cover how a run
-ends with its transfers. `TestSendFilesSideBySide` and the other tests in
+ends with its transfers. `TestSessionCarriesOneTransferAtATime` and the other
+tests in
 [internal/dutagent/session/filetransfer_test.go](../../internal/dutagent/session/filetransfer_test.go)
 and [cmds/dutctl/file_transfer_test.go](../../cmds/dutctl/file_transfer_test.go)
 cover both ends of the protocol.
