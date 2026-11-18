@@ -124,6 +124,10 @@ linters:
     - zerologlint
 
   settings:
+    nolintlint:
+      # Every nolint directive names its linters and says why the finding is fine there.
+      require-explanation: true
+      require-specific: true
     depguard:
       # Ban the standard library "log" package repo-wide. The project logs only
       # via internal/log (structured, context-carried) or log/slog. depguard
