@@ -167,7 +167,7 @@ func toClientWorker(ctx context.Context, stream Stream, s *backend) error {
 // cancelled or the client closes the stream with io.EOF (both returning nil),
 // or a stream error occurs (returning that error).
 //
-//nolint:cyclop,funlen,gocognit
+//nolint:cyclop,funlen,gocognit // one loop over every message the client sends, beside a receiving goroutine
 func fromClientWorker(ctx context.Context, stream Stream, s *backend) error {
 	l := log.FromContext(ctx)
 
