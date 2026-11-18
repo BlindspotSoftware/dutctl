@@ -320,6 +320,46 @@ func TestRunDropsUploadWhenModuleReturns(t *testing.T) {
 	}
 }
 
+// A session carries one transfer at a time, so an upload that its module left
+// unread ends when the module returns: it must not refuse the transfer of the
+// next module.
+func TestRunEndsAnUnreadUploadWithItsModule(t *testing.T) {
+	svc := newRunService(
+		func(ctx context.Context, s module.Session, _ ...string) error {
+			_, err := s.RequestFile(ctx, "image.bin")
+
+			return err
+		},
+		func(ctx context.Context, s module.Session, _ ...string) error {
+			return s.SendFile(ctx, "out.bin", 4, strings.NewReader("data"))
+		},
+	)
+
+	stream := newClientStream(t, commandReq(testDevice, testCommand))
+
+	done := make(chan error, 1)
+
+	go func() { done <- svc.run(context.Background(), stream, "alice") }()
+
+	final := stream.awaitSent(t, func(res *pb.RunResponse) bool { return res.GetFileChunk().GetIsFinal() })
+
+	stream.push(&pb.RunRequest{Msg: &pb.RunRequest_FileTransferResponse{
+		FileTransferResponse: &pb.FileTransferResponse{
+			TransferId: final.GetFileChunk().GetTransferId(),
+			Status:     pb.FileTransferResponse_STATUS_TRANSFER_COMPLETE,
+		},
+	}})
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("run: unexpected error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("run did not return after the client confirmed the download")
+	}
+}
+
 func TestRunRejectedBeforeModules(t *testing.T) {
 	tests := []struct {
 		name     string

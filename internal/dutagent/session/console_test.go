@@ -541,38 +541,6 @@ func (s *consoleStream) pushFile(t *testing.T, id, name string) {
 	}}})
 }
 
-// A chunk waits until the module reads it, but not in the upstream worker:
-// a module may read its files in any order, the client's chunk of the other
-// one arriving first.
-func TestUploadsReachTheModuleInAnyOrder(t *testing.T) {
-	b := &Broker{}
-	stream := newConsoleStream(t)
-	sess, _ := start(t, b, stream)
-
-	first, err := sess.RequestFile(t.Context(), "first.bin")
-	if err != nil {
-		t.Fatalf("RequestFile: %v", err)
-	}
-
-	second, err := sess.RequestFile(t.Context(), "second.bin")
-	if err != nil {
-		t.Fatalf("RequestFile: %v", err)
-	}
-
-	ids := stream.awaitUploads(t, 2)
-	stream.pushFile(t, ids["first.bin"], "first.bin")
-	stream.pushFile(t, ids["second.bin"], "second.bin")
-
-	for _, f := range []struct {
-		r    io.Reader
-		want string
-	}{{second, "second.bin"}, {first, "first.bin"}} {
-		if data, err := readChunk(t, f.r); err != nil || data != f.want {
-			t.Fatalf("read = %q, %v; want %q", data, err, f.want)
-		}
-	}
-}
-
 // Console input reaches the module while a chunk of a file waits for the
 // module to read it.
 func TestConsoleInputPassesAWaitingChunk(t *testing.T) {

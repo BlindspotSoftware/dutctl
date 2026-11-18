@@ -513,10 +513,16 @@ func TestUploadHappyPath(t *testing.T) {
 	}
 
 	read := make(chan []byte, 1)
+	next := make(chan error, 1)
 
 	go func() {
 		got, _ := io.ReadAll(reader)
 		read <- got
+
+		// The upload ended with the end of the reader, so the module can move
+		// the next file at once.
+		_, err := sess.RequestFile(ctx, "next.bin")
+		next <- err
 	}()
 
 	id := awaitAnnouncement(t, stream, pb.FileTransferRequest_DIRECTION_UPLOAD)
@@ -549,6 +555,10 @@ func TestUploadHappyPath(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("module never received the uploaded file")
+	}
+
+	if err := <-next; err != nil {
+		t.Errorf("RequestFile after the upload ended: %v", err)
 	}
 
 	awaitStatus(t, stream, pb.FileTransferResponse_STATUS_TRANSFER_COMPLETE)
@@ -721,10 +731,47 @@ func TestSendFileContextBoundsTransfer(t *testing.T) {
 	}
 }
 
-// TestSendFilesSideBySide: a module may send several files at once from
-// goroutines of its own. Each SendFile returns once the client confirmed its
-// file, and every file arrives whole.
-func TestSendFilesSideBySide(t *testing.T) {
+// TestSessionCarriesOneTransferAtATime: while a download waits for the client,
+// RequestFile and SendFile refuse a second transfer. Once the download ended,
+// the next transfer starts.
+func TestSessionCarriesOneTransferAtATime(t *testing.T) {
+	stream := newScriptedStream()
+	defer close(stream.stop)
+
+	b := &Broker{}
+	sess, _ := b.Start(context.Background(), stream)
+
+	ctx := context.Background()
+	result := sendFileAsync(ctx, sess, "out.bin", 4, strings.NewReader("data"))
+	final := awaitFinalChunk(t, stream)
+
+	if _, err := sess.RequestFile(ctx, "image.bin"); !errors.Is(err, errTransferInProgress) {
+		t.Errorf("RequestFile during a download: err = %v, want %v", err, errTransferInProgress)
+	}
+
+	if err := sess.SendFile(ctx, "other.bin", 4, strings.NewReader("data")); !errors.Is(err, errTransferInProgress) {
+		t.Errorf("SendFile during a download: err = %v, want %v", err, errTransferInProgress)
+	}
+
+	stream.reply <- &pb.RunRequest{Msg: &pb.RunRequest_FileTransferResponse{
+		FileTransferResponse: &pb.FileTransferResponse{
+			TransferId: final[0].GetTransferId(), Status: pb.FileTransferResponse_STATUS_TRANSFER_COMPLETE,
+		},
+	}}
+
+	if err := awaitResult(t, result); err != nil {
+		t.Fatalf("SendFile: %v", err)
+	}
+
+	if _, err := sess.RequestFile(ctx, "image.bin"); err != nil {
+		t.Errorf("RequestFile after the download ended: %v", err)
+	}
+}
+
+// TestCancelledUploadFreesTheSession: an upload whose context ended no longer
+// counts, also before the session has dropped it, so the module can move the
+// next file at once.
+func TestCancelledUploadFreesTheSession(t *testing.T) {
 	stream := newScriptedStream()
 	stream.confirm = true
 
@@ -733,40 +780,16 @@ func TestSendFilesSideBySide(t *testing.T) {
 	b := &Broker{}
 	sess, _ := b.Start(context.Background(), stream)
 
-	files := map[string][]byte{
-		"a.bin": bytes.Repeat([]byte("a"), 2*chunkSize+1),
-		"b.bin": bytes.Repeat([]byte("b"), 2*chunkSize+1),
+	uploadCtx, cancelUpload := context.WithCancel(context.Background())
+
+	if _, err := sess.RequestFile(uploadCtx, "image.bin"); err != nil {
+		t.Fatalf("RequestFile: %v", err)
 	}
 
-	results := make(map[string]<-chan error, len(files))
-	for name, content := range files {
-		results[name] = sendFileAsync(context.Background(), sess, name, int64(len(content)), bytes.NewReader(content))
-	}
+	cancelUpload()
 
-	for name, result := range results {
-		if err := awaitResult(t, result); err != nil {
-			t.Errorf("SendFile(%s): %v", name, err)
-		}
-	}
-
-	names := map[string]string{}
-	got := map[string][]byte{}
-
-	for _, res := range stream.responses() {
-		if r := res.GetFileTransferRequest(); r != nil {
-			names[r.GetTransferId()] = r.GetMetadata().GetPath()
-		}
-
-		if c := res.GetFileChunk(); c != nil {
-			name := names[c.GetTransferId()]
-			got[name] = append(got[name], c.GetChunkData()...)
-		}
-	}
-
-	for name, content := range files {
-		if !bytes.Equal(got[name], content) {
-			t.Errorf("%s arrived with %d bytes, want %d", name, len(got[name]), len(content))
-		}
+	if err := awaitResult(t, sendFileAsync(context.Background(), sess, "out.bin", 4, strings.NewReader("data"))); err != nil {
+		t.Errorf("SendFile after the upload was cancelled: %v", err)
 	}
 }
 

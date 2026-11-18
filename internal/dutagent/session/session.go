@@ -28,6 +28,10 @@ const chunkSize = 1024 * 1024
 // module should return it rather than retry.
 var ErrSessionClosed = errors.New("session is closed")
 
+// errTransferInProgress is returned by RequestFile and SendFile while another
+// transfer of the session runs: a session carries one transfer at a time.
+var errTransferInProgress = errors.New("another file transfer is in progress")
+
 // uploadState represents an active upload from client to agent (a file the
 // module requested via RequestFile). Chunks arriving from the client are written
 // to file; the module reads them through reader.
@@ -56,16 +60,18 @@ type uploadState struct {
 	closeOnce sync.Once
 }
 
-// close releases the upload once, failing the module's reader and a
-// deliverChunk blocked in the pipe write with err. CloseWithError is safe
-// concurrently with Write.
+// close releases the upload once, ending the module's reader and a
+// deliverChunk blocked in the pipe write with err, or with io.EOF for a nil
+// err. CloseWithError is safe concurrently with Write.
 func (u *uploadState) close(err error) {
 	u.closeOnce.Do(func() {
+		// done first: a module that sees the end of its reader may start the
+		// next transfer at once.
+		close(u.done)
+
 		if u.file != nil {
 			u.file.CloseWithError(err)
 		}
-
-		close(u.done)
 	})
 }
 
@@ -146,6 +152,13 @@ type backend struct {
 	// the session, which is also the client's scope for it.
 	lastTransferID atomic.Uint64
 
+	// transferMu guards the transfer the session carries (see claimTransfer):
+	// transferDone is closed once it ended, and transferAborted, for an upload,
+	// once its context ended.
+	transferMu      sync.Mutex
+	transferDone    <-chan struct{}
+	transferAborted <-chan struct{}
+
 	// fileTransferNotifyCh wakes toClientWorker when a transfer has work for it:
 	// one to announce, a chunk to send or acknowledge, or a failure to report.
 	// Buffered to one; a pending signal coalesces with a fresh one.
@@ -201,7 +214,8 @@ func (s *backend) Println(a ...any) {
 // reader, as the end of the session does. The session imposes no limit of its
 // own.
 //
-// It returns ErrSessionClosed if the session can no longer carry a transfer.
+// It returns ErrSessionClosed if the session can no longer carry a transfer,
+// and errTransferInProgress while another transfer of the session runs.
 func (s *backend) RequestFile(ctx context.Context, name string) (io.Reader, error) {
 	err := ctx.Err()
 	if err != nil {
@@ -212,14 +226,8 @@ func (s *backend) RequestFile(ctx context.Context, name string) (io.Reader, erro
 		return nil, ErrSessionClosed
 	}
 
-	transferID := s.newTransferID()
-
-	// Requesting and reading a file is the upstream (client → agent) flow.
-	log.Scope(s.logger(), scopeSessionUpstream).Debug("module requested file", "name", name, "transfer_id", transferID)
-
 	reader, writer := io.Pipe()
 	state := &uploadState{
-		transferID: transferID,
 		metadata: &pb.FileMetadata{
 			Path: name,
 			Name: name,
@@ -230,6 +238,17 @@ func (s *backend) RequestFile(ctx context.Context, name string) (io.Reader, erro
 		lastChunk: -1,
 		done:      make(chan struct{}),
 	}
+
+	err = s.claimTransfer(state.done, ctx.Done())
+	if err != nil {
+		return nil, err
+	}
+
+	transferID := s.newTransferID()
+	state.transferID = transferID
+
+	// Requesting and reading a file is the upstream (client → agent) flow.
+	log.Scope(s.logger(), scopeSessionUpstream).Debug("module requested file", "name", name, "transfer_id", transferID)
 
 	s.uploadMutex.Lock()
 	s.activeUploads[transferID] = state
@@ -273,16 +292,40 @@ func (s *backend) newTransferID() string {
 	return strconv.FormatUint(s.lastTransferID.Add(1), 10)
 }
 
+// claimTransfer makes the transfer that ends with done the one the session
+// carries, or returns errTransferInProgress while another one runs. aborted
+// is the context of an upload, nil for a download. An upload whose context
+// ended counts as ended, as watchUpload drops it at once; claimTransfer waits
+// for that.
+func (s *backend) claimTransfer(done, aborted <-chan struct{}) error {
+	s.transferMu.Lock()
+	defer s.transferMu.Unlock()
+
+	select {
+	case <-s.transferDone:
+	case <-s.transferAborted:
+		<-s.transferDone
+	default:
+		if s.transferDone != nil {
+			return errTransferInProgress
+		}
+	}
+
+	s.transferDone, s.transferAborted = done, aborted
+
+	return nil
+}
+
 // SendFile streams r to the client under the given name. size is the total file
 // size in bytes. It reads r on the calling goroutine and returns once the client
 // has confirmed the file, or with the reason the file did not arrive. The
-// caller keeps r. Several calls from goroutines of the module stream their
-// files side by side.
+// caller keeps r.
 //
 // ctx bounds the transfer: cancelling it ends the transfer between two reads
 // of r, and the client is told why.
 //
-// It returns ErrSessionClosed if the session can no longer carry a transfer.
+// It returns ErrSessionClosed if the session can no longer carry a transfer,
+// and errTransferInProgress while another transfer of the session runs.
 func (s *backend) SendFile(ctx context.Context, name string, size int64, r io.Reader) error {
 	err := ctx.Err()
 	if err != nil {
@@ -293,13 +336,7 @@ func (s *backend) SendFile(ctx context.Context, name string, size int64, r io.Re
 		return ErrSessionClosed
 	}
 
-	transferID := s.newTransferID()
-
-	// Sending a file to the client is the downstream (agent → client) flow.
-	log.Scope(s.logger(), scopeSessionDownstream).Debug("module sending file", "name", name, "size", size, "transfer_id", transferID)
-
 	state := &downloadState{
-		transferID: transferID,
 		metadata: &pb.FileMetadata{
 			Path: name,
 			Name: name,
@@ -308,6 +345,17 @@ func (s *backend) SendFile(ctx context.Context, name string, size int64, r io.Re
 		sent: make(chan struct{}, 1),
 		done: make(chan struct{}),
 	}
+
+	err = s.claimTransfer(state.done, nil)
+	if err != nil {
+		return err
+	}
+
+	transferID := s.newTransferID()
+	state.transferID = transferID
+
+	// Sending a file to the client is the downstream (agent → client) flow.
+	log.Scope(s.logger(), scopeSessionDownstream).Debug("module sending file", "name", name, "size", size, "transfer_id", transferID)
 
 	s.downloadMutex.Lock()
 	s.activeDownloads[transferID] = state
@@ -462,7 +510,7 @@ func (s *backend) registerUploadChunk(transferID string, chunk *pb.FileChunk) er
 // deliverChunk writes a chunk into the upload's pipe, which returns once the
 // module has read all of it, and then has toClientWorker acknowledge it. It
 // runs on a goroutine of its own, so that fromClientWorker never waits for a
-// module: console input and the chunks of other uploads keep flowing. Every
+// module: console input keeps flowing. Every
 // abort closes the pipe, which ends the write. The end of the file comes from
 // ackUploadChunks, once the client has been told.
 func (s *backend) deliverChunk(state *uploadState, chunk *pb.FileChunk) {

@@ -376,7 +376,7 @@ func ackUploadChunks(stream Stream, s *backend) (bool, error) {
 		}
 
 		if final {
-			upload.file.Close()
+			upload.close(nil)
 			s.removeUpload(transferID, "")
 		}
 	}

@@ -78,10 +78,10 @@ also of the same type, overlap with it.
 ## Session and console
 
 - [MOD-13] `OpenConsole`, `Print`, `Printf` and `Println` are called from `Run`'s goroutine only.
-  `RequestFile` and `SendFile` may also be called from goroutines that `Run` starts to move
-  several files at once, and waits for. Other goroutines may only read the console's `Stdin` (one
-  reader at a time), close it, and write its `Stdout` and `Stderr`; stop every goroutine that uses
-  the console before `Run` returns.
+  `RequestFile` and `SendFile` may also be called from a goroutine that `Run` starts and waits for,
+  one file at a time: a second transfer while one runs fails. Other goroutines may only read the
+  console's `Stdin` (one reader at a time), close it, and write its `Stdout` and `Stderr`; stop
+  every goroutine that uses the console before `Run` returns.
   → https://github.com/BlindspotSoftware/dutctl/blob/main/pkg/module/module.go
 - [MOD-14] A console opens in the mode the module needs: `ConsoleLine`, the zero value, for
   prompts and piped input; `ConsoleRaw` for bridging a terminal line, such as a serial port. The

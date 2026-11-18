@@ -35,7 +35,9 @@ superseding ADR or is breaking.
   only under it. `SendFile` reads the module's reader on the module's goroutine and hands
   `toClientWorker` one chunk at a time; the session never reads or closes that reader on a
   goroutine of its own. An upload ends when its context or the session ends, through a watcher
-  that ends with the upload.
+  that ends with the upload. A session carries one transfer at a time: `claimTransfer` refuses a
+  second one while the first runs, and an upload frees the session before its reader reports the
+  end.
   → https://github.com/BlindspotSoftware/dutctl/blob/main/internal/dutagent/session/session.go
 - [CORE-4] A module has one console at a time: a second `OpenConsole` ends the first. Input or
   control that is not marked for the open console is dropped, never kept for a later one. A
