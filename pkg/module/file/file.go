@@ -96,7 +96,7 @@ func (f *File) Help() string {
 	return help.String()
 }
 
-//nolint:cyclop
+//nolint:cyclop // a flat two-level switch: which paths are configured, then the operation
 func usageAndDescription(operation, source, destination string) string {
 	var description string
 

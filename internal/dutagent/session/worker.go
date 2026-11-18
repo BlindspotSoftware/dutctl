@@ -54,7 +54,7 @@ func wireConsoleMode(mode module.ConsoleMode) pb.ConsoleMode {
 // follows its last. It reads output only from the open console; a console that
 // ended has no reader any more, and a writer still blocked on it fails.
 //
-//nolint:cyclop, funlen
+//nolint:cyclop,funlen // one select over every channel the module session sends on; the stream's only sender
 func toClientWorker(ctx context.Context, stream Stream, s *backend) error {
 	l := log.FromContext(ctx)
 
@@ -159,7 +159,7 @@ func toClientWorker(ctx context.Context, stream Stream, s *backend) error {
 // It loops until ctx is cancelled or the client closes the stream with io.EOF (both
 // returning nil), or a stream/protocol error occurs (returning that error).
 //
-//nolint:cyclop,funlen,gocognit
+//nolint:cyclop,funlen,gocognit // one loop over every message the client sends, beside a receiving goroutine
 func fromClientWorker(ctx context.Context, stream Stream, s *backend) error {
 	l := log.FromContext(ctx)
 
