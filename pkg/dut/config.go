@@ -69,6 +69,10 @@ var (
 	ErrUndefinedArgReference      = errors.New("undefined argument reference")
 )
 
+// mappingStride is the step between entries of a yaml.MappingNode's Content,
+// which holds each entry's key and value one after the other.
+const mappingStride = 2
+
 // UnmarshalYAML unmarshals a Devlist from a YAML node, wrapping errors
 // with the device name where they occurred.
 //
@@ -95,9 +99,9 @@ func (d *Devlist) UnmarshalYAML(node *yaml.Node) error {
 		return &ConfigError{Err: ErrEmptyDevices}
 	}
 
-	*d = make(Devlist, len(node.Content)/2) //nolint:mnd // MappingNode stores key/value as alternating pairs
+	*d = make(Devlist, len(node.Content)/mappingStride)
 
-	for idx := 0; idx < len(node.Content); idx += 2 {
+	for idx := 0; idx < len(node.Content); idx += mappingStride {
 		devName := node.Content[idx].Value
 
 		if keyword.IsReservedDeviceName(devName) {
@@ -197,10 +201,10 @@ func decodeCmds(node *yaml.Node) (map[string]Command, error) {
 		return nil, &ConfigError{Err: ErrNoCommands}
 	}
 
-	cmds := make(map[string]Command, len(node.Content)/2) //nolint:mnd // MappingNode stores key/value as alternating pairs
+	cmds := make(map[string]Command, len(node.Content)/mappingStride)
 
 	// Iterate command entries to capture the command name for errors.
-	for idx := 0; idx < len(node.Content); idx += 2 {
+	for idx := 0; idx < len(node.Content); idx += mappingStride {
 		cmdName := node.Content[idx].Value
 
 		if keyword.IsReservedCommandName(cmdName) {
