@@ -103,7 +103,7 @@ func (s *SSH) Init(_ context.Context) error {
 
 		hostKeyCallback = ssh.FixedHostKey(hostKey)
 	} else {
-		//nolint: gosec // ignore the InsecureIgnoreHostKey warning, it is only used as a fallback
+		//nolint:gosec // ignore the InsecureIgnoreHostKey warning, it is only used as a fallback
 		hostKeyCallback = ssh.InsecureIgnoreHostKey()
 	}
 

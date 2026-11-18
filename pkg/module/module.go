@@ -16,7 +16,7 @@ import (
 	"sync"
 )
 
-//nolint:gochecknoglobals
+//nolint:gochecknoglobals // the module registry, filled by the init functions of the module packages
 var (
 	modules = make(map[string]Record)
 	mutex   sync.RWMutex
