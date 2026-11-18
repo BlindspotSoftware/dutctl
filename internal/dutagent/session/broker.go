@@ -47,8 +47,6 @@ func (b *Broker) init() {
 	b.session.printCh = make(chan string)
 	b.session.consoleCh = make(chan consoleEvent)
 	b.session.fileTransferNotifyCh = make(chan struct{}, 1)
-	b.session.activeUploads = make(map[string]*uploadState)
-	b.session.activeDownloads = make(map[string]*downloadState)
 }
 
 // CloseConsole ends the console a module has open, if any, and tells the

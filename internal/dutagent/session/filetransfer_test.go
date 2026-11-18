@@ -91,7 +91,7 @@ func TestUploadEndsWithTheSession(t *testing.T) {
 
 	deadline := time.After(5 * time.Second)
 
-	for len(b.session.getActiveUploads()) != 0 {
+	for b.session.currentUpload() != nil {
 		select {
 		case <-deadline:
 			t.Fatal("the abandoned upload was not dropped when the session ended")
@@ -200,8 +200,8 @@ func TestDownloadRejectionStopsStreaming(t *testing.T) {
 		t.Errorf("SendFile err = %v, want the client's reason", err)
 	}
 
-	if left := b.session.getActiveDownloads(); len(left) != 0 {
-		t.Errorf("download still active after rejection: %v", left)
+	if b.session.currentDownload() != nil {
+		t.Error("download still active after rejection")
 	}
 
 	stream.mu.Lock()
@@ -410,8 +410,8 @@ func TestDownloadHappyPath(t *testing.T) {
 	default:
 	}
 
-	if left := b.session.getActiveDownloads(); len(left) != 1 {
-		t.Errorf("download released before the client confirmed: %v", left)
+	if b.session.currentDownload() == nil {
+		t.Error("download released before the client confirmed")
 	}
 
 	stream.reply <- &pb.RunRequest{Msg: &pb.RunRequest_FileTransferResponse{
@@ -424,8 +424,8 @@ func TestDownloadHappyPath(t *testing.T) {
 		t.Errorf("SendFile: %v", err)
 	}
 
-	if left := b.session.getActiveDownloads(); len(left) != 0 {
-		t.Errorf("download still registered after TRANSFER_COMPLETE: %v", left)
+	if b.session.currentDownload() != nil {
+		t.Error("download still registered after TRANSFER_COMPLETE")
 	}
 }
 
@@ -538,7 +538,7 @@ func TestUploadHappyPath(t *testing.T) {
 
 	awaitStatus(t, stream, pb.FileTransferResponse_STATUS_ACCEPTED)
 
-	if got := b.session.getUpload(id); got == nil {
+	if got := b.session.uploadByID(id); got == nil {
 		t.Fatal("upload disappeared after acceptance")
 	} else if size := got.metadata.GetSize(); size != int64(len(content)) {
 		t.Errorf("recorded upload size = %d, want %d", size, len(content))
@@ -656,8 +656,8 @@ func TestRequestFileContextBoundsTransfer(t *testing.T) {
 		t.Fatal("cancelling the context did not unblock the module's reader")
 	}
 
-	if left := b.session.getActiveUploads(); len(left) != 0 {
-		t.Errorf("upload still registered after cancellation: %v", left)
+	if b.session.currentUpload() != nil {
+		t.Error("upload still registered after cancellation")
 	}
 }
 
@@ -697,8 +697,8 @@ func TestSendFileReadErrorFailsTheDownload(t *testing.T) {
 
 	awaitStatus(t, stream, pb.FileTransferResponse_STATUS_ERROR)
 
-	if left := b.session.getActiveDownloads(); len(left) != 0 {
-		t.Errorf("download still registered after it failed: %v", left)
+	if b.session.currentDownload() != nil {
+		t.Error("download still registered after it failed")
 	}
 }
 
@@ -726,8 +726,8 @@ func TestSendFileContextBoundsTransfer(t *testing.T) {
 
 	awaitStatus(t, stream, pb.FileTransferResponse_STATUS_ERROR)
 
-	if left := b.session.getActiveDownloads(); len(left) != 0 {
-		t.Errorf("download still registered after cancellation: %v", left)
+	if b.session.currentDownload() != nil {
+		t.Error("download still registered after cancellation")
 	}
 }
 
@@ -813,7 +813,7 @@ func TestTransferRefusedOnCancelledContext(t *testing.T) {
 		t.Errorf("SendFile err = %v, want context.Canceled", err)
 	}
 
-	if n := len(b.session.getActiveUploads()) + len(b.session.getActiveDownloads()); n != 0 {
-		t.Errorf("%d transfers registered despite a cancelled context", n)
+	if b.session.currentUpload() != nil || b.session.currentDownload() != nil {
+		t.Error("a transfer registered despite a cancelled context")
 	}
 }

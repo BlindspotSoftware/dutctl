@@ -94,19 +94,13 @@ func (s *backend) sendOrStop(stream Stream, res *pb.RunResponse) (bool, error) {
 // sendDownloadError reports why SendFile gave a download up to the client and
 // ends the download. The failure itself is not fatal to the run. Only a failure
 // to deliver the report is, and that is returned.
-func sendDownloadError(
-	stream Stream,
-	s *backend,
-	transferID string,
-	downloadMetadataSent map[string]bool,
-	err error,
-) error {
-	s.logger().Warn("download failed", "transfer_id", transferID, "err", err)
+func sendDownloadError(stream Stream, s *backend, download *downloadState, err error) error {
+	s.logger().Warn("download failed", "transfer_id", download.transferID, "err", err)
 
 	res := &pb.RunResponse{
 		Msg: &pb.RunResponse_FileTransferResponse{
 			FileTransferResponse: &pb.FileTransferResponse{
-				TransferId:        transferID,
+				TransferId:        download.transferID,
 				Status:            pb.FileTransferResponse_STATUS_ERROR,
 				ErrorMessage:      err.Error(),
 				NextChunkExpected: 0,
@@ -116,8 +110,7 @@ func sendDownloadError(
 
 	sendErr := s.sendToClient(stream, res)
 
-	s.removeDownload(transferID, err)
-	delete(downloadMetadataSent, transferID)
+	_ = download.finish(err)
 
 	return sendErr
 }
@@ -125,25 +118,11 @@ func sendDownloadError(
 // sendDownloadMetadata announces a download to the client (its metadata and
 // direction). It reports whether a message was sent, and returns a send error
 // unchanged for the caller to act on.
-func sendDownloadMetadata(
-	stream Stream,
-	s *backend,
-	transferID string,
-	downloadMetadataSent map[string]bool,
-) (bool, error) {
-	if downloadMetadataSent[transferID] {
-		return false, nil
-	}
-
-	download := s.getDownload(transferID)
-	if download == nil {
-		return false, nil
-	}
-
+func sendDownloadMetadata(stream Stream, s *backend, download *downloadState) (bool, error) {
 	res := &pb.RunResponse{
 		Msg: &pb.RunResponse_FileTransferRequest{
 			FileTransferRequest: &pb.FileTransferRequest{
-				TransferId: transferID,
+				TransferId: download.transferID,
 				Metadata:   download.metadata,
 				Direction:  pb.FileTransferRequest_DIRECTION_DOWNLOAD,
 			},
@@ -155,49 +134,39 @@ func sendDownloadMetadata(
 		return false, sendErr
 	}
 
-	downloadMetadataSent[transferID] = true
+	download.announced = true
 
 	return true, nil
 }
 
-// handleDownloadFileTransfer advances a single download: announce its metadata,
+// handleDownloadFileTransfer advances the download: announce its metadata,
 // then send the chunk SendFile handed over, or report why SendFile gave the
 // download up. It reports whether a message was sent.
 //
 // A send error is returned rather than logged and shrugged off: carrying on
 // would leave SendFile waiting for a chunk that never went out, with nothing on
 // the error channel.
-func handleDownloadFileTransfer(
-	stream Stream,
-	s *backend,
-	transferID string,
-	downloadMetadataSent map[string]bool,
-) (bool, error) {
-	download := s.getDownload(transferID)
-	if download == nil {
-		return false, nil
-	}
-
+func handleDownloadFileTransfer(stream Stream, s *backend, download *downloadState) (bool, error) {
 	download.mu.Lock()
 	failErr := download.failErr
 	download.mu.Unlock()
 
 	// A failed download is reported, so the client's run fails instead of
 	// ending without the file. One the client has not heard of yet is only
-	// dropped.
-	if failErr != nil && !downloadMetadataSent[transferID] {
-		s.removeDownload(transferID, failErr)
+	// ended.
+	if failErr != nil && !download.announced {
+		_ = download.finish(failErr)
 
 		return false, nil
 	}
 
 	if failErr != nil {
-		return true, sendDownloadError(stream, s, transferID, downloadMetadataSent, failErr)
+		return true, sendDownloadError(stream, s, download, failErr)
 	}
 
 	// Announce the transfer before streaming any chunk.
-	if !downloadMetadataSent[transferID] {
-		return sendDownloadMetadata(stream, s, transferID, downloadMetadataSent)
+	if !download.announced {
+		return sendDownloadMetadata(stream, s, download)
 	}
 
 	return sendDownloadChunk(stream, s, download)
@@ -209,17 +178,18 @@ func sendDownloadChunk(stream Stream, s *backend, download *downloadState) (bool
 	download.mu.Lock()
 	chunk := download.chunk
 	download.chunk = nil
-	download.mu.Unlock()
-
-	if chunk == nil {
-		return false, nil
-	}
 
 	// Wait for the confirmation before the final chunk goes out: the client
 	// may confirm before Send returns, and a confirmation that finds the
 	// download not waiting for it is dropped.
 	if chunk.GetIsFinal() {
-		s.markDownloadAwaitingAck(download.transferID)
+		download.awaitingFinalAck = true
+	}
+
+	download.mu.Unlock()
+
+	if chunk == nil {
+		return false, nil
 	}
 
 	sendErr := s.sendToClient(stream, &pb.RunResponse{Msg: &pb.RunResponse_FileChunk{FileChunk: chunk}})
@@ -236,165 +206,105 @@ func sendDownloadChunk(stream Stream, s *backend, download *downloadState) (bool
 	return true, nil
 }
 
-// forgetFinishedDownloads drops announcement markers for transfers that are no
-// longer active, so the map cannot grow for the life of a long session.
-func forgetFinishedDownloads(s *backend, downloadMetadataSent map[string]bool) {
-	if len(downloadMetadataSent) == 0 {
-		return
-	}
-
-	active := make(map[string]struct{}, len(downloadMetadataSent))
-	for _, id := range s.getActiveDownloads() {
-		active[id] = struct{}{}
-	}
-
-	for id := range downloadMetadataSent {
-		if _, ok := active[id]; !ok {
-			delete(downloadMetadataSent, id)
+// processFileTransfers takes the next step of the transfer the session
+// carries. It reports whether a message was sent, so the caller can re-signal
+// for the remaining work, and returns any send error so the worker can
+// terminate instead of leaving the transfer stalled.
+func processFileTransfers(stream Stream, s *backend) (bool, error) {
+	if upload := s.currentUpload(); upload != nil {
+		acked, err := ackUploadChunk(stream, s, upload)
+		if acked || err != nil {
+			return acked, err
 		}
+
+		return announceUpload(stream, s, upload)
 	}
+
+	if download := s.currentDownload(); download != nil {
+		return handleDownloadFileTransfer(stream, s, download)
+	}
+
+	return false, nil
 }
 
-// processFileTransfers acknowledges the upload chunks the modules have read,
-// announces one pending upload and advances one download per call (one at a
-// time for fairness). It reports whether a message was sent, so
-// the caller can re-signal for the remaining work, and returns any send error so
-// the worker can terminate instead of leaving the transfer stalled.
-func processFileTransfers(stream Stream, s *backend, downloadMetadataSent map[string]bool) (bool, error) {
-	acked, err := ackUploadChunks(stream, s)
-	if err != nil {
-		return acked, err
+// announceUpload sends the FileTransferRequest of the upload, unless it went
+// out already. It reports whether it sent one.
+func announceUpload(stream Stream, s *backend, upload *uploadState) (bool, error) {
+	// metadata is written by fromClientWorker under upload.mu, so read it (and
+	// requestSent) under the same lock.
+	upload.mu.Lock()
+	metadata := upload.metadata
+	alreadySent := upload.requestSent
+	upload.mu.Unlock()
+
+	if metadata == nil || alreadySent {
+		return false, nil
 	}
 
-	announced, err := announceUpload(stream, s)
-	if err != nil {
-		return acked || announced, err
+	res := &pb.RunResponse{
+		Msg: &pb.RunResponse_FileTransferRequest{
+			FileTransferRequest: &pb.FileTransferRequest{
+				TransferId: upload.transferID,
+				Metadata:   metadata,
+				Direction:  pb.FileTransferRequest_DIRECTION_UPLOAD,
+			},
+		},
 	}
 
-	advanced, err := advanceDownload(stream, s, downloadMetadataSent)
+	err := s.sendToClient(stream, res)
+	if err != nil {
+		return false, err
+	}
 
-	return acked || announced || advanced, err
+	upload.mu.Lock()
+	upload.requestSent = true
+	upload.mu.Unlock()
+
+	return true, nil
 }
 
-// announceUpload sends the FileTransferRequest of one upload that has not been
-// announced yet. It reports whether it sent one.
-func announceUpload(stream Stream, s *backend) (bool, error) {
-	for _, transferID := range s.getActiveUploads() {
-		upload := s.getUpload(transferID)
-		if upload == nil {
-			continue
-		}
+// ackUploadChunk acknowledges the upload chunk the module has read, and
+// completes the upload once its final chunk was read: it tells the client, and
+// only then ends the module's file. A module that saw the end first could
+// return, and the end of the run would drop the upload before the client heard
+// of it. It reports whether it sent anything.
+func ackUploadChunk(stream Stream, s *backend, upload *uploadState) (bool, error) {
+	pending, next, final := s.takeUploadAck(upload)
+	if !pending {
+		return false, nil
+	}
 
-		// metadata is written by fromClientWorker under upload.mu, so read it
-		// (and requestSent) under the same lock.
-		upload.mu.Lock()
-		metadata := upload.metadata
-		alreadySent := upload.requestSent
-		upload.mu.Unlock()
+	statuses := []pb.FileTransferResponse_Status{pb.FileTransferResponse_STATUS_CHUNK_RECEIVED}
+	if final {
+		statuses = append(statuses, pb.FileTransferResponse_STATUS_TRANSFER_COMPLETE)
+	}
 
-		if metadata == nil || alreadySent {
-			continue
-		}
-
-		res := &pb.RunResponse{
-			Msg: &pb.RunResponse_FileTransferRequest{
-				FileTransferRequest: &pb.FileTransferRequest{
-					TransferId: transferID,
-					Metadata:   metadata,
-					Direction:  pb.FileTransferRequest_DIRECTION_UPLOAD,
+	for idx, status := range statuses {
+		err := s.sendToClient(stream, &pb.RunResponse{
+			Msg: &pb.RunResponse_FileTransferResponse{
+				FileTransferResponse: &pb.FileTransferResponse{
+					TransferId:        upload.transferID,
+					Status:            status,
+					NextChunkExpected: next,
 				},
 			},
-		}
-
-		err := s.sendToClient(stream, res)
+		})
 		if err != nil {
-			return false, err
-		}
-
-		upload.mu.Lock()
-		upload.requestSent = true
-		upload.mu.Unlock()
-
-		return true, nil // one at a time
-	}
-
-	return false, nil
-}
-
-// advanceDownload advances the first download that has work available, one at
-// a time for fairness. It reports whether it sent anything.
-func advanceDownload(stream Stream, s *backend, downloadMetadataSent map[string]bool) (bool, error) {
-	for _, transferID := range s.getActiveDownloads() {
-		advanced, err := handleDownloadFileTransfer(stream, s, transferID, downloadMetadataSent)
-		if err != nil || advanced {
-			return advanced, err
+			return idx > 0, err
 		}
 	}
 
-	return false, nil
-}
-
-// ackUploadChunks acknowledges the upload chunks the modules have read, and
-// completes an upload whose final chunk was read: it tells the client, and only
-// then ends the module's file. A module that saw the end first could return,
-// and the end of the run would drop the upload before the client heard of it.
-// It reports whether it sent anything.
-func ackUploadChunks(stream Stream, s *backend) (bool, error) {
-	sent := false
-
-	for _, transferID := range s.getActiveUploads() {
-		upload := s.getUpload(transferID)
-		if upload == nil {
-			continue
-		}
-
-		pending, next, final := s.takeUploadAck(upload)
-		if !pending {
-			continue
-		}
-
-		statuses := []pb.FileTransferResponse_Status{pb.FileTransferResponse_STATUS_CHUNK_RECEIVED}
-		if final {
-			statuses = append(statuses, pb.FileTransferResponse_STATUS_TRANSFER_COMPLETE)
-		}
-
-		for _, status := range statuses {
-			err := s.sendToClient(stream, &pb.RunResponse{
-				Msg: &pb.RunResponse_FileTransferResponse{
-					FileTransferResponse: &pb.FileTransferResponse{
-						TransferId:        transferID,
-						Status:            status,
-						NextChunkExpected: next,
-					},
-				},
-			})
-			if err != nil {
-				return sent, err
-			}
-
-			sent = true
-		}
-
-		if final {
-			upload.close(nil)
-			s.removeUpload(transferID, "")
-		}
+	if final {
+		upload.close(nil)
 	}
 
-	return sent, nil
+	return true, nil
 }
 
 // advanceFileTransfers runs one file-transfer step and classifies the outcome
 // for toClientWorker's loop, reporting whether the worker should stop.
-func advanceFileTransfers(
-	l *slog.Logger,
-	stream Stream,
-	s *backend,
-	downloadMetadataSent map[string]bool,
-) (bool, error) {
-	forgetFinishedDownloads(s, downloadMetadataSent)
-
-	sent, err := processFileTransfers(stream, s, downloadMetadataSent)
+func advanceFileTransfers(l *slog.Logger, stream Stream, s *backend) (bool, error) {
+	sent, err := processFileTransfers(stream, s)
 	if err != nil {
 		// A dead stream is not a run failure (there is no client left to tell),
 		// but this worker must stop either way.
@@ -437,9 +347,6 @@ func toClientWorker(ctx context.Context, stream Stream, s *backend) error {
 	// last event opened, none after a close. The events arrive in order, a
 	// close before the next open, so a close is always the current one's.
 	var current *console
-
-	// Track which downloads have had their metadata announced.
-	downloadMetadataSent := make(map[string]bool)
 
 	for {
 		select {
@@ -489,7 +396,7 @@ func toClientWorker(ctx context.Context, stream Stream, s *backend) error {
 				return err
 			}
 		case <-s.fileTransferNotifyCh:
-			stop, err := advanceFileTransfers(l, stream, s, downloadMetadataSent)
+			stop, err := advanceFileTransfers(l, stream, s)
 			if stop {
 				return err
 			}
@@ -635,7 +542,7 @@ func fromClientWorker(ctx context.Context, stream Stream, s *backend) error {
 				metadata := ftReq.GetMetadata()
 
 				// Only uploads the module has requested are known here.
-				upload := s.getUpload(transferID)
+				upload := s.uploadByID(transferID)
 				if upload == nil {
 					res := &pb.RunResponse{
 						Msg: &pb.RunResponse_FileTransferResponse{
@@ -689,9 +596,7 @@ func fromClientWorker(ctx context.Context, stream Stream, s *backend) error {
 
 				switch ftRes.GetStatus() {
 				case pb.FileTransferResponse_STATUS_TRANSFER_COMPLETE:
-					if s.isDownloadAwaitingAck(transferID) {
-						s.removeDownload(transferID, nil)
-					}
+					s.confirmDownload(transferID)
 				case pb.FileTransferResponse_STATUS_ERROR, pb.FileTransferResponse_STATUS_TRANSFER_REJECTED:
 					// Either can answer either direction: the client cannot read a
 					// file it was asked to upload, or cannot write a download. Drop
