@@ -519,8 +519,7 @@ func (r *run) receiveLoop(ctx context.Context) {
 			return
 		}
 
-		//nolint:protogetter
-		switch msg := res.Msg.(type) {
+		switch msg := res.GetMsg().(type) {
 		case *pb.RunResponse_Print:
 			r.app.formatter.WriteContent(output.Content{
 				Type:     output.TypeModuleOutput,
