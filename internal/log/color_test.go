@@ -19,7 +19,7 @@ func emit(color bool, level slog.Level, msg string) string {
 	var buf bytes.Buffer
 
 	h := newTextHandler(&buf, slog.LevelDebug, color)
-	rec := slog.NewRecord(time.Time{}, level, msg, 0) //nolint:exhaustruct
+	rec := slog.NewRecord(time.Time{}, level, msg, 0)
 
 	_ = h.Handle(context.Background(), rec)
 
