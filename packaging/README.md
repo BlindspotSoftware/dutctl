@@ -28,3 +28,7 @@ The systemd service needs a non-root user to run, with correct privileges (for e
 
 ## `packaging/dutagent.tmpfiles`
 Just like with `sysusers` case, we use `systemd-tmpfiles` tool to create directories needed by `dutagent`, with correct ownership and permissions. This is done automatically by `systemd` on installation of the distribution package.
+
+
+## `packaging/dutagent.modules-load`
+`dutagent.service` allows USB serial ports with `DeviceAllow=char-ttyUSB`, and systemd looks up the `ttyUSB` class only when the service starts. If no USB serial adapter was present at that time, for example because the adapter sits on a board that is still switched off after a reboot of the worker, the class does not exist yet, and every later open of a `/dev/ttyUSB*` fails with "operation not permitted" until `dutagent` restarts. This file is installed to `/usr/lib/modules-load.d/dutagent.conf`, so `systemd-modules-load` loads `usbserial`, which registers the `ttyUSB` class, at every boot before `dutagent` starts.

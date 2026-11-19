@@ -136,6 +136,10 @@ nfpms:
       - src: packaging/dutagent.tmpfiles
         dst: /usr/lib/tmpfiles.d/dutagent.conf
 
+      # load usbserial at boot, so serial adapters plugged in later are allowed
+      - src: packaging/dutagent.modules-load
+        dst: /usr/lib/modules-load.d/dutagent.conf
+
     rpm:
       packager: "Jens Topp <jens.topp@blindspot.software>"
     archlinux:
