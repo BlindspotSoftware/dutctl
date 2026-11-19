@@ -84,15 +84,8 @@ type uploadState struct {
 
 	// chunks hands a chunk from fromClientWorker to RequestFile. Unbuffered:
 	// fromClientWorker reads past a chunk only once RequestFile has written the
-	// one before.
+	// one before, so the stream's flow control holds the client back.
 	chunks chan *pb.FileChunk
-
-	// mu guards ackPending and ackNext.
-	mu sync.Mutex
-	// ackPending marks a chunk RequestFile has written, for toClientWorker to
-	// acknowledge; ackNext is the next chunk expected.
-	ackPending bool
-	ackNext    int32
 
 	// end is how the upload ends: nil once the whole file is in the module's
 	// writer, or why it is not.
@@ -168,7 +161,7 @@ type backend struct {
 	lastTransferID atomic.Uint64
 
 	// fileTransferNotifyCh wakes toClientWorker when a transfer has work for it:
-	// one to announce, a chunk to send or acknowledge, or an end to report.
+	// one to announce, a chunk to send, or an end to report.
 	// Buffered to one; a pending signal coalesces with a fresh one.
 	fileTransferNotifyCh chan struct{}
 
@@ -272,13 +265,6 @@ func (s *backend) receiveUpload(ctx context.Context, state *uploadState, w io.Wr
 			if chunk.GetIsFinal() {
 				return s.endTransfer(&state.end, nil)
 			}
-
-			state.mu.Lock()
-			state.ackPending = true
-			state.ackNext = chunk.GetChunkNumber() + 1
-			state.mu.Unlock()
-
-			s.notifyFileTransfer()
 		case <-state.end.done:
 			return state.end.err
 		case <-ctx.Done():

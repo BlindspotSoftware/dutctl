@@ -69,13 +69,7 @@ type clientFileTransferState struct {
 	// bytes counts what has moved so far, for the transfer report. Guarded by mu.
 	bytes int
 
-	// ackCh carries the agent's per-chunk acknowledgment to the upload sender.
-	// Buffered to one: the protocol keeps a single chunk outstanding, so the
-	// sender is always the one waiting.
-	ackCh chan int32
-
-	// abort is closed when the transfer is dropped, so a sender waiting on an
-	// acknowledgment that will never arrive stops instead of leaking.
+	// abort is closed when the transfer is dropped, which also closes file.
 	abort     chan struct{}
 	abortOnce sync.Once
 }
@@ -110,7 +104,6 @@ func (m *clientFileTransferManager) registerTransfer(transferID, path, direction
 		transferID: transferID,
 		path:       path,
 		direction:  direction,
-		ackCh:      make(chan int32, 1),
 		abort:      make(chan struct{}),
 	}
 
@@ -298,18 +291,15 @@ func (m *clientFileTransferManager) sendUploadMetadata(
 	return stream.Send(res)
 }
 
-// sendUploadInChunks reads and sends a file in chunks to the agent, keeping one
-// chunk outstanding at a time: each chunk waits for the agent's CHUNK_RECEIVED
-// before the next is read and sent.
-//
-// The agent acknowledges a chunk only once the module has consumed it, so this
-// is genuine end-to-end backpressure: the client cannot outrun the module, and
-// the client's memory stays bounded at one chunk regardless of file size. The
-// cost is one round trip per megabyte, which is far below the rate at which a
-// module writes a chunk to hardware.
+// sendUploadInChunks reads and sends a file in chunks to the agent. The agent
+// reads the stream only as fast as the module writes the file, so the stream's
+// flow control holds the sender back, and the client's memory stays bounded at
+// one chunk regardless of file size.
 //
 // The transfer stays registered after the final chunk, until the agent's
-// TRANSFER_COMPLETE reports it, or the end of the run drops it.
+// TRANSFER_COMPLETE reports it, or the end of the run drops it. A transfer
+// dropped before, because the agent ended it, closes the file, and the sender
+// stops at its next read.
 func (m *clientFileTransferManager) sendUploadInChunks(
 	transferID, path string,
 	file *os.File,
@@ -325,9 +315,14 @@ func (m *clientFileTransferManager) sendUploadInChunks(
 
 			isFinal := errors.Is(readErr, io.EOF)
 			if readErr != nil && !isFinal {
-				// Tell the agent, or its module waits for the next chunk forever.
-				slog.Warn("upload failed", "err",
-					m.dropTransfer(transferID, fmt.Errorf("reading %q: %w", path, readErr), stream))
+				select {
+				case <-state.abort:
+					slog.Debug("upload stopped", "transfer_id", transferID)
+				default:
+					// Tell the agent, or its module waits for the next chunk forever.
+					slog.Warn("upload failed", "err",
+						m.dropTransfer(transferID, fmt.Errorf("reading %q: %w", path, readErr), stream))
+				}
 
 				return
 			}
@@ -346,37 +341,11 @@ func (m *clientFileTransferManager) sendUploadInChunks(
 				return
 			}
 
-			// The final chunk is answered with TRANSFER_COMPLETE, not an ack.
-			if isFinal || !waitForChunkAck(state, chunkNum+1) {
+			if isFinal {
 				return
 			}
 		}
 	}()
-}
-
-// waitForChunkAck blocks until the agent acknowledges the chunk before wantNext,
-// or the transfer is dropped. It reports whether sending should continue.
-//
-// The transfer's abort channel is the only exit besides the acknowledgment: it
-// closes when the transfer is removed, which covers a rejection, a stream error
-// and the end of the run. Without it a sender would wait forever for an
-// acknowledgment the agent can no longer send.
-func waitForChunkAck(state *clientFileTransferState, wantNext int32) bool {
-	for {
-		select {
-		case <-state.abort:
-			slog.Debug("upload stopped while awaiting acknowledgment",
-				"transfer_id", state.transferID, "chunk", wantNext-1)
-
-			return false
-		case next := <-state.ackCh:
-			// Ignore a stale acknowledgment for a chunk already past; only the one
-			// for the chunk in flight releases the sender.
-			if next >= wantNext {
-				return true
-			}
-		}
-	}
 }
 
 // handleFileTransferRequest handles a FileTransferRequest from the agent: a
@@ -529,16 +498,6 @@ func (m *clientFileTransferManager) handleFileTransferResponse(ftRes *pb.FileTra
 	case pb.FileTransferResponse_STATUS_TRANSFER_COMPLETE:
 		m.removeTransfer(transferID)
 		m.reportUpload(state)
-	case pb.FileTransferResponse_STATUS_CHUNK_RECEIVED:
-		// Release the upload sender to read and send the next chunk. A
-		// non-blocking send keeps the receive loop moving: the channel is buffered
-		// to one and only ever holds the acknowledgment for the chunk in flight.
-		if state != nil {
-			select {
-			case state.ackCh <- ftRes.GetNextChunkExpected():
-			default:
-			}
-		}
 	case pb.FileTransferResponse_STATUS_ACCEPTED:
 		// The agent is ready; the sender is already running.
 	case pb.FileTransferResponse_STATUS_UNSPECIFIED:

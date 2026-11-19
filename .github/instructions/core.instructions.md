@@ -25,10 +25,9 @@ superseding ADR or is breaking.
   output keeps its order. The only buffered one among them is `fileTransferNotifyCh`, of
   capacity 1, a wake-up for `toClientWorker` in which signals coalesce. Every send on the stream
   goes through `sendToClient`: `toClientWorker` sends the module's output, the console events,
-  the requests for uploads, the downloads, the acknowledgments of upload chunks and the end of
-  each transfer; `fromClientWorker` only answers the client's transfer requests and refuses its
-  broken chunks. `fromClientWorker` hands an upload chunk to `RequestFile` over an unbuffered
-  channel and holds no lock while it waits.
+  the requests for uploads, the downloads and the end of each transfer; `fromClientWorker` only
+  answers the client's transfer requests and refuses its broken chunks. `fromClientWorker` hands
+  an upload chunk to `RequestFile` over an unbuffered channel and holds no lock while it waits.
   → https://github.com/BlindspotSoftware/dutctl/blob/main/docs/decisions/0040-transfer-files-in-chunks-over-the-run-stream.md#decision-outcome
 - [CORE-3] `Broker.Start` sets the fields that the module-facing methods read without a lock (the
   channels, `done`, `log`) before it starts the workers, and nothing reassigns them later. The

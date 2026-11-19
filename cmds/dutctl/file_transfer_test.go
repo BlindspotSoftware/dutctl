@@ -59,20 +59,15 @@ func announceDownload(t *testing.T, m *clientFileTransferManager, id, dest strin
 	}
 }
 
-// ackUploads stands in for the agent: it acknowledges each upload chunk so the
-// sender proceeds, and confirms the upload after the final one.
-func ackUploads(m *clientFileTransferManager) func(*pb.FileChunk) {
+// confirmUploads stands in for the agent: it confirms an upload after its
+// final chunk.
+func confirmUploads(m *clientFileTransferManager) func(*pb.FileChunk) {
 	return func(c *pb.FileChunk) {
-		res := &pb.FileTransferResponse{
-			TransferId:        c.GetTransferId(),
-			Status:            pb.FileTransferResponse_STATUS_CHUNK_RECEIVED,
-			NextChunkExpected: c.GetChunkNumber() + 1,
-		}
 		if c.GetIsFinal() {
-			res = &pb.FileTransferResponse{TransferId: c.GetTransferId(), Status: pb.FileTransferResponse_STATUS_TRANSFER_COMPLETE}
+			_ = m.handleFileTransferResponse(&pb.FileTransferResponse{
+				TransferId: c.GetTransferId(), Status: pb.FileTransferResponse_STATUS_TRANSFER_COMPLETE,
+			})
 		}
-
-		_ = m.handleFileTransferResponse(res)
 	}
 }
 
@@ -104,9 +99,8 @@ type recordingStream struct {
 	sent []*pb.RunRequest
 	err  error // when non-nil, Send returns it instead of recording
 
-	// onChunk, when set, is invoked after a FileChunk is recorded. Uploads keep
-	// one chunk outstanding, so a test that wants the sender to progress has to
-	// stand in for the agent and acknowledge.
+	// onChunk, when set, is invoked after a FileChunk is recorded, so that a
+	// test can stand in for the agent.
 	onChunk func(*pb.FileChunk)
 }
 
@@ -374,7 +368,7 @@ func TestHandleUploadRequest_StreamsFile(t *testing.T) {
 
 	m, reported := newTestManager()
 	stream := &recordingStream{}
-	stream.onChunk = ackUploads(m)
+	stream.onChunk = confirmUploads(m)
 
 	if err := m.handleUploadRequest("u1", src, stream); err != nil {
 		t.Fatalf("handleUploadRequest: %v", err)
@@ -556,8 +550,8 @@ type unguardedStream struct {
 	inSend  atomic.Int32
 	maxSeen atomic.Int32
 
-	// onChunk acknowledges a chunk so the ack-gated upload keeps sending, which
-	// is what sustains the overlap this test needs.
+	// onChunk confirms the upload after its final chunk, which ends the
+	// transfer the test waits for.
 	onChunk func(*pb.FileChunk)
 }
 
@@ -600,7 +594,7 @@ func TestSendStreamSerializesUploadAndAcks(t *testing.T) {
 	raw := &unguardedStream{}
 	sender := newSendStream(raw)
 	mgr, _ := newTestManager()
-	raw.onChunk = ackUploads(mgr)
+	raw.onChunk = confirmUploads(mgr)
 
 	// The agent asks for the file: this spawns the upload goroutine.
 	if err := mgr.handleUploadRequest("up-1", path, sender); err != nil {
@@ -622,10 +616,10 @@ func TestSendStreamSerializesUploadAndAcks(t *testing.T) {
 	}
 }
 
-// An upload keeps a single chunk outstanding: until the agent acknowledges,
-// nothing further is read or sent. Without that the client streams the whole
-// file as fast as it can and next_chunk_expected means nothing.
-func TestUploadWaitsForChunkAck(t *testing.T) {
+// An upload the agent ends, because its module stopped, stops the sender at
+// its next read, without a rejection back to the agent: the transfer closed
+// the file the sender reads.
+func TestUploadStopsWhenTheAgentEndsIt(t *testing.T) {
 	t.Parallel()
 
 	path := filepath.Join(t.TempDir(), "image.bin")
@@ -634,36 +628,31 @@ func TestUploadWaitsForChunkAck(t *testing.T) {
 	}
 
 	m, _ := newTestManager()
-	stream := &recordingStream{} // no onChunk: nothing is ever acknowledged
+	stream := &recordingStream{}
+
+	// The agent ends the upload while its first chunk is on the way.
+	stream.onChunk = func(c *pb.FileChunk) {
+		if c.GetChunkNumber() == 0 {
+			_ = m.handleFileTransferResponse(&pb.FileTransferResponse{
+				TransferId: c.GetTransferId(), Status: pb.FileTransferResponse_STATUS_ERROR, ErrorMessage: "cancelled",
+			})
+		}
+	}
 
 	if err := m.handleUploadRequest("u1", path, stream); err != nil {
 		t.Fatalf("handleUploadRequest: %v", err)
 	}
 
-	waitFor(t, func() bool { return len(stream.chunks()) >= 1 })
+	waitFor(t, func() bool { return m.getTransfer("u1") == nil })
 
-	// Give a would-be runaway sender room to send the rest of the file.
-	time.Sleep(200 * time.Millisecond)
-
-	if got := len(stream.chunks()); got != 1 {
-		t.Errorf("sent %d chunks without an acknowledgment, want 1", got)
-	}
-
-	// Acknowledging releases exactly one more chunk.
-	_ = m.handleFileTransferResponse(&pb.FileTransferResponse{
-		TransferId:        "u1",
-		Status:            pb.FileTransferResponse_STATUS_CHUNK_RECEIVED,
-		NextChunkExpected: 1,
-	})
-
-	waitFor(t, func() bool { return len(stream.chunks()) == 2 })
-
-	// Dropping the transfer must release the sender rather than leak it.
-	m.removeTransfer("u1")
-
+	// Give a sender that keeps going room to send the rest of the file.
 	time.Sleep(100 * time.Millisecond)
 
-	if got := len(stream.chunks()); got != 2 {
-		t.Errorf("sender kept going after the transfer was dropped: %d chunks", got)
+	if got := len(stream.chunks()); got != 1 {
+		t.Errorf("sent %d chunks, want 1: the sender kept going after the agent ended the upload", got)
+	}
+
+	if hasStatus(stream.responses(), pb.FileTransferResponse_STATUS_TRANSFER_REJECTED) {
+		t.Error("the sender rejected an upload that the agent had ended")
 	}
 }

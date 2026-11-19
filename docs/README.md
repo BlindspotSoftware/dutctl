@@ -116,10 +116,10 @@ Raw mode is used only when the client's standard input is a terminal and the out
 example with input piped from a file or in CI, the input is forwarded as it is read, in chunks, with no raw mode
 anywhere.
 
-Files move in chunks of up to 1 MiB, so neither side holds a whole file in memory, and other messages keep flowing
-during a transfer. A transfer has an ID that the agent assigns, and its chunks are numbered from 0; the last one is
-marked final. Transfers can happen multiple times and can be mixed with Print messages, consoles and each other.
-Note that while a console is open, a file transfer waits behind the module's reading of the console input.
+Files move in chunks of up to 1 MiB, so neither side holds a whole file in memory, and other messages pass between two
+chunks. A transfer has an ID that the agent assigns, and its chunks are numbered from 0; the last one is marked final. A
+run can move several files, one at a time, mixed with Print messages and consoles. Note that while a console is open, a
+file transfer waits behind the module's reading of the console input.
 
 **File download to the client**: A module sends a file with `SendFile`. The agent announces the download with a
 FileTransferRequest in the download direction, which names the destination path on the client, and then streams the
@@ -129,9 +129,9 @@ with a FileTransferResponse with the status TRANSFER_COMPLETE, and only then doe
 
 **File upload to the agent**: A module requests a file with `RequestFile`. The agent sends a FileTransferRequest in the
 upload direction, which names the path on the client. The client answers with a FileTransferRequest that carries the
-file's size, and then sends the file as FileChunk messages. It sends the next chunk only once the agent has answered the
-last one with the status CHUNK_RECEIVED, which the agent does once the module has read it. After the final chunk the
-agent answers TRANSFER_COMPLETE.
+file's size, and then sends the file as FileChunk messages. The agent writes each chunk to the module's writer before it
+takes the next, so the flow control of the stream paces the client. Once the module has the whole file, the agent
+answers TRANSFER_COMPLETE, and only then does the module's `RequestFile` return.
 
 Either side ends a transfer it cannot continue with the status TRANSFER_REJECTED or ERROR. A download that fails this
 way fails the run on the client.

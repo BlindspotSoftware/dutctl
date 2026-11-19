@@ -222,9 +222,8 @@ func processFileTransfers(stream Stream, s *backend) (bool, error) {
 }
 
 // handleUploadFileTransfer advances the upload: ask the client for the file,
-// acknowledge the chunk RequestFile has written, or tell the client how the
-// upload ended. An upload the client has not heard of yet is only ended. It
-// reports whether a message was sent.
+// or tell the client how the upload ended. An upload the client has not heard
+// of yet is only ended. It reports whether a message was sent.
 func handleUploadFileTransfer(stream Stream, s *backend, upload *uploadState) (bool, error) {
 	ending, endErr := upload.end.pending()
 
@@ -238,7 +237,7 @@ func handleUploadFileTransfer(stream Stream, s *backend, upload *uploadState) (b
 	case !upload.announced:
 		return announceUpload(stream, s, upload)
 	default:
-		return ackUploadChunk(stream, s, upload)
+		return false, nil
 	}
 }
 
@@ -259,34 +258,6 @@ func announceUpload(stream Stream, s *backend, upload *uploadState) (bool, error
 	}
 
 	upload.announced = true
-
-	return true, nil
-}
-
-// ackUploadChunk acknowledges the chunk RequestFile has written, if there is
-// one, so that the client sends the next. It reports whether it sent one.
-func ackUploadChunk(stream Stream, s *backend, upload *uploadState) (bool, error) {
-	upload.mu.Lock()
-	pending, next := upload.ackPending, upload.ackNext
-	upload.ackPending = false
-	upload.mu.Unlock()
-
-	if !pending {
-		return false, nil
-	}
-
-	err := s.sendToClient(stream, &pb.RunResponse{
-		Msg: &pb.RunResponse_FileTransferResponse{
-			FileTransferResponse: &pb.FileTransferResponse{
-				TransferId:        upload.transferID,
-				Status:            pb.FileTransferResponse_STATUS_CHUNK_RECEIVED,
-				NextChunkExpected: next,
-			},
-		},
-	})
-	if err != nil {
-		return false, err
-	}
 
 	return true, nil
 }
@@ -395,7 +366,7 @@ func toClientWorker(ctx context.Context, stream Stream, s *backend) error {
 }
 
 // fromClientWorker reads messages from the client and routes them: console
-// input and control to the open console, and file-transfer messages (chunks, requests, acknowledgments)
+// input and control to the open console, and file-transfer messages (chunks, requests, responses)
 // to the transfer state machine. It loops until ctx is cancelled or the client
 // closes the stream with io.EOF (both returning nil), or a stream error occurs
 // (returning that error).
@@ -580,8 +551,7 @@ func fromClientWorker(ctx context.Context, stream Stream, s *backend) error {
 					s.removeUpload(transferID, reason)
 					s.removeDownload(transferID, fmt.Errorf("client could not receive the file: %s", reason))
 				case pb.FileTransferResponse_STATUS_UNSPECIFIED,
-					pb.FileTransferResponse_STATUS_ACCEPTED,
-					pb.FileTransferResponse_STATUS_CHUNK_RECEIVED:
+					pb.FileTransferResponse_STATUS_ACCEPTED:
 					// Not meaningful from the client for these flows; ignore.
 				}
 

@@ -52,8 +52,8 @@ Links point to the ADR's Decision outcome.
   bidirectional Run stream whose first request carries the command, and which ends when the
   agent's handler returns, with no end-of-run message. The module on the agent starts every file
   transfer. `FileTransferRequest`, `FileChunk` and `FileTransferResponse` move a file in chunks
-  of at most 1 MiB, under an ID unique within the run. An upload sends a chunk only after the
-  agent acknowledged the last one; a download streams, and the client confirms the complete file.
+  of at most 1 MiB, under an ID unique within the run. Both directions stream, paced by the flow
+  control of the stream; the agent confirms a complete upload, and the client a complete download.
   `RequestFile` and `SendFile` take a context that bounds the transfer. `RequestFile` writes the
   file to the module's writer on the module's goroutine, and returns once the whole file is in it
   or with the reason it failed. `SendFile` takes the size, reads the module's reader on the

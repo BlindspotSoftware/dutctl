@@ -215,19 +215,17 @@ message FileTransferRequest {
   Direction direction = 3; // Direction of file transfer
 }
 
-// FileTransferResponse acknowledges file transfer requests and chunk receipts.
+// FileTransferResponse answers a FileTransferRequest, or ends a transfer.
 message FileTransferResponse {
   string transfer_id = 1; // Matches request ID
   enum Status {
     STATUS_UNSPECIFIED = 0;
     STATUS_ACCEPTED = 1; // Ready to receive chunks
-    STATUS_CHUNK_RECEIVED = 2; // Chunk received successfully
     STATUS_TRANSFER_COMPLETE = 3; // All chunks received
     STATUS_TRANSFER_REJECTED = 4; // Transfer cannot proceed
     STATUS_ERROR = 5; // Transfer error occurred
   }
   Status status = 2;
-  int32 next_chunk_expected = 3; // Next chunk number expected (for recovery)
   string error_message = 4; // Error details if status is ERROR
 }
 

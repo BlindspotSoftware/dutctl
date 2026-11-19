@@ -304,19 +304,18 @@ func TestRunRPCFileReplyWhileInputFlows(t *testing.T) {
 			switch msg := req.GetMsg().(type) {
 			case *pb.RunRequest_FileChunk:
 				content = append(content, msg.FileChunk.GetChunkData()...)
-				status := pb.FileTransferResponse_STATUS_CHUNK_RECEIVED
-
-				if msg.FileChunk.GetIsFinal() {
-					if string(content) != "file content" {
-						return errors.New("wrong file content")
-					}
-
-					gotFile = true
-					status = pb.FileTransferResponse_STATUS_TRANSFER_COMPLETE
+				if !msg.FileChunk.GetIsFinal() {
+					continue
 				}
 
+				if string(content) != "file content" {
+					return errors.New("wrong file content")
+				}
+
+				gotFile = true
+
 				if err := stream.Send(&pb.RunResponse{Msg: &pb.RunResponse_FileTransferResponse{FileTransferResponse: &pb.FileTransferResponse{
-					TransferId: "1", Status: status, NextChunkExpected: msg.FileChunk.GetChunkNumber() + 1,
+					TransferId: "1", Status: pb.FileTransferResponse_STATUS_TRANSFER_COMPLETE,
 				}}}); err != nil {
 					return err
 				}

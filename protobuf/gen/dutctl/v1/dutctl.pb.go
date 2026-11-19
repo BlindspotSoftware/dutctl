@@ -134,7 +134,6 @@ type FileTransferResponse_Status int32
 const (
 	FileTransferResponse_STATUS_UNSPECIFIED       FileTransferResponse_Status = 0
 	FileTransferResponse_STATUS_ACCEPTED          FileTransferResponse_Status = 1 // Ready to receive chunks
-	FileTransferResponse_STATUS_CHUNK_RECEIVED    FileTransferResponse_Status = 2 // Chunk received successfully
 	FileTransferResponse_STATUS_TRANSFER_COMPLETE FileTransferResponse_Status = 3 // All chunks received
 	FileTransferResponse_STATUS_TRANSFER_REJECTED FileTransferResponse_Status = 4 // Transfer cannot proceed
 	FileTransferResponse_STATUS_ERROR             FileTransferResponse_Status = 5 // Transfer error occurred
@@ -145,7 +144,6 @@ var (
 	FileTransferResponse_Status_name = map[int32]string{
 		0: "STATUS_UNSPECIFIED",
 		1: "STATUS_ACCEPTED",
-		2: "STATUS_CHUNK_RECEIVED",
 		3: "STATUS_TRANSFER_COMPLETE",
 		4: "STATUS_TRANSFER_REJECTED",
 		5: "STATUS_ERROR",
@@ -153,7 +151,6 @@ var (
 	FileTransferResponse_Status_value = map[string]int32{
 		"STATUS_UNSPECIFIED":       0,
 		"STATUS_ACCEPTED":          1,
-		"STATUS_CHUNK_RECEIVED":    2,
 		"STATUS_TRANSFER_COMPLETE": 3,
 		"STATUS_TRANSFER_REJECTED": 4,
 		"STATUS_ERROR":             5,
@@ -1563,15 +1560,14 @@ func (x *FileTransferRequest) GetDirection() FileTransferRequest_Direction {
 	return FileTransferRequest_DIRECTION_UNSPECIFIED
 }
 
-// FileTransferResponse acknowledges file transfer requests and chunk receipts.
+// FileTransferResponse answers a FileTransferRequest, or ends a transfer.
 type FileTransferResponse struct {
-	state             protoimpl.MessageState      `protogen:"open.v1"`
-	TransferId        string                      `protobuf:"bytes,1,opt,name=transfer_id,json=transferId,proto3" json:"transfer_id,omitempty"` // Matches request ID
-	Status            FileTransferResponse_Status `protobuf:"varint,2,opt,name=status,proto3,enum=dutctl.v1.FileTransferResponse_Status" json:"status,omitempty"`
-	NextChunkExpected int32                       `protobuf:"varint,3,opt,name=next_chunk_expected,json=nextChunkExpected,proto3" json:"next_chunk_expected,omitempty"` // Next chunk number expected (for recovery)
-	ErrorMessage      string                      `protobuf:"bytes,4,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`                   // Error details if status is ERROR
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	state         protoimpl.MessageState      `protogen:"open.v1"`
+	TransferId    string                      `protobuf:"bytes,1,opt,name=transfer_id,json=transferId,proto3" json:"transfer_id,omitempty"` // Matches request ID
+	Status        FileTransferResponse_Status `protobuf:"varint,2,opt,name=status,proto3,enum=dutctl.v1.FileTransferResponse_Status" json:"status,omitempty"`
+	ErrorMessage  string                      `protobuf:"bytes,4,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"` // Error details if status is ERROR
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *FileTransferResponse) Reset() {
@@ -1616,13 +1612,6 @@ func (x *FileTransferResponse) GetStatus() FileTransferResponse_Status {
 		return x.Status
 	}
 	return FileTransferResponse_STATUS_UNSPECIFIED
-}
-
-func (x *FileTransferResponse) GetNextChunkExpected() int32 {
-	if x != nil {
-		return x.NextChunkExpected
-	}
-	return 0
 }
 
 func (x *FileTransferResponse) GetErrorMessage() string {
@@ -1927,17 +1916,15 @@ const file_dutctl_v1_dutctl_proto_rawDesc = "" +
 	"\tDirection\x12\x19\n" +
 	"\x15DIRECTION_UNSPECIFIED\x10\x00\x12\x14\n" +
 	"\x10DIRECTION_UPLOAD\x10\x01\x12\x16\n" +
-	"\x12DIRECTION_DOWNLOAD\x10\x02\"\xed\x02\n" +
+	"\x12DIRECTION_DOWNLOAD\x10\x02\"\xa2\x02\n" +
 	"\x14FileTransferResponse\x12\x1f\n" +
 	"\vtransfer_id\x18\x01 \x01(\tR\n" +
 	"transferId\x12>\n" +
-	"\x06status\x18\x02 \x01(\x0e2&.dutctl.v1.FileTransferResponse.StatusR\x06status\x12.\n" +
-	"\x13next_chunk_expected\x18\x03 \x01(\x05R\x11nextChunkExpected\x12#\n" +
-	"\rerror_message\x18\x04 \x01(\tR\ferrorMessage\"\x9e\x01\n" +
+	"\x06status\x18\x02 \x01(\x0e2&.dutctl.v1.FileTransferResponse.StatusR\x06status\x12#\n" +
+	"\rerror_message\x18\x04 \x01(\tR\ferrorMessage\"\x83\x01\n" +
 	"\x06Status\x12\x16\n" +
 	"\x12STATUS_UNSPECIFIED\x10\x00\x12\x13\n" +
-	"\x0fSTATUS_ACCEPTED\x10\x01\x12\x19\n" +
-	"\x15STATUS_CHUNK_RECEIVED\x10\x02\x12\x1c\n" +
+	"\x0fSTATUS_ACCEPTED\x10\x01\x12\x1c\n" +
 	"\x18STATUS_TRANSFER_COMPLETE\x10\x03\x12\x1c\n" +
 	"\x18STATUS_TRANSFER_REJECTED\x10\x04\x12\x10\n" +
 	"\fSTATUS_ERROR\x10\x05\"P\n" +
