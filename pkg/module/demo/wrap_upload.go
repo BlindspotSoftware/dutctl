@@ -8,7 +8,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"io"
 
@@ -62,32 +61,34 @@ func (w *WrapUpload) Run(ctx context.Context, s module.Session, args ...string) 
 
 	name := args[0]
 
-	r, err := s.RequestFile(ctx, name)
+	// Hashing as the file arrives keeps any size of file out of memory.
+	sum := sha256.New()
+	progress := &progress{s: s, name: name}
+
+	err := s.RequestFile(ctx, name, io.MultiWriter(sum, progress))
 	if err != nil {
 		return fmt.Errorf("requesting %s: %w", name, err)
 	}
 
-	// Hashing while reading keeps any size of file out of memory.
-	sum := sha256.New()
-
-	var size int64
-
-	for {
-		n, err := io.CopyN(sum, r, mib)
-		size += n
-
-		if errors.Is(err, io.EOF) {
-			break
-		}
-
-		if err != nil {
-			return fmt.Errorf("receiving %s: %w", name, err)
-		}
-
-		s.Printf("Received %d MiB of %s.\n", size/mib, name)
-	}
-
-	s.Printf("Received %s: %d bytes, sha256 %s.\n", name, size, hex.EncodeToString(sum.Sum(nil)))
+	s.Printf("Received %s: %d bytes, sha256 %s.\n", name, progress.size, hex.EncodeToString(sum.Sum(nil)))
 
 	return nil
+}
+
+// progress counts the bytes of a file and reports each MiB as it arrives.
+type progress struct {
+	s    module.Session
+	name string
+	size int64
+}
+
+func (p *progress) Write(data []byte) (int, error) {
+	before := p.size / mib
+	p.size += int64(len(data))
+
+	if now := p.size / mib; now > before {
+		p.s.Printf("Received %d MiB of %s.\n", now, p.name)
+	}
+
+	return len(data), nil
 }

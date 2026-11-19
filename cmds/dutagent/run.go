@@ -198,7 +198,7 @@ func runModules(
 
 		// Set the "module" scope on the context handed to the module, so
 		// only the module's own records are scoped to it.
-		modCtx, cancel := context.WithCancel(log.With(log.WithScope(ctx, "module"), "module", mod.Config.Name, "module-index", idx+1))
+		modCtx := log.With(log.WithScope(ctx, "module"), "module", mod.Config.Name, "module-index", idx+1)
 
 		returned := warnUntilReturned(modCtx, mlog, stopWarnInterval)
 		err := catchPanic(func() error {
@@ -210,9 +210,6 @@ func runModules(
 		})
 
 		returned()
-		// Ends what the module left bound to its context, such as an upload it
-		// did not read: the session carries one transfer at a time.
-		cancel()
 
 		if err != nil {
 			// Deliberate detail+summary logging (not log-and-return spam): this

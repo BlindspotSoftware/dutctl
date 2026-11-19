@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"strings"
 	"sync"
@@ -284,79 +285,6 @@ func TestRunEndsOnceTheClientHasTheDownload(t *testing.T) {
 
 	if !bytes.Equal(got, content) {
 		t.Errorf("client received %d bytes, want %d", len(got), len(content))
-	}
-}
-
-// A module that requests a file and fails before it reads it, say because it
-// cannot create the destination, leaves an upload that nothing will finish. The
-// run must drop it and end, or the device stays busy until the client gives up.
-func TestRunDropsUploadWhenModuleReturns(t *testing.T) {
-	svc := newRunService(func(ctx context.Context, s module.Session, _ ...string) error {
-		_, err := s.RequestFile(ctx, "image.bin")
-		if err != nil {
-			return err
-		}
-
-		return errors.New("cannot create the destination")
-	})
-
-	stream := newClientStream(t, commandReq(testDevice, testCommand))
-
-	done := make(chan error, 1)
-
-	go func() { done <- svc.run(context.Background(), stream, "alice") }()
-
-	select {
-	case err := <-done:
-		if connect.CodeOf(err) != connect.CodeAborted {
-			t.Errorf("code = %v (err = %v), want %v", connect.CodeOf(err), err, connect.CodeAborted)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("run did not return after its module abandoned an upload")
-	}
-
-	if hold, ok := deviceHold(svc); ok {
-		t.Errorf("auto-lock still held after run returned: %+v", hold)
-	}
-}
-
-// A session carries one transfer at a time, so an upload that its module left
-// unread ends when the module returns: it must not refuse the transfer of the
-// next module.
-func TestRunEndsAnUnreadUploadWithItsModule(t *testing.T) {
-	svc := newRunService(
-		func(ctx context.Context, s module.Session, _ ...string) error {
-			_, err := s.RequestFile(ctx, "image.bin")
-
-			return err
-		},
-		func(ctx context.Context, s module.Session, _ ...string) error {
-			return s.SendFile(ctx, "out.bin", 4, strings.NewReader("data"))
-		},
-	)
-
-	stream := newClientStream(t, commandReq(testDevice, testCommand))
-
-	done := make(chan error, 1)
-
-	go func() { done <- svc.run(context.Background(), stream, "alice") }()
-
-	final := stream.awaitSent(t, func(res *pb.RunResponse) bool { return res.GetFileChunk().GetIsFinal() })
-
-	stream.push(&pb.RunRequest{Msg: &pb.RunRequest_FileTransferResponse{
-		FileTransferResponse: &pb.FileTransferResponse{
-			TransferId: final.GetFileChunk().GetTransferId(),
-			Status:     pb.FileTransferResponse_STATUS_TRANSFER_COMPLETE,
-		},
-	}})
-
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("run: unexpected error: %v", err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("run did not return after the client confirmed the download")
 	}
 }
 
@@ -1130,13 +1058,13 @@ func TestRunHoldsDeviceUntilModulesReturn(t *testing.T) {
 			)
 
 			svc = newRunService(func(ctx context.Context, s module.Session, _ ...string) error {
+				close(started)
+
 				if tt.breakUpload {
-					if _, err := s.RequestFile(ctx, "image.bin"); err != nil {
-						return err
-					}
+					// Returns once the broken file protocol ended the run.
+					_ = s.RequestFile(ctx, "image.bin", io.Discard)
 				}
 
-				close(started)
 				<-ctx.Done()
 				cause = context.Cause(ctx)
 				close(stopping)

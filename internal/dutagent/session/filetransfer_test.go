@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -21,8 +22,8 @@ import (
 )
 
 // uploadStream learns the upload transfer ID from the FileTransferRequest the
-// agent announces, then sends one chunk for it and stays connected, waiting for
-// an acknowledgment as a client does.
+// agent announces, then sends one chunk for it and stays connected, but sends
+// nothing more.
 type uploadStream struct {
 	idCh chan string
 	id   string
@@ -62,11 +63,9 @@ func (s *uploadStream) Receive() (*pb.RunRequest, error) {
 	}}}, nil
 }
 
-// TestUploadEndsWithTheSession: an upload chunk is written into an io.Pipe that
-// only the module drains, so a module that abandons its reader leaves
-// deliverChunk blocked in a write no context can interrupt. The end of the
-// session must drop the upload, which closes the pipe, also when the module
-// gave RequestFile a context that never ends.
+// TestUploadEndsWithTheSession: RequestFile waits for the chunks of a client
+// that went quiet. The end of the session must end the upload, also when the
+// module gave RequestFile a context that never ends.
 func TestUploadEndsWithTheSession(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	stream := &uploadStream{idCh: make(chan string, 1), stop: make(chan struct{})}
@@ -76,31 +75,21 @@ func TestUploadEndsWithTheSession(t *testing.T) {
 	b := &Broker{}
 	sess, _ := b.Start(ctx, stream)
 
-	reader, err := sess.RequestFile(context.Background(), "image.bin")
-	if err != nil {
-		t.Fatalf("RequestFile: %v", err)
-	}
+	result := requestFileAsync(context.Background(), sess, "image.bin", io.Discard)
 
-	// Give the announced transfer time to reach deliverChunk and block there;
-	// the module deliberately does not read the returned reader yet.
+	// Give the first chunk time to arrive; the client sends no more.
 	time.Sleep(200 * time.Millisecond)
 
 	cancel()
 
 	_ = b.Stop()
 
-	deadline := time.After(5 * time.Second)
-
-	for b.session.currentUpload() != nil {
-		select {
-		case <-deadline:
-			t.Fatal("the abandoned upload was not dropped when the session ended")
-		case <-time.After(5 * time.Millisecond):
-		}
+	if err := awaitResult(t, result); !errors.Is(err, ErrSessionClosed) {
+		t.Errorf("RequestFile err = %v, want %v", err, ErrSessionClosed)
 	}
 
-	if _, err := io.ReadAll(reader); err == nil {
-		t.Error("the reader of a dropped upload reported a clean end")
+	if b.session.currentUpload() != nil {
+		t.Error("upload still registered after the session ended")
 	}
 }
 
@@ -114,8 +103,18 @@ func sendFileAsync(ctx context.Context, sess module.Session, name string, size i
 	return result
 }
 
-// awaitResult returns what SendFile returned, failing the test if it does not
-// return in time.
+// requestFileAsync calls RequestFile on a goroutine, as a module waiting for
+// its upload, and delivers what it returns.
+func requestFileAsync(ctx context.Context, sess module.Session, name string, w io.Writer) <-chan error {
+	result := make(chan error, 1)
+
+	go func() { result <- sess.RequestFile(ctx, name, w) }()
+
+	return result
+}
+
+// awaitResult returns what SendFile or RequestFile returned, failing the test
+// if it does not return in time.
 func awaitResult(t *testing.T, result <-chan error) error {
 	t.Helper()
 
@@ -123,10 +122,17 @@ func awaitResult(t *testing.T, result <-chan error) error {
 	case err := <-result:
 		return err
 	case <-time.After(5 * time.Second):
-		t.Fatal("SendFile did not return; the download never ended")
+		t.Fatal("the transfer call did not return; the transfer never ended")
 
 		return nil
 	}
+}
+
+// uploadChunk is the client's chunk number num of the upload id.
+func uploadChunk(id string, num int32, data string, final bool) *pb.RunRequest {
+	return &pb.RunRequest{Msg: &pb.RunRequest_FileChunk{FileChunk: &pb.FileChunk{
+		TransferId: id, ChunkNumber: num, ChunkData: []byte(data), IsFinal: final,
+	}}}
 }
 
 // rejectStream takes the download announcement, answers TRANSFER_REJECTED,
@@ -221,10 +227,6 @@ type scriptedStream struct {
 	mu   sync.Mutex
 	sent []*pb.RunResponse
 
-	// confirm makes the stream confirm each download once its final chunk
-	// arrived, as the client does.
-	confirm bool
-
 	reply chan *pb.RunRequest
 	stop  chan struct{}
 }
@@ -240,14 +242,6 @@ func (s *scriptedStream) Send(res *pb.RunResponse) error {
 	s.mu.Lock()
 	s.sent = append(s.sent, res)
 	s.mu.Unlock()
-
-	if c := res.GetFileChunk(); s.confirm && c.GetIsFinal() {
-		s.reply <- &pb.RunRequest{Msg: &pb.RunRequest_FileTransferResponse{
-			FileTransferResponse: &pb.FileTransferResponse{
-				TransferId: c.GetTransferId(), Status: pb.FileTransferResponse_STATUS_TRANSFER_COMPLETE,
-			},
-		}}
-	}
 
 	return nil
 }
@@ -492,14 +486,14 @@ func TestDownloadConfirmedDuringFinalSend(t *testing.T) {
 	}
 }
 
-// TestUploadHappyPath covers the agent's upload state machine: announce the
-// request, record the size the client reports, reassemble the chunks through the
-// module's reader, and complete.
+// TestUploadHappyPath covers the agent's upload state machine: ask the client
+// for the file, write its chunks to the module's writer, and tell the client
+// that the upload is complete before RequestFile returns. A module that
+// returned at once would end the run, and the client must not miss the end of
+// its upload then.
 func TestUploadHappyPath(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-
-	content := []byte("firmware image contents")
 
 	stream := newScriptedStream()
 	defer close(stream.stop)
@@ -507,61 +501,89 @@ func TestUploadHappyPath(t *testing.T) {
 	b := &Broker{}
 	sess, _ := b.Start(ctx, stream)
 
-	reader, err := sess.RequestFile(ctx, "image.bin")
-	if err != nil {
-		t.Fatalf("RequestFile: %v", err)
-	}
+	var got bytes.Buffer
 
-	read := make(chan []byte, 1)
-	next := make(chan error, 1)
-
-	go func() {
-		got, _ := io.ReadAll(reader)
-		read <- got
-
-		// The upload ended with the end of the reader, so the module can move
-		// the next file at once.
-		_, err := sess.RequestFile(ctx, "next.bin")
-		next <- err
-	}()
+	result := requestFileAsync(ctx, sess, "image.bin", &got)
 
 	id := awaitAnnouncement(t, stream, pb.FileTransferRequest_DIRECTION_UPLOAD)
 
-	// The client answers with the file's real size, then sends it.
+	// The client answers with the file's size, then sends it.
 	stream.reply <- &pb.RunRequest{Msg: &pb.RunRequest_FileTransferRequest{
 		FileTransferRequest: &pb.FileTransferRequest{
 			TransferId: id,
 			Direction:  pb.FileTransferRequest_DIRECTION_UPLOAD,
-			Metadata:   &pb.FileMetadata{Path: "image.bin", Size: int64(len(content))},
+			Metadata:   &pb.FileMetadata{Path: "image.bin", Size: 23},
 		},
 	}}
 
 	awaitStatus(t, stream, pb.FileTransferResponse_STATUS_ACCEPTED)
 
-	if got := b.session.uploadByID(id); got == nil {
-		t.Fatal("upload disappeared after acceptance")
-	} else if size := got.metadata.GetSize(); size != int64(len(content)) {
-		t.Errorf("recorded upload size = %d, want %d", size, len(content))
+	stream.reply <- uploadChunk(id, 0, "firmware image", false)
+	stream.reply <- uploadChunk(id, 1, " contents", true)
+
+	if err := awaitResult(t, result); err != nil {
+		t.Fatalf("RequestFile: %v", err)
 	}
 
-	stream.reply <- &pb.RunRequest{Msg: &pb.RunRequest_FileChunk{FileChunk: &pb.FileChunk{
-		TransferId: id, ChunkNumber: 0, ChunkData: content, IsFinal: true,
+	if got.String() != "firmware image contents" {
+		t.Errorf("module got %q, want %q", got.String(), "firmware image contents")
+	}
+
+	complete := slices.ContainsFunc(stream.responses(), func(res *pb.RunResponse) bool {
+		return res.GetFileTransferResponse().GetStatus() == pb.FileTransferResponse_STATUS_TRANSFER_COMPLETE
+	})
+	if !complete {
+		t.Error("RequestFile returned before the client was told that the upload is complete")
+	}
+
+	// The upload ended with RequestFile, so the module can move the next file
+	// at once.
+	if b.session.currentUpload() != nil {
+		t.Error("upload still registered after RequestFile returned")
+	}
+}
+
+// failingWriter fails every write with err.
+type failingWriter struct{ err error }
+
+func (w failingWriter) Write([]byte) (int, error) { return 0, w.err }
+
+// TestRequestFileWriteErrorFailsTheUpload: a writer that fails ends the upload
+// on both ends. RequestFile returns the error to the module, and the client is
+// told, so that it stops sending. A chunk the client sent before it heard is
+// dropped and does not fail the run.
+func TestRequestFileWriteErrorFailsTheUpload(t *testing.T) {
+	stream := newScriptedStream()
+	defer close(stream.stop)
+
+	b := &Broker{}
+	sess, runCtx := b.Start(context.Background(), stream)
+
+	full := errors.New("no space left on device")
+	result := requestFileAsync(context.Background(), sess, "image.bin", failingWriter{err: full})
+
+	id := awaitAnnouncement(t, stream, pb.FileTransferRequest_DIRECTION_UPLOAD)
+
+	stream.reply <- uploadChunk(id, 0, "firm", false)
+	stream.reply <- uploadChunk(id, 1, "ware", false)
+
+	if err := awaitResult(t, result); !errors.Is(err, full) {
+		t.Errorf("RequestFile err = %v, want %v", err, full)
+	}
+
+	awaitStatus(t, stream, pb.FileTransferResponse_STATUS_ERROR)
+
+	// The agent answers a message sent after the dropped chunk, so it went past
+	// that chunk.
+	stream.reply <- &pb.RunRequest{Msg: &pb.RunRequest_FileTransferRequest{FileTransferRequest: &pb.FileTransferRequest{
+		TransferId: "unknown", Direction: pb.FileTransferRequest_DIRECTION_UPLOAD,
 	}}}
 
-	select {
-	case got := <-read:
-		if !bytes.Equal(got, content) {
-			t.Errorf("module read %q, want %q", got, content)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("module never received the uploaded file")
-	}
+	awaitStatus(t, stream, pb.FileTransferResponse_STATUS_TRANSFER_REJECTED)
 
-	if err := <-next; err != nil {
-		t.Errorf("RequestFile after the upload ended: %v", err)
+	if err := context.Cause(runCtx); err != nil {
+		t.Errorf("the run failed: %v", err)
 	}
-
-	awaitStatus(t, stream, pb.FileTransferResponse_STATUS_TRANSFER_COMPLETE)
 }
 
 // TestUploadChunkOutOfOrderFailsRun guards the sequence check. There is no
@@ -578,19 +600,12 @@ func TestUploadChunkOutOfOrderFailsRun(t *testing.T) {
 	b := &Broker{}
 	sess, runCtx := b.Start(ctx, stream)
 
-	reader, err := sess.RequestFile(ctx, "image.bin")
-	if err != nil {
-		t.Fatalf("RequestFile: %v", err)
-	}
-
-	go io.Copy(io.Discard, reader) //nolint:errcheck // drains the pipe so writes proceed
+	requestFileAsync(ctx, sess, "image.bin", io.Discard)
 
 	id := awaitAnnouncement(t, stream, pb.FileTransferRequest_DIRECTION_UPLOAD)
 
 	// Chunk 1 without chunk 0.
-	stream.reply <- &pb.RunRequest{Msg: &pb.RunRequest_FileChunk{FileChunk: &pb.FileChunk{
-		TransferId: id, ChunkNumber: 1, ChunkData: []byte("out of order"),
-	}}}
+	stream.reply <- uploadChunk(id, 1, "out of order", false)
 
 	select {
 	case <-runCtx.Done():
@@ -618,8 +633,9 @@ func (r *shortReader) Read(p []byte) (int, error) {
 }
 
 // TestRequestFileContextBoundsTransfer: a module that gives RequestFile a
-// deadline gets one. The reader fails with the context's cause and the transfer
-// is released, so the run is not held open by a client that stopped sending.
+// deadline gets one. RequestFile returns the context's cause, the client is
+// told, and the transfer is released, so the run is not held open by a client
+// that stopped sending.
 func TestRequestFileContextBoundsTransfer(t *testing.T) {
 	stream := newScriptedStream()
 	defer close(stream.stop)
@@ -630,31 +646,18 @@ func TestRequestFileContextBoundsTransfer(t *testing.T) {
 	// The module bounds its own transfer, exactly as it would bound a subprocess.
 	transferCtx, cancelTransfer := context.WithCancel(context.Background())
 
-	reader, err := sess.RequestFile(transferCtx, "image.bin")
-	if err != nil {
-		t.Fatalf("RequestFile: %v", err)
-	}
+	result := requestFileAsync(transferCtx, sess, "image.bin", io.Discard)
 
 	awaitAnnouncement(t, stream, pb.FileTransferRequest_DIRECTION_UPLOAD)
-
-	readErr := make(chan error, 1)
-
-	go func() {
-		_, err := io.ReadAll(reader)
-		readErr <- err
-	}()
 
 	// The client goes quiet. Only the module's own context can end this.
 	cancelTransfer()
 
-	select {
-	case err := <-readErr:
-		if err == nil {
-			t.Error("reader returned success after the transfer was cancelled")
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("cancelling the context did not unblock the module's reader")
+	if err := awaitResult(t, result); !errors.Is(err, context.Canceled) {
+		t.Errorf("RequestFile err = %v, want context.Canceled", err)
 	}
+
+	awaitStatus(t, stream, pb.FileTransferResponse_STATUS_ERROR)
 
 	if b.session.currentUpload() != nil {
 		t.Error("upload still registered after cancellation")
@@ -745,7 +748,7 @@ func TestSessionCarriesOneTransferAtATime(t *testing.T) {
 	result := sendFileAsync(ctx, sess, "out.bin", 4, strings.NewReader("data"))
 	final := awaitFinalChunk(t, stream)
 
-	if _, err := sess.RequestFile(ctx, "image.bin"); !errors.Is(err, errTransferInProgress) {
+	if err := sess.RequestFile(ctx, "image.bin", io.Discard); !errors.Is(err, errTransferInProgress) {
 		t.Errorf("RequestFile during a download: err = %v, want %v", err, errTransferInProgress)
 	}
 
@@ -763,34 +766,8 @@ func TestSessionCarriesOneTransferAtATime(t *testing.T) {
 		t.Fatalf("SendFile: %v", err)
 	}
 
-	if _, err := sess.RequestFile(ctx, "image.bin"); err != nil {
-		t.Errorf("RequestFile after the download ended: %v", err)
-	}
-}
-
-// TestCancelledUploadFreesTheSession: an upload whose context ended no longer
-// counts, also before the session has dropped it, so the module can move the
-// next file at once.
-func TestCancelledUploadFreesTheSession(t *testing.T) {
-	stream := newScriptedStream()
-	stream.confirm = true
-
-	defer close(stream.stop)
-
-	b := &Broker{}
-	sess, _ := b.Start(context.Background(), stream)
-
-	uploadCtx, cancelUpload := context.WithCancel(context.Background())
-
-	if _, err := sess.RequestFile(uploadCtx, "image.bin"); err != nil {
-		t.Fatalf("RequestFile: %v", err)
-	}
-
-	cancelUpload()
-
-	if err := awaitResult(t, sendFileAsync(context.Background(), sess, "out.bin", 4, strings.NewReader("data"))); err != nil {
-		t.Errorf("SendFile after the upload was cancelled: %v", err)
-	}
+	requestFileAsync(ctx, sess, "image.bin", io.Discard)
+	awaitAnnouncement(t, stream, pb.FileTransferRequest_DIRECTION_UPLOAD)
 }
 
 // A context already cancelled when the module calls in is refused outright,
@@ -805,7 +782,7 @@ func TestTransferRefusedOnCancelledContext(t *testing.T) {
 	dead, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	if _, err := sess.RequestFile(dead, "image.bin"); !errors.Is(err, context.Canceled) {
+	if err := sess.RequestFile(dead, "image.bin", io.Discard); !errors.Is(err, context.Canceled) {
 		t.Errorf("RequestFile err = %v, want context.Canceled", err)
 	}
 

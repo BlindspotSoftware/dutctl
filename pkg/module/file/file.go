@@ -201,16 +201,10 @@ func (f *File) uploadFile(ctx context.Context, sesh module.Session, src, dest st
 	l := log.FromContext(ctx)
 	l.Debug(fmt.Sprintf("uploading %q from client to %q on dutagent", src, dest))
 
-	// Request file from client
-	fileReader, err := sesh.RequestFile(ctx, src)
-	if err != nil {
-		return fmt.Errorf("failed to request file from client: %w", err)
-	}
-
 	// Create parent directories
 	destDir := filepath.Dir(dest)
 
-	err = os.MkdirAll(destDir, DefaultDirPerm)
+	err := os.MkdirAll(destDir, DefaultDirPerm)
 	if err != nil {
 		return fmt.Errorf("failed to create parent directories for %q: %w", dest, err)
 	}
@@ -220,7 +214,7 @@ func (f *File) uploadFile(ctx context.Context, sesh module.Session, src, dest st
 		return fmt.Errorf("failed to parse permission %q: %w", f.Permission, err)
 	}
 
-	bytesWritten, err := writeUpload(l, fileReader, dest, fs.FileMode(mode))
+	bytesWritten, err := writeUpload(ctx, l, sesh, src, dest, fs.FileMode(mode))
 	if err != nil {
 		return err
 	}
@@ -231,11 +225,16 @@ func (f *File) uploadFile(ctx context.Context, sesh module.Session, src, dest st
 	return nil
 }
 
-// writeUpload writes the file arriving on r to dest. RequestFile returns before
-// the client has opened the file, so the upload is staged in the run's own
-// directory, and dest is opened only once all of it arrived: a file the client
-// cannot send leaves dest as it was.
-func writeUpload(l *slog.Logger, r io.Reader, dest string, perm fs.FileMode) (int64, error) {
+// writeUpload requests src from the client and writes it to dest. The upload
+// is staged in the run's own directory, and dest is opened only once all of it
+// arrived: a file the client cannot send leaves dest as it was.
+func writeUpload(
+	ctx context.Context,
+	l *slog.Logger,
+	sesh module.Session,
+	src, dest string,
+	perm fs.FileMode,
+) (int64, error) {
 	dir, err := os.MkdirTemp("", "file-")
 	if err != nil {
 		return 0, fmt.Errorf("failed to create a directory for the upload: %w", err)
@@ -256,9 +255,9 @@ func writeUpload(l *slog.Logger, r io.Reader, dest string, perm fs.FileMode) (in
 	// Read back below through the same descriptor, so its close cannot lose data.
 	defer func() { _ = staged.Close() }()
 
-	size, err := io.Copy(staged, r)
+	err = sesh.RequestFile(ctx, src, staged)
 	if err != nil {
-		return 0, fmt.Errorf("failed to receive file data: %w", err)
+		return 0, fmt.Errorf("failed to request file from client: %w", err)
 	}
 
 	_, err = staged.Seek(0, io.SeekStart)
@@ -271,7 +270,7 @@ func writeUpload(l *slog.Logger, r io.Reader, dest string, perm fs.FileMode) (in
 		return 0, fmt.Errorf("failed to create destination file %q: %w", dest, err)
 	}
 
-	_, err = io.Copy(dstFile, staged)
+	size, err := io.Copy(dstFile, staged)
 	// A failed close can mean the data did not reach the disk in full.
 	err = errors.Join(err, dstFile.Close())
 	if err != nil {

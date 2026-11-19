@@ -32,54 +32,71 @@ var ErrSessionClosed = errors.New("session is closed")
 // transfer of the session runs: a session carries one transfer at a time.
 var errTransferInProgress = errors.New("another file transfer is in progress")
 
-// errTransferRemoved fails the reader of an upload that the agent dropped.
-var errTransferRemoved = errors.New("transfer removed")
+// transferEnd is the end of a transfer. The module's side asks for it with
+// endTransfer, toClientWorker tells the client, and finish settles it.
+type transferEnd struct {
+	// mu guards ending and endErr.
+	mu sync.Mutex
+	// ending is set once the module's side is done with the transfer, for
+	// toClientWorker to tell the client: endErr is why, or nil for an upload
+	// whose file is complete.
+	ending bool
+	endErr error
 
-// uploadState represents an upload from client to agent (a file the module
-// requested via RequestFile). Chunks arriving from the client are written to
-// file; the module reads them through reader.
-type uploadState struct {
-	transferID  string
-	metadata    *pb.FileMetadata
-	lastChunk   int32 // last received chunk number, for sequence validation
-	file        *io.PipeWriter
-	reader      *io.PipeReader
-	requestSent bool // whether the initial FileTransferRequest has been announced
-	mu          sync.Mutex
-
-	// aborted is closed once the context the module passed to RequestFile
-	// ended, which ends the upload.
-	aborted <-chan struct{}
-
-	// delivering is set while deliverChunk writes a chunk into the pipe. The
-	// client sends a chunk only after the last one was acknowledged, so one
-	// that arrives meanwhile breaks the protocol.
-	delivering bool
-	// ackPending marks a chunk the module has read, for toClientWorker to
-	// acknowledge: ackNext is the next chunk expected, and ackFinal says the
-	// chunk was the last one, which completes the upload.
-	ackPending bool
-	ackNext    int32
-	ackFinal   bool
-
-	// done is closed once the transfer is released, freeing the context watcher.
-	done      chan struct{}
-	closeOnce sync.Once
+	// done is closed once the transfer ended, and err is its outcome then.
+	done chan struct{}
+	err  error
+	once sync.Once
 }
 
-// close releases the upload once, ending the module's reader and a
-// deliverChunk blocked in the pipe write with err, or with io.EOF for a nil
-// err. CloseWithError is safe concurrently with Write.
-func (u *uploadState) close(err error) {
-	u.closeOnce.Do(func() {
-		// done first: a module that sees the end of its reader may start the
-		// next transfer at once.
-		close(u.done)
+// pending returns whether the module's side asked to end the transfer, and why.
+func (e *transferEnd) pending() (bool, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 
-		if u.file != nil {
-			u.file.CloseWithError(err)
-		}
+	return e.ending, e.endErr
+}
+
+// finish ends the transfer with err, unless it ended already, and returns the
+// outcome.
+func (e *transferEnd) finish(err error) error {
+	e.once.Do(func() {
+		e.err = err
+		close(e.done)
 	})
+
+	return e.err
+}
+
+// uploadState represents an upload from client to agent (a file the module
+// requested via RequestFile). fromClientWorker hands each chunk to RequestFile,
+// which writes it to the module's writer.
+type uploadState struct {
+	transferID string
+	metadata   *pb.FileMetadata
+
+	// announced says that the client was asked for the file. Only
+	// toClientWorker uses it.
+	announced bool
+	// lastChunk is the number of the last chunk handed over, for the order
+	// check. Only fromClientWorker uses it.
+	lastChunk int32
+
+	// chunks hands a chunk from fromClientWorker to RequestFile. Unbuffered:
+	// fromClientWorker reads past a chunk only once RequestFile has written the
+	// one before.
+	chunks chan *pb.FileChunk
+
+	// mu guards ackPending and ackNext.
+	mu sync.Mutex
+	// ackPending marks a chunk RequestFile has written, for toClientWorker to
+	// acknowledge; ackNext is the next chunk expected.
+	ackPending bool
+	ackNext    int32
+
+	// end is how the upload ends: nil once the whole file is in the module's
+	// writer, or why it is not.
+	end transferEnd
 }
 
 // downloadState represents a download from agent to client (a file the module
@@ -93,14 +110,11 @@ type downloadState struct {
 	// toClientWorker uses it.
 	announced bool
 
-	// mu guards chunk, failErr and awaitingFinalAck.
+	// mu guards chunk and awaitingFinalAck.
 	mu sync.Mutex
 	// chunk is the chunk SendFile handed over that toClientWorker has not sent
 	// yet, nil while there is none.
 	chunk *pb.FileChunk
-	// failErr is why SendFile gave the download up, for toClientWorker to tell
-	// the client.
-	failErr error
 	// awaitingFinalAck is set once the final chunk goes out: only then does
 	// the client's TRANSFER_COMPLETE end the download.
 	awaitingFinalAck bool
@@ -109,22 +123,9 @@ type downloadState struct {
 	// one, as SendFile hands over one chunk at a time.
 	sent chan struct{}
 
-	// done is closed once the download ended, and err is its outcome then: nil
-	// once the client confirmed the file, or why the file did not arrive.
-	done      chan struct{}
-	err       error
-	closeOnce sync.Once
-}
-
-// finish ends the download with err, unless it ended already, and returns the
-// outcome.
-func (d *downloadState) finish(err error) error {
-	d.closeOnce.Do(func() {
-		d.err = err
-		close(d.done)
-	})
-
-	return d.err
+	// end is how the download ends: nil once the client confirmed the file, or
+	// why the file did not arrive.
+	end transferEnd
 }
 
 // backend implements the module.Session interface.
@@ -157,7 +158,7 @@ type backend struct {
 	// transferMu guards upload and download. A session carries one file
 	// transfer at a time (see claimTransfer): uploads flow client → agent
 	// (RequestFile), downloads agent → client (SendFile). The last one started
-	// stays here once it ended, its done closed.
+	// stays here once it ended, its end.done closed.
 	transferMu sync.Mutex
 	upload     *uploadState
 	download   *downloadState
@@ -167,7 +168,7 @@ type backend struct {
 	lastTransferID atomic.Uint64
 
 	// fileTransferNotifyCh wakes toClientWorker when a transfer has work for it:
-	// one to announce, a chunk to send or acknowledge, or a failure to report.
+	// one to announce, a chunk to send or acknowledge, or an end to report.
 	// Buffered to one; a pending signal coalesces with a fresh one.
 	fileTransferNotifyCh chan struct{}
 
@@ -213,68 +214,79 @@ func (s *backend) Println(a ...any) {
 	}
 }
 
-// RequestFile asks the client for the named file and returns a reader that
-// streams its contents as chunks arrive. It returns immediately; the returned
-// reader blocks until chunks are delivered (or the transfer is aborted).
+// RequestFile asks the client for the named file and writes it to w as its
+// chunks arrive, on the calling goroutine. It returns once the whole file is in
+// w and the client was told, or with the reason the file did not arrive.
 //
-// ctx bounds the transfer: cancelling it aborts the transfer and fails the
-// reader, as the end of the session does. The session imposes no limit of its
-// own.
+// ctx bounds the transfer: cancelling it ends the transfer between two chunks,
+// as an error from w does, and the client is told why. The session imposes no
+// limit of its own.
 //
 // It returns ErrSessionClosed if the session can no longer carry a transfer,
 // and errTransferInProgress while another transfer of the session runs.
-func (s *backend) RequestFile(ctx context.Context, name string) (io.Reader, error) {
+func (s *backend) RequestFile(ctx context.Context, name string, w io.Writer) error {
 	err := ctx.Err()
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	if s.isClosed() {
-		return nil, ErrSessionClosed
+		return ErrSessionClosed
 	}
 
-	reader, writer := io.Pipe()
 	state := &uploadState{
 		metadata: &pb.FileMetadata{
 			Path: name,
 			Name: name,
 			Size: 0, // unknown; the client has the file
 		},
-		file:      writer,
-		reader:    reader,
 		lastChunk: -1,
-		aborted:   ctx.Done(),
-		done:      make(chan struct{}),
+		chunks:    make(chan *pb.FileChunk),
+		end:       transferEnd{done: make(chan struct{})},
 	}
 
 	err = s.claimTransfer(state, nil)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	// Requesting and reading a file is the upstream (client → agent) flow.
 	log.Scope(s.logger(), scopeSessionUpstream).Debug("module requested file", "name", name, "transfer_id", state.transferID)
 
-	go s.watchUpload(ctx, state)
-
 	s.notifyFileTransfer()
 
-	return state.reader, nil
+	return s.receiveUpload(ctx, state, w)
 }
 
-// watchUpload drops the upload once ctx or the session ends, which fails the
-// module's reader and ends a deliverChunk blocked in the pipe. It returns once
-// the upload ended, so it never outlives it.
-func (s *backend) watchUpload(ctx context.Context, state *uploadState) {
-	select {
-	case <-ctx.Done():
-		s.logger().Debug("upload aborted by context", "transfer_id", state.transferID, "err", ctx.Err())
-	case <-s.done:
-	case <-state.done:
-		return
-	}
+// receiveUpload writes each chunk fromClientWorker hands over to w, up to the
+// final one. It returns the outcome of the upload.
+func (s *backend) receiveUpload(ctx context.Context, state *uploadState, w io.Writer) error {
+	for {
+		select {
+		case chunk := <-state.chunks:
+			_, err := w.Write(chunk.GetChunkData())
+			if err != nil {
+				return s.endTransfer(&state.end, fmt.Errorf("writing the file: %w", err))
+			}
 
-	state.close(errTransferRemoved)
+			if chunk.GetIsFinal() {
+				return s.endTransfer(&state.end, nil)
+			}
+
+			state.mu.Lock()
+			state.ackPending = true
+			state.ackNext = chunk.GetChunkNumber() + 1
+			state.mu.Unlock()
+
+			s.notifyFileTransfer()
+		case <-state.end.done:
+			return state.end.err
+		case <-ctx.Done():
+			return s.endTransfer(&state.end, fmt.Errorf("the module cancelled the transfer: %w", context.Cause(ctx)))
+		case <-s.done:
+			return state.end.finish(ErrSessionClosed)
+		}
+	}
 }
 
 // isClosed reports whether the broker's workers are gone. The done of a
@@ -295,22 +307,13 @@ func isDone(ch <-chan struct{}) bool {
 
 // claimTransfer makes upload or download, whichever is not nil, the transfer
 // the session carries and gives it an ID, or returns errTransferInProgress
-// while another transfer runs. An upload whose context ended counts as ended:
-// claimTransfer drops it, as watchUpload is about to.
+// while another transfer runs.
 func (s *backend) claimTransfer(upload *uploadState, download *downloadState) error {
 	s.transferMu.Lock()
 	defer s.transferMu.Unlock()
 
-	if s.download != nil && !isDone(s.download.done) {
+	if s.download != nil && !isDone(s.download.end.done) || s.upload != nil && !isDone(s.upload.end.done) {
 		return errTransferInProgress
-	}
-
-	if s.upload != nil && !isDone(s.upload.done) {
-		if !isDone(s.upload.aborted) {
-			return errTransferInProgress
-		}
-
-		s.upload.close(errTransferRemoved)
 	}
 
 	transferID := strconv.FormatUint(s.lastTransferID.Add(1), 10)
@@ -330,7 +333,7 @@ func (s *backend) currentUpload() *uploadState {
 	s.transferMu.Lock()
 	defer s.transferMu.Unlock()
 
-	if s.upload == nil || isDone(s.upload.done) {
+	if s.upload == nil || isDone(s.upload.end.done) {
 		return nil
 	}
 
@@ -342,7 +345,7 @@ func (s *backend) currentDownload() *downloadState {
 	s.transferMu.Lock()
 	defer s.transferMu.Unlock()
 
-	if s.download == nil || isDone(s.download.done) {
+	if s.download == nil || isDone(s.download.end.done) {
 		return nil
 	}
 
@@ -396,7 +399,7 @@ func (s *backend) SendFile(ctx context.Context, name string, size int64, r io.Re
 			Size: size,
 		},
 		sent: make(chan struct{}, 1),
-		done: make(chan struct{}),
+		end:  transferEnd{done: make(chan struct{})},
 	}
 
 	err = s.claimTransfer(nil, state)
@@ -427,7 +430,7 @@ func (s *backend) streamDownload(ctx context.Context, state *downloadState, r io
 		// clean end of file, not a read failure.
 		final := errors.Is(readErr, io.EOF)
 		if readErr != nil && !final {
-			return s.failDownload(state, fmt.Errorf("error reading file: %w", readErr))
+			return s.endTransfer(&state.end, fmt.Errorf("error reading file: %w", readErr))
 		}
 
 		state.mu.Lock()
@@ -467,31 +470,33 @@ func (s *backend) awaitDownload(ctx context.Context, state *downloadState, sent 
 	select {
 	case <-sent:
 		return false, nil
-	case <-state.done:
-		return true, state.err
+	case <-state.end.done:
+		return true, state.end.err
 	case <-ctx.Done():
-		return true, s.failDownload(state, fmt.Errorf("the module cancelled the transfer: %w", context.Cause(ctx)))
+		return true, s.endTransfer(&state.end, fmt.Errorf("the module cancelled the transfer: %w", context.Cause(ctx)))
 	case <-s.done:
-		return true, state.finish(ErrSessionClosed)
+		return true, state.end.finish(ErrSessionClosed)
 	}
 }
 
-// failDownload gives the download up with err. toClientWorker tells the client,
-// unless the client has not heard of the download yet, and ends it. failDownload
-// waits for that, so that the client hears why before the run ends, and returns
+// endTransfer ends a transfer from the module's side with err, nil for an
+// upload whose file is complete. toClientWorker tells the client, unless the
+// client has not heard of the transfer yet, and ends it. endTransfer waits for
+// that, so that the client hears of the end before the run ends, and returns
 // the outcome, which the client may have settled first.
-func (s *backend) failDownload(state *downloadState, err error) error {
-	state.mu.Lock()
-	state.failErr = err
-	state.mu.Unlock()
+func (s *backend) endTransfer(end *transferEnd, err error) error {
+	end.mu.Lock()
+	end.ending = true
+	end.endErr = err
+	end.mu.Unlock()
 
 	s.notifyFileTransfer()
 
 	select {
-	case <-state.done:
-		return state.err
+	case <-end.done:
+		return end.err
 	case <-s.done:
-		return state.finish(err)
+		return end.finish(err)
 	}
 }
 
@@ -503,94 +508,46 @@ func (s *backend) notifyFileTransfer() {
 	}
 }
 
-// registerUploadChunk validates a chunk received from the client and hands it
-// to deliverChunk, without waiting for the module to read it.
-func (s *backend) registerUploadChunk(transferID string, chunk *pb.FileChunk) error {
-	state := s.uploadByID(transferID)
+// deliverUploadChunk hands a chunk from the client to RequestFile, once
+// RequestFile has written the one before. A chunk of an upload that does not
+// run is dropped: the client may have sent it before it heard that the upload
+// ended.
+func (s *backend) deliverUploadChunk(ctx context.Context, chunk *pb.FileChunk) error {
+	state := s.uploadByID(chunk.GetTransferId())
 	if state == nil {
-		return fmt.Errorf("upload not found: %s", transferID)
+		s.logger().Debug("dropping chunk of an upload that does not run", "transfer_id", chunk.GetTransferId())
+
+		return nil
 	}
 
-	state.mu.Lock()
-	defer state.mu.Unlock()
-
-	// A gap, a repeat or a chunk ahead of the acknowledgment means the client
-	// is not speaking the protocol; there is no resend path, so the transfer
-	// cannot recover. Wrapping ErrBadFileTransfer lets the RPC layer report
-	// CodeInvalidArgument instead of a vague internal fault (see brokerError in
-	// cmds/dutagent).
+	// A gap or a repeat means the client is not speaking the protocol; there is
+	// no resend path, so the transfer cannot recover. Wrapping
+	// ErrBadFileTransfer lets the RPC layer report CodeInvalidArgument instead
+	// of a vague internal fault (see brokerError in cmds/dutagent).
 	expectedChunk := state.lastChunk + 1
 	if chunk.GetChunkNumber() != expectedChunk {
 		return fmt.Errorf("%w: chunk order violation: expected %d, got %d",
 			ErrBadFileTransfer, expectedChunk, chunk.GetChunkNumber())
 	}
 
-	if state.delivering || state.ackPending {
-		return fmt.Errorf("%w: chunk %d sent before chunk %d was acknowledged",
-			ErrBadFileTransfer, chunk.GetChunkNumber(), state.lastChunk)
-	}
-
 	state.lastChunk = chunk.GetChunkNumber()
-	state.delivering = true
 
-	go s.deliverChunk(state, chunk)
+	select {
+	case state.chunks <- chunk:
+	case <-state.end.done:
+	case <-ctx.Done():
+	}
 
 	return nil
 }
 
-// deliverChunk writes a chunk into the upload's pipe, which returns once the
-// module has read all of it, and then has toClientWorker acknowledge it. It
-// runs on a goroutine of its own, so that fromClientWorker never waits for a
-// module: console input keeps flowing. Every abort closes the pipe, which ends
-// the write. The end of the file comes from ackUploadChunk, once the client has
-// been told.
-func (s *backend) deliverChunk(state *uploadState, chunk *pb.FileChunk) {
-	_, err := state.file.Write(chunk.GetChunkData())
-
-	state.mu.Lock()
-
-	state.delivering = false
-
-	if err == nil {
-		state.ackPending = true
-		state.ackNext = chunk.GetChunkNumber() + 1
-		state.ackFinal = chunk.GetIsFinal()
-	}
-
-	state.mu.Unlock()
-
-	if err == nil {
-		s.notifyFileTransfer()
-	}
-}
-
-// takeUploadAck returns the acknowledgment an upload is waiting for, if any,
-// and clears it.
-func (s *backend) takeUploadAck(state *uploadState) (bool, int32, bool) {
-	state.mu.Lock()
-	defer state.mu.Unlock()
-
-	pending := state.ackPending
-	state.ackPending = false
-
-	return pending, state.ackNext, state.ackFinal
-}
-
-// removeUpload ends the running upload with transferID, if there is one, so
-// that the module's reader fails: with the client's reason when the client gave
-// one.
+// removeUpload ends the running upload with transferID, if there is one, with
+// the client's reason, which RequestFile then returns.
 func (s *backend) removeUpload(transferID, clientReason string) {
 	state := s.uploadByID(transferID)
-	if state == nil {
-		return
+	if state != nil {
+		_ = state.end.finish(fmt.Errorf("client could not send %q: %s", state.metadata.GetPath(), clientReason))
 	}
-
-	err := errTransferRemoved
-	if clientReason != "" {
-		err = fmt.Errorf("client could not send %q: %s", state.metadata.GetPath(), clientReason)
-	}
-
-	state.close(err)
 }
 
 // removeDownload ends the running download with transferID, if there is one,
@@ -598,7 +555,7 @@ func (s *backend) removeUpload(transferID, clientReason string) {
 func (s *backend) removeDownload(transferID string, err error) {
 	state := s.downloadByID(transferID)
 	if state != nil {
-		_ = state.finish(err)
+		_ = state.end.finish(err)
 	}
 }
 
@@ -615,6 +572,6 @@ func (s *backend) confirmDownload(transferID string) {
 	state.mu.Unlock()
 
 	if awaiting {
-		_ = state.finish(nil)
+		_ = state.end.finish(nil)
 	}
 }

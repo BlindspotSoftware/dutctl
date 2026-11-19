@@ -10,7 +10,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -299,21 +298,16 @@ func (f *Flash) cmdline(operation op, image string) []string {
 
 // uploadImage receives the flash image file from sesh and saves it locally.
 func uploadImage(ctx context.Context, sesh module.Session, remote, local string) error {
-	img, err := sesh.RequestFile(ctx, remote)
-	if err != nil {
-		return fmt.Errorf("request flash image from client for write operation: %w", err)
-	}
-
 	imgFile, err := os.Create(local)
 	if err != nil {
 		return fmt.Errorf("save flash image on dutagent for write operation: %w", err)
 	}
 
-	_, err = io.Copy(imgFile, img)
+	err = sesh.RequestFile(ctx, remote, imgFile)
 	// A failed close can mean the image did not reach the disk in full.
 	err = errors.Join(err, imgFile.Close())
 	if err != nil {
-		return fmt.Errorf("save flash image on dutagent for write operation: %w", err)
+		return fmt.Errorf("receive flash image from client for write operation: %w", err)
 	}
 
 	return nil

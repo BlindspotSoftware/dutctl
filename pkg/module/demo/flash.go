@@ -7,8 +7,8 @@ package demo
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
-	"io"
 	"path/filepath"
 
 	"github.com/BlindspotSoftware/dutctl/pkg/module"
@@ -84,21 +84,18 @@ func writeFlash(ctx context.Context, s module.Session, name string) error {
 		return err
 	}
 
-	r, err := s.RequestFile(ctx, name)
+	var data imageBuffer
+
+	err = s.RequestFile(ctx, name, &data)
+	if errors.Is(err, errImageTooLarge) {
+		return fmt.Errorf("%s does not fit the flash of %d bytes", name, board.FlashSize)
+	}
+
 	if err != nil {
 		return fmt.Errorf("requesting %s: %w", name, err)
 	}
 
-	data, err := io.ReadAll(io.LimitReader(r, board.FlashSize+1))
-	if err != nil {
-		return fmt.Errorf("receiving %s: %w", name, err)
-	}
-
-	if len(data) > board.FlashSize {
-		return fmt.Errorf("%s does not fit the flash of %d bytes", name, board.FlashSize)
-	}
-
-	img := board.Image{Name: filepath.Base(name), Data: data}
+	img := board.Image{Name: filepath.Base(name), Data: data.Bytes()}
 
 	err = demoBoard.Flash(img)
 	if err != nil {
@@ -108,6 +105,22 @@ func writeFlash(ctx context.Context, s module.Session, name string) error {
 	s.Printf("Wrote %s to the flash.\n", img.Summary())
 
 	return nil
+}
+
+// errImageTooLarge is what imageBuffer returns for an image larger than the
+// flash.
+var errImageTooLarge = errors.New("image larger than the flash")
+
+// imageBuffer collects an image as it arrives, and refuses one larger than the
+// flash before it is held in memory.
+type imageBuffer struct{ bytes.Buffer }
+
+func (b *imageBuffer) Write(p []byte) (int, error) {
+	if b.Len()+len(p) > board.FlashSize {
+		return 0, errImageTooLarge
+	}
+
+	return b.Buffer.Write(p)
 }
 
 // readFlash sends the content of the flash to the user as name.

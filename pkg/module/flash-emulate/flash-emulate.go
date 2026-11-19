@@ -10,7 +10,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -171,21 +170,16 @@ func (e *FlashEmulate) cmdline(image string) []string {
 
 // uploadImage receives the firmware image file from sesh and saves it locally.
 func uploadImage(ctx context.Context, sesh module.Session, remote, local string) error {
-	img, err := sesh.RequestFile(ctx, remote)
-	if err != nil {
-		return fmt.Errorf("request image from client: %w", err)
-	}
-
 	imgFile, err := os.Create(local)
 	if err != nil {
 		return fmt.Errorf("save image on dutagent: %w", err)
 	}
 
-	_, err = io.Copy(imgFile, img)
+	err = sesh.RequestFile(ctx, remote, imgFile)
 	// A failed close can mean the image did not reach the disk in full.
 	err = errors.Join(err, imgFile.Close())
 	if err != nil {
-		return fmt.Errorf("save image on dutagent: %w", err)
+		return fmt.Errorf("receive image from client: %w", err)
 	}
 
 	return nil

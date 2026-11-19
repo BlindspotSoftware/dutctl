@@ -25,19 +25,19 @@ superseding ADR or is breaking.
   output keeps its order. The only buffered one among them is `fileTransferNotifyCh`, of
   capacity 1, a wake-up for `toClientWorker` in which signals coalesce. Every send on the stream
   goes through `sendToClient`: `toClientWorker` sends the module's output, the console events,
-  the downloads and the acknowledgments of upload chunks; `fromClientWorker` only answers the
-  client's transfer requests and refuses its broken chunks. An upload chunk waits for the module
-  in a `deliverChunk` goroutine of its own, never in `fromClientWorker`, and holds no lock there.
+  the requests for uploads, the downloads, the acknowledgments of upload chunks and the end of
+  each transfer; `fromClientWorker` only answers the client's transfer requests and refuses its
+  broken chunks. `fromClientWorker` hands an upload chunk to `RequestFile` over an unbuffered
+  channel and holds no lock while it waits.
   → https://github.com/BlindspotSoftware/dutctl/blob/main/docs/decisions/0040-transfer-files-in-chunks-over-the-run-stream.md#decision-outcome
 - [CORE-3] `Broker.Start` sets the fields that the module-facing methods read without a lock (the
   channels, `done`, `log`) before it starts the workers, and nothing reassigns them later. The
   fields that `backend.mu` guards, `currentConsole` and `lastConsoleID`, are read and written
-  only under it. `SendFile` reads the module's reader on the module's goroutine and hands
-  `toClientWorker` one chunk at a time; the session never reads or closes that reader on a
-  goroutine of its own. An upload ends when its context or the session ends, through a watcher
-  that ends with the upload. A session carries one transfer at a time, in `upload` or `download`
-  under `transferMu`: `claimTransfer` refuses a second one while the first runs, and an upload
-  frees the session before its reader reports the end.
+  only under it. `SendFile` reads the module's reader, and `RequestFile` writes the module's
+  writer, on the module's goroutine, one chunk at a time; the session never uses either on a
+  goroutine of its own. Both return only once their transfer ended. A session carries one
+  transfer at a time, in `upload` or `download` under `transferMu`: `claimTransfer` refuses a
+  second one while the first runs.
   → https://github.com/BlindspotSoftware/dutctl/blob/main/internal/dutagent/session/session.go
 - [CORE-4] A module has one console at a time: a second `OpenConsole` ends the first. Input or
   control that is not marked for the open console is dropped, never kept for a later one. A

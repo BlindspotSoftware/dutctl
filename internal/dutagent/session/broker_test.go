@@ -293,7 +293,7 @@ func TestBrokerSessionCallsUnblockAfterTeardown(t *testing.T) {
 		_, stdoutErr = con.Stdout.Write([]byte("x"))
 		_, stderrErr = con.Stderr.Write([]byte("x"))
 		_, stdinErr = io.ReadAll(con.Stdin)
-		_, reqErr = sess.RequestFile(ctx, "f")
+		reqErr = sess.RequestFile(ctx, "f", io.Discard)
 		sendFileErr = sess.SendFile(ctx, "f", 4, strings.NewReader("data"))
 	}()
 

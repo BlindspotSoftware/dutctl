@@ -91,26 +91,28 @@ func (s *backend) sendOrStop(stream Stream, res *pb.RunResponse) (bool, error) {
 	}
 }
 
-// sendDownloadError reports why SendFile gave a download up to the client and
-// ends the download. The failure itself is not fatal to the run. Only a failure
-// to deliver the report is, and that is returned.
-func sendDownloadError(stream Stream, s *backend, download *downloadState, err error) error {
-	s.logger().Warn("download failed", "transfer_id", download.transferID, "err", err)
-
-	res := &pb.RunResponse{
-		Msg: &pb.RunResponse_FileTransferResponse{
-			FileTransferResponse: &pb.FileTransferResponse{
-				TransferId:        download.transferID,
-				Status:            pb.FileTransferResponse_STATUS_ERROR,
-				ErrorMessage:      err.Error(),
-				NextChunkExpected: 0,
-			},
-		},
+// sendTransferEnd tells the client how the module's side ended a transfer, and
+// ends it: with the status ERROR and err, or with TRANSFER_COMPLETE for a nil
+// err, as only an upload ends. The failure itself is not fatal to the run. Only
+// a failure to deliver the message is, and that is returned.
+func sendTransferEnd(stream Stream, s *backend, transferID string, end *transferEnd, err error) error {
+	res := &pb.FileTransferResponse{
+		TransferId: transferID,
+		Status:     pb.FileTransferResponse_STATUS_TRANSFER_COMPLETE,
 	}
 
-	sendErr := s.sendToClient(stream, res)
+	if err != nil {
+		s.logger().Warn("file transfer failed", "transfer_id", transferID, "err", err)
 
-	_ = download.finish(err)
+		res.Status = pb.FileTransferResponse_STATUS_ERROR
+		res.ErrorMessage = err.Error()
+	}
+
+	sendErr := s.sendToClient(stream, &pb.RunResponse{
+		Msg: &pb.RunResponse_FileTransferResponse{FileTransferResponse: res},
+	})
+
+	_ = end.finish(err)
 
 	return sendErr
 }
@@ -147,21 +149,18 @@ func sendDownloadMetadata(stream Stream, s *backend, download *downloadState) (b
 // would leave SendFile waiting for a chunk that never went out, with nothing on
 // the error channel.
 func handleDownloadFileTransfer(stream Stream, s *backend, download *downloadState) (bool, error) {
-	download.mu.Lock()
-	failErr := download.failErr
-	download.mu.Unlock()
-
 	// A failed download is reported, so the client's run fails instead of
 	// ending without the file. One the client has not heard of yet is only
 	// ended.
-	if failErr != nil && !download.announced {
-		_ = download.finish(failErr)
+	failed, failErr := download.end.pending()
+	if failed && !download.announced {
+		_ = download.end.finish(failErr)
 
 		return false, nil
 	}
 
-	if failErr != nil {
-		return true, sendDownloadError(stream, s, download, failErr)
+	if failed {
+		return true, sendTransferEnd(stream, s, download.transferID, &download.end, failErr)
 	}
 
 	// Announce the transfer before streaming any chunk.
@@ -212,12 +211,7 @@ func sendDownloadChunk(stream Stream, s *backend, download *downloadState) (bool
 // terminate instead of leaving the transfer stalled.
 func processFileTransfers(stream Stream, s *backend) (bool, error) {
 	if upload := s.currentUpload(); upload != nil {
-		acked, err := ackUploadChunk(stream, s, upload)
-		if acked || err != nil {
-			return acked, err
-		}
-
-		return announceUpload(stream, s, upload)
+		return handleUploadFileTransfer(stream, s, upload)
 	}
 
 	if download := s.currentDownload(); download != nil {
@@ -227,75 +221,71 @@ func processFileTransfers(stream Stream, s *backend) (bool, error) {
 	return false, nil
 }
 
-// announceUpload sends the FileTransferRequest of the upload, unless it went
-// out already. It reports whether it sent one.
-func announceUpload(stream Stream, s *backend, upload *uploadState) (bool, error) {
-	// metadata is written by fromClientWorker under upload.mu, so read it (and
-	// requestSent) under the same lock.
-	upload.mu.Lock()
-	metadata := upload.metadata
-	alreadySent := upload.requestSent
-	upload.mu.Unlock()
+// handleUploadFileTransfer advances the upload: ask the client for the file,
+// acknowledge the chunk RequestFile has written, or tell the client how the
+// upload ended. An upload the client has not heard of yet is only ended. It
+// reports whether a message was sent.
+func handleUploadFileTransfer(stream Stream, s *backend, upload *uploadState) (bool, error) {
+	ending, endErr := upload.end.pending()
 
-	if metadata == nil || alreadySent {
+	switch {
+	case ending && !upload.announced:
+		_ = upload.end.finish(endErr)
+
 		return false, nil
+	case ending:
+		return true, sendTransferEnd(stream, s, upload.transferID, &upload.end, endErr)
+	case !upload.announced:
+		return announceUpload(stream, s, upload)
+	default:
+		return ackUploadChunk(stream, s, upload)
 	}
+}
 
-	res := &pb.RunResponse{
+// announceUpload asks the client for the file of the upload. It reports
+// whether it sent the request.
+func announceUpload(stream Stream, s *backend, upload *uploadState) (bool, error) {
+	err := s.sendToClient(stream, &pb.RunResponse{
 		Msg: &pb.RunResponse_FileTransferRequest{
 			FileTransferRequest: &pb.FileTransferRequest{
 				TransferId: upload.transferID,
-				Metadata:   metadata,
+				Metadata:   upload.metadata,
 				Direction:  pb.FileTransferRequest_DIRECTION_UPLOAD,
 			},
 		},
-	}
-
-	err := s.sendToClient(stream, res)
+	})
 	if err != nil {
 		return false, err
 	}
 
-	upload.mu.Lock()
-	upload.requestSent = true
-	upload.mu.Unlock()
+	upload.announced = true
 
 	return true, nil
 }
 
-// ackUploadChunk acknowledges the upload chunk the module has read, and
-// completes the upload once its final chunk was read: it tells the client, and
-// only then ends the module's file. A module that saw the end first could
-// return, and the end of the run would drop the upload before the client heard
-// of it. It reports whether it sent anything.
+// ackUploadChunk acknowledges the chunk RequestFile has written, if there is
+// one, so that the client sends the next. It reports whether it sent one.
 func ackUploadChunk(stream Stream, s *backend, upload *uploadState) (bool, error) {
-	pending, next, final := s.takeUploadAck(upload)
+	upload.mu.Lock()
+	pending, next := upload.ackPending, upload.ackNext
+	upload.ackPending = false
+	upload.mu.Unlock()
+
 	if !pending {
 		return false, nil
 	}
 
-	statuses := []pb.FileTransferResponse_Status{pb.FileTransferResponse_STATUS_CHUNK_RECEIVED}
-	if final {
-		statuses = append(statuses, pb.FileTransferResponse_STATUS_TRANSFER_COMPLETE)
-	}
-
-	for idx, status := range statuses {
-		err := s.sendToClient(stream, &pb.RunResponse{
-			Msg: &pb.RunResponse_FileTransferResponse{
-				FileTransferResponse: &pb.FileTransferResponse{
-					TransferId:        upload.transferID,
-					Status:            status,
-					NextChunkExpected: next,
-				},
+	err := s.sendToClient(stream, &pb.RunResponse{
+		Msg: &pb.RunResponse_FileTransferResponse{
+			FileTransferResponse: &pb.FileTransferResponse{
+				TransferId:        upload.transferID,
+				Status:            pb.FileTransferResponse_STATUS_CHUNK_RECEIVED,
+				NextChunkExpected: next,
 			},
-		})
-		if err != nil {
-			return idx > 0, err
-		}
-	}
-
-	if final {
-		upload.close(nil)
+		},
+	})
+	if err != nil {
+		return false, err
 	}
 
 	return true, nil
@@ -410,7 +400,7 @@ func toClientWorker(ctx context.Context, stream Stream, s *backend) error {
 // closes the stream with io.EOF (both returning nil), or a stream error occurs
 // (returning that error).
 //
-//nolint:cyclop,funlen,gocognit,gocyclo,maintidx
+//nolint:cyclop,funlen,gocognit,gocyclo
 func fromClientWorker(ctx context.Context, stream Stream, s *backend) error {
 	l := log.FromContext(ctx)
 
@@ -496,18 +486,19 @@ func fromClientWorker(ctx context.Context, stream Stream, s *backend) error {
 					continue
 				}
 
-				transferID := chunk.GetTransferId()
-
-				registerErr := s.registerUploadChunk(transferID, chunk)
-				if registerErr != nil {
-					l.Warn("error registering upload chunk", "transfer_id", transferID, "err", registerErr)
+				// A broken chunk sequence is a protocol violation the client
+				// cannot recover from, so it terminates the run.
+				deliverErr := s.deliverUploadChunk(ctx, chunk)
+				if deliverErr != nil {
+					transferID := chunk.GetTransferId()
+					l.Warn("error delivering upload chunk", "transfer_id", transferID, "err", deliverErr)
 
 					res := &pb.RunResponse{
 						Msg: &pb.RunResponse_FileTransferResponse{
 							FileTransferResponse: &pb.FileTransferResponse{
 								TransferId:   transferID,
 								Status:       pb.FileTransferResponse_STATUS_ERROR,
-								ErrorMessage: fmt.Sprintf("error processing chunk: %v", registerErr),
+								ErrorMessage: fmt.Sprintf("error processing chunk: %v", deliverErr),
 							},
 						},
 					}
@@ -517,20 +508,8 @@ func fromClientWorker(ctx context.Context, stream Stream, s *backend) error {
 						return sendErr
 					}
 
-					s.removeUpload(transferID, "")
-
-					// An unknown transfer ID is a benign race: the agent may have
-					// dropped the upload while chunks were still in flight. A broken
-					// chunk sequence is not: it is a protocol violation the client
-					// cannot recover from, so it terminates the run.
-					if errors.Is(registerErr, ErrBadFileTransfer) {
-						return registerErr
-					}
-
-					continue
+					return deliverErr
 				}
-
-				// toClientWorker acknowledges the chunk once the module has read it.
 
 			case *pb.RunRequest_FileTransferRequest:
 				ftReq := msg.FileTransferRequest
@@ -539,11 +518,9 @@ func fromClientWorker(ctx context.Context, stream Stream, s *backend) error {
 				}
 
 				transferID := ftReq.GetTransferId()
-				metadata := ftReq.GetMetadata()
 
 				// Only uploads the module has requested are known here.
-				upload := s.uploadByID(transferID)
-				if upload == nil {
+				if s.uploadByID(transferID) == nil {
 					res := &pb.RunResponse{
 						Msg: &pb.RunResponse_FileTransferResponse{
 							FileTransferResponse: &pb.FileTransferResponse{
@@ -561,11 +538,6 @@ func fromClientWorker(ctx context.Context, stream Stream, s *backend) error {
 
 					continue
 				}
-
-				// Record the client's metadata (size/name), then accept.
-				upload.mu.Lock()
-				upload.metadata = metadata
-				upload.mu.Unlock()
 
 				res := &pb.RunResponse{
 					Msg: &pb.RunResponse_FileTransferResponse{

@@ -116,9 +116,7 @@ type Module interface {
 // and waits for before it returns.
 //
 // A session carries one file transfer at a time: while one runs, RequestFile
-// and SendFile return an error. An upload runs until its reader has returned
-// io.EOF or an error, or until its ctx ends, as Run's context does when Run
-// returns; a download runs until SendFile returns.
+// and SendFile return an error. Each transfer runs until its call returns.
 type Session interface {
 	// Print sends a message to the client. Implementations should wrap [fmt.Sprint].
 	// The message is displayed in the console or GUI of the client.
@@ -167,13 +165,18 @@ type Session interface {
 	// first, whose Stdin then reports io.EOF and whose writers fail. Print may
 	// be used while a console is open.
 	OpenConsole(opts ConsoleOptions) Console
-	// RequestFile requests a file from the client. The file is identified by its
-	// name and is made available to the module via the returned io.Reader.
+	// RequestFile requests the named file from the client and writes it to w as
+	// it arrives, on the calling goroutine. It returns once the whole file is in
+	// w, or with the reason the file did not arrive.
 	//
-	// ctx bounds the transfer: cancelling it aborts the transfer and fails the
-	// reader. Pass Run's context, or a deadline derived from it. The session
-	// imposes no limit of its own.
-	RequestFile(ctx context.Context, name string) (io.Reader, error)
+	// w must not wait for the user's input, on a console say: while w writes,
+	// that input can wait behind the next part of the file.
+	//
+	// ctx bounds the transfer: cancelling it ends the transfer between two
+	// writes to w, as an error from w does, and the client is told. Pass Run's
+	// context, or a deadline derived from it. The session imposes no limit of
+	// its own.
+	RequestFile(ctx context.Context, name string, w io.Writer) error
 	// SendFile sends a file to the client. size is the total file size in bytes,
 	// which the agent announces to the client.
 	//

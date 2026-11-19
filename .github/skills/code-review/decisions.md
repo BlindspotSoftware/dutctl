@@ -54,9 +54,11 @@ Links point to the ADR's Decision outcome.
   transfer. `FileTransferRequest`, `FileChunk` and `FileTransferResponse` move a file in chunks
   of at most 1 MiB, under an ID unique within the run. An upload sends a chunk only after the
   agent acknowledged the last one; a download streams, and the client confirms the complete file.
-  `RequestFile` and `SendFile` take a context that bounds the transfer. `SendFile` takes the size,
-  reads the module's reader on the module's goroutine, and returns once the client has confirmed
-  the file or with the reason it failed; the module keeps and closes its reader. A session carries
+  `RequestFile` and `SendFile` take a context that bounds the transfer. `RequestFile` writes the
+  file to the module's writer on the module's goroutine, and returns once the whole file is in it
+  or with the reason it failed. `SendFile` takes the size, reads the module's reader on the
+  module's goroutine, and returns once the client has confirmed the file or with the reason it
+  failed; the module keeps and closes its reader. A session carries
   one transfer at a time, and a second one while the first runs fails. The client writes a
   download to a temporary file and moves it into place once it is complete.
 

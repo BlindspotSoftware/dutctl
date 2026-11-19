@@ -5,6 +5,7 @@
 package session
 
 import (
+	"bytes"
 	"errors"
 	"io"
 	"sync"
@@ -274,15 +275,10 @@ func TestConsoleInputWithoutConsoleKeepsFilesFlowing(t *testing.T) {
 	got := make(chan result, 1)
 
 	go func() {
-		r, err := sess.RequestFile(t.Context(), "f.txt")
-		if err != nil {
-			got <- result{err: err}
+		var data bytes.Buffer
 
-			return
-		}
-
-		data, err := io.ReadAll(r)
-		got <- result{data: data, err: err}
+		err := sess.RequestFile(t.Context(), "f.txt", &data)
+		got <- result{data: data.Bytes(), err: err}
 	}()
 
 	announced := stream.await(t, 1)
@@ -494,104 +490,4 @@ func TestConsoleConcurrentUse(t *testing.T) {
 	if err := b.Stop(); err != nil {
 		t.Fatalf("Stop: %v", err)
 	}
-}
-
-// awaitUploads waits until the agent asked the client for n files and returns
-// their transfer IDs by name.
-func (s *consoleStream) awaitUploads(t *testing.T, n int) map[string]string {
-	t.Helper()
-
-	deadline := time.After(2 * time.Second)
-
-	for {
-		ids := map[string]string{}
-
-		for _, res := range s.responses() {
-			if r := res.GetFileTransferRequest(); r.GetDirection() == pb.FileTransferRequest_DIRECTION_UPLOAD {
-				ids[r.GetMetadata().GetPath()] = r.GetTransferId()
-			}
-		}
-
-		if len(ids) >= n {
-			return ids
-		}
-
-		select {
-		case <-deadline:
-			t.Fatalf("the agent asked for %d files, want %d", len(ids), n)
-		case <-time.After(5 * time.Millisecond):
-		}
-	}
-}
-
-// pushFile sends name as the client does for a small file: its size, then
-// its content in one final chunk.
-func (s *consoleStream) pushFile(t *testing.T, id, name string) {
-	t.Helper()
-
-	s.push(t, &pb.RunRequest{Msg: &pb.RunRequest_FileTransferRequest{FileTransferRequest: &pb.FileTransferRequest{
-		TransferId: id,
-		Metadata:   &pb.FileMetadata{Path: name, Name: name, Size: int64(len(name))},
-		Direction:  pb.FileTransferRequest_DIRECTION_UPLOAD,
-	}}})
-	s.push(t, &pb.RunRequest{Msg: &pb.RunRequest_FileChunk{FileChunk: &pb.FileChunk{
-		TransferId: id,
-		ChunkData:  []byte(name),
-		IsFinal:    true,
-	}}})
-}
-
-// Console input reaches the module while a chunk of a file waits for the
-// module to read it.
-func TestConsoleInputPassesAWaitingChunk(t *testing.T) {
-	b := &Broker{}
-	stream := newConsoleStream(t)
-	sess, _ := start(t, b, stream)
-
-	file, err := sess.RequestFile(t.Context(), "image.bin")
-	if err != nil {
-		t.Fatalf("RequestFile: %v", err)
-	}
-
-	con := sess.OpenConsole(module.ConsoleOptions{})
-
-	stream.pushFile(t, stream.awaitUploads(t, 1)["image.bin"], "image.bin")
-	stream.push(t, inputReq(1, "abc"))
-
-	if data, err := readChunk(t, con.Stdin); err != nil || data != "abc" {
-		t.Fatalf("stdin.Read = %q, %v; want \"abc\", nil", data, err)
-	}
-
-	if data, err := readChunk(t, file); err != nil || data != "image.bin" {
-		t.Fatalf("file read = %q, %v; want \"image.bin\"", data, err)
-	}
-}
-
-// The client learns that its upload is complete before the module sees the
-// end of the file. A module that returns at once ends the run, which drops the
-// upload, and the client must not miss the end of it then.
-func TestUploadCompleteBeforeTheModuleSeesItsEnd(t *testing.T) {
-	b := &Broker{}
-	stream := newConsoleStream(t)
-	sess, _ := start(t, b, stream)
-
-	file, err := sess.RequestFile(t.Context(), "image.bin")
-	if err != nil {
-		t.Fatalf("RequestFile: %v", err)
-	}
-
-	stream.pushFile(t, stream.awaitUploads(t, 1)["image.bin"], "image.bin")
-
-	data, err := io.ReadAll(file)
-	if err != nil || string(data) != "image.bin" {
-		t.Fatalf("read = %q, %v; want \"image.bin\"", data, err)
-	}
-
-	for _, res := range stream.responses() {
-		if res.GetFileTransferResponse().GetStatus() == pb.FileTransferResponse_STATUS_TRANSFER_COMPLETE {
-			return
-		}
-	}
-
-	t.Fatal("the module saw the end of the file before the client was told the upload is complete")
 }

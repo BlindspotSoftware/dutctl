@@ -87,21 +87,23 @@ func (m *Session) OpenConsole(opts module.ConsoleOptions) module.Console {
 }
 
 // RequestFile records the call in RequestFileCalled and the argument in RequestedFileName.
-// It returns RequestFileErr if that field is set; otherwise it returns RequestedFileResponse,
-// panicking if that field is unset.
-func (m *Session) RequestFile(_ context.Context, name string) (io.Reader, error) {
+// It returns RequestFileErr if that field is set; otherwise it copies RequestedFileResponse
+// to w and returns the error of the copy, panicking if that field is unset.
+func (m *Session) RequestFile(_ context.Context, name string, w io.Writer) error {
 	m.RequestFileCalled = true
 	m.RequestedFileName = name
 
 	if m.RequestFileErr != nil {
-		return nil, m.RequestFileErr
+		return m.RequestFileErr
 	}
 
 	if m.RequestedFileResponse == nil {
 		panic("mock.Session: RequestedFileResponse not set")
 	}
 
-	return m.RequestedFileResponse, nil
+	_, err := io.Copy(w, m.RequestedFileResponse)
+
+	return err
 }
 
 // SendFile records the call in SendFileCalled and the argument in SentFileName, then reads
