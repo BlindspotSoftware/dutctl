@@ -1,0 +1,2 @@
+# Registers the ttyUSB class at boot, before dutagent.service resolves DeviceAllow=char-ttyUSB.
+usbserial
