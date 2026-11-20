@@ -59,6 +59,22 @@ pre-stage:
       executable: chmod
       args: ["644", "[[attributes.ConfigFile]]"]
 
+  # Clear the pulls the GPIO-Sensor test checks before the agent starts, so the
+  # pulls it finds can only come from the gpio-sensor modules' Init, not from
+  # an earlier run.
+  - cmd: cmd
+    name: Clear the pull on GPIO 12 for the gpio-sensor test
+    transport: *transport_root
+    parameters:
+      executable: "pinctrl"
+      args: ["set", "12", "ip", "pn"]
+  - cmd: cmd
+    name: Clear the pull on GPIO 18 for the gpio-sensor test
+    transport: *transport_root
+    parameters:
+      executable: "pinctrl"
+      args: ["set", "18", "ip", "pn"]
+
   # ==============
   #  Start server
   # ==============

@@ -61,3 +61,38 @@ func memmapDo(op func()) error {
 
 	return nil
 }
+
+func (d *devmem) Input(p Pin, pl pull) error {
+	return memmapDo(func() {
+		pin := rpio.Pin(p)
+		pin.Input()
+
+		switch pl {
+		case pullUp:
+			pin.PullUp()
+		case pullDown:
+			pin.PullDown()
+		case pullOff:
+			pin.PullOff()
+		}
+	})
+}
+
+func (d *devmem) Read(p Pin) (State, error) {
+	var level rpio.State
+
+	err := memmapDo(func() {
+		pin := rpio.Pin(p)
+		pin.Input()
+		level = pin.Read()
+	})
+	if err != nil {
+		return Low, err
+	}
+
+	if level == rpio.High {
+		return High, nil
+	}
+
+	return Low, nil
+}

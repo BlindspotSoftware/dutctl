@@ -52,3 +52,28 @@ devices:
           - module: time-wait
             with:
               duration: 1s
+      power-sense:
+        desc: "Reads the power line back on the sensing pin"
+        uses:
+          - module: gpio-sensor
+            passthrough: true
+            with:
+              pin: 21
+              label: Power sense
+              # GPIO 21 is wired to GPIO 26, the power switch above
+      pull-up:
+        desc: "gpio-sensor with the internal pull-up"
+        uses:
+          - module: gpio-sensor
+            passthrough: true
+            with:
+              pin: 12
+              pull: up
+      pull-down:
+        desc: "gpio-sensor with the internal pull-down"
+        uses:
+          - module: gpio-sensor
+            passthrough: true
+            with:
+              pin: 18
+              pull: down

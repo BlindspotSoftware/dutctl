@@ -2,11 +2,12 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package gpio provides two modules that simulate buttons and switches
-// respectively, using the GPIO pins of the Raspberry Pi. The pins used must be
+// Package gpio provides modules that simulate buttons and switches and read
+// digital inputs, using the GPIO pins of the Raspberry Pi. The pins used must be
 // wired to the respective pads or connections on the DUT.
 //
-// For example, these modules can be used to pull down the reset line of the DUT.
+// For example, these modules can be used to pull down the reset line of the DUT
+// or to read whether its power-good signal is set.
 package gpio
 
 import (
@@ -32,10 +33,30 @@ func init() {
 			return &Switch{backendParser: backendFromOption}
 		},
 	})
+	module.Register(module.Record{
+		ID: "gpio-sensor",
+		New: func() module.Module {
+			return &Sensor{backendParser: backendFromOption}
+		},
+	})
 }
 
 // Pin is a raw BCM2835/BCM2711 GPIO pin number.
 type Pin uint8
+
+// maxPin is the highest GPIO number of the BCM2711 (Raspberry Pi 4); the
+// BCM2835 family ends at 53. go-rpio turns the number into a register offset
+// unchecked, so a larger one reaches registers that are not that pin's.
+const maxPin Pin = 57
+
+// validate reports a pin number that no supported chip has.
+func (p Pin) validate() error {
+	if p > maxPin {
+		return fmt.Errorf("pin %d does not exist: BCM GPIO numbers go from 0 to %d", p, maxPin)
+	}
+
+	return nil
+}
 
 // State is the logic level of a GPIO pin, either [Low] or [High].
 type State uint8
@@ -45,6 +66,10 @@ type gpio interface {
 	Low(pin Pin) error
 	High(pin Pin) error
 	Toggle(pin Pin) error
+	// Input sets pin to input mode with the given pull resistor.
+	Input(pin Pin, p pull) error
+	// Read sets pin to input mode and returns its level.
+	Read(pin Pin) (State, error)
 }
 
 // backendParser is a function that returns a gpio backend for the given name.
