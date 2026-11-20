@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"strings"
 	"sync"
@@ -131,6 +132,32 @@ func (s *clientStream) prints() []string {
 	return out
 }
 
+// awaitSent waits until the agent has sent a response that match accepts, and
+// returns it.
+func (s *clientStream) awaitSent(t *testing.T, match func(*pb.RunResponse) bool) *pb.RunResponse {
+	t.Helper()
+
+	deadline := time.After(5 * time.Second)
+
+	for {
+		s.mu.Lock()
+		for _, res := range s.sent {
+			if match(res) {
+				s.mu.Unlock()
+
+				return res
+			}
+		}
+		s.mu.Unlock()
+
+		select {
+		case <-deadline:
+			t.Fatal("the agent never sent the expected response")
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+}
+
 // funcModule adapts a function to module.Module, so each test states its
 // module's behavior inline.
 type funcModule func(ctx context.Context, s module.Session, args ...string) error
@@ -206,6 +233,58 @@ func TestRunSuccess(t *testing.T) {
 
 	if hold, ok := deviceHold(svc); ok {
 		t.Errorf("auto-lock still held after run returned: %+v", hold)
+	}
+}
+
+// SendFile returns once the client has confirmed the download, so the module,
+// and with it the run, ends only when the whole file has arrived.
+func TestRunEndsOnceTheClientHasTheDownload(t *testing.T) {
+	content := bytes.Repeat([]byte("firmware"), 300_000) // 2.4 MB, three chunks
+
+	svc := newRunService(func(ctx context.Context, s module.Session, _ ...string) error {
+		return s.SendFile(ctx, "out.bin", int64(len(content)), bytes.NewReader(content))
+	})
+
+	stream := newClientStream(t, commandReq(testDevice, testCommand))
+
+	done := make(chan error, 1)
+
+	go func() { done <- svc.run(context.Background(), stream, "alice") }()
+
+	final := stream.awaitSent(t, func(res *pb.RunResponse) bool { return res.GetFileChunk().GetIsFinal() })
+
+	select {
+	case err := <-done:
+		t.Fatalf("run returned %v before the client confirmed the download", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	stream.push(&pb.RunRequest{Msg: &pb.RunRequest_FileTransferResponse{
+		FileTransferResponse: &pb.FileTransferResponse{
+			TransferId: final.GetFileChunk().GetTransferId(),
+			Status:     pb.FileTransferResponse_STATUS_TRANSFER_COMPLETE,
+		},
+	}})
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("run: unexpected error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("run did not return after the client confirmed the download")
+	}
+
+	var got []byte
+
+	stream.mu.Lock()
+	for _, res := range stream.sent {
+		got = append(got, res.GetFileChunk().GetChunkData()...)
+	}
+	stream.mu.Unlock()
+
+	if !bytes.Equal(got, content) {
+		t.Errorf("client received %d bytes, want %d", len(got), len(content))
 	}
 }
 
@@ -938,9 +1017,10 @@ func TestRunModules(t *testing.T) {
 func TestRunHoldsDeviceUntilModulesReturn(t *testing.T) {
 	tests := []struct {
 		name string
-		// send is what the client sends once the module runs; nil means the
-		// client cancels and hangs up instead, unless agentAborts is set.
-		send        *pb.RunRequest
+		// breakUpload makes the module request a file, and the client answer
+		// with a chunk out of sequence. Without it or agentAborts, the client
+		// cancels and hangs up.
+		breakUpload bool
 		agentAborts bool // the agent aborts its running commands while stopping
 		wantCode    connect.Code
 		wantCause   error // the cause the module's context reports
@@ -957,14 +1037,12 @@ func TestRunHoldsDeviceUntilModulesReturn(t *testing.T) {
 			wantCause:   errAbortedByShutdown,
 		},
 		{
-			// A file nobody requested is a protocol violation that fails the
-			// upstream worker, which aborts the modules.
-			name: "client breaks the file protocol",
-			send: &pb.RunRequest{Msg: &pb.RunRequest_File{
-				File: &pb.File{Path: "unrequested", Content: []byte("x")},
-			}},
-			wantCode:  connect.CodeInvalidArgument,
-			wantCause: session.ErrBadFileTransfer,
+			// A gap in an upload's chunks is a protocol violation that fails
+			// the upstream worker, which aborts the modules.
+			name:        "client breaks the file protocol",
+			breakUpload: true,
+			wantCode:    connect.CodeInvalidArgument,
+			wantCause:   session.ErrBadFileTransfer,
 		},
 	}
 
@@ -979,8 +1057,14 @@ func TestRunHoldsDeviceUntilModulesReturn(t *testing.T) {
 				releaseOnce sync.Once
 			)
 
-			svc = newRunService(func(ctx context.Context, _ module.Session, _ ...string) error {
+			svc = newRunService(func(ctx context.Context, s module.Session, _ ...string) error {
 				close(started)
+
+				if tt.breakUpload {
+					// Returns once the broken file protocol ended the run.
+					_ = s.RequestFile(ctx, "image.bin", io.Discard)
+				}
+
 				<-ctx.Done()
 				cause = context.Cause(ctx)
 				close(stopping)
@@ -1016,8 +1100,14 @@ func TestRunHoldsDeviceUntilModulesReturn(t *testing.T) {
 			}
 
 			switch {
-			case tt.send != nil:
-				stream.push(tt.send)
+			case tt.breakUpload:
+				id := stream.awaitSent(t, func(res *pb.RunResponse) bool {
+					return res.GetFileTransferRequest().GetDirection() == pb.FileTransferRequest_DIRECTION_UPLOAD
+				}).GetFileTransferRequest().GetTransferId()
+
+				stream.push(&pb.RunRequest{Msg: &pb.RunRequest_FileChunk{
+					FileChunk: &pb.FileChunk{TransferId: id, ChunkNumber: 1},
+				}})
 			case tt.agentAborts:
 				abortAgent(errAbortedByShutdown)
 			default:

@@ -46,9 +46,7 @@ type Broker struct {
 func (b *Broker) init() {
 	b.session.printCh = make(chan string)
 	b.session.consoleCh = make(chan consoleEvent)
-	b.session.fileReqCh = make(chan string)
-	b.session.fileDownCh = make(chan chan []byte)
-	b.session.fileUpCh = make(chan chan []byte)
+	b.session.fileTransferNotifyCh = make(chan struct{}, 1)
 }
 
 // CloseConsole ends the console a module has open, if any, and tells the

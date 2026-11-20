@@ -57,7 +57,7 @@ also of the same type, overlap with it.
 - [MOD-9] A run's scratch files go into a directory made with `os.MkdirTemp("", "<module>-")` in
   `Run`, held in a local and removed in a `defer`, so it also goes after an error, a cancellation
   or a panic. Never a fixed path such as `./image`, and never create `$TMPDIR` itself: it must
-  exist. Close every file `Run` opens; a failed `Close` of a file it wrote is a failed write.
+  exist. Close every file `Run` opens. A failed `Close` of a file it wrote is a failed write.
   Destinations named by the user or the configuration are not scratch files.
   → https://github.com/BlindspotSoftware/dutctl/blob/main/docs/decisions/0037-keep-the-files-of-a-run-in-a-directory-of-its-own.md#decision-outcome
 - [MOD-10] `Run` reports every failure, missing or unknown arguments included, by returning an
@@ -77,10 +77,12 @@ also of the same type, overlap with it.
 
 ## Session and console
 
-- [MOD-13] `OpenConsole`, `Print`, `Printf`, `Println`, `RequestFile` and `SendFile` are called
-  from `Run`'s goroutine only. Other goroutines may only read the console's `Stdin` (one reader at
-  a time), close it, and write its `Stdout` and `Stderr`; stop every goroutine that uses the
-  console before `Run` returns.
+- [MOD-13] `OpenConsole`, `Print`, `Printf` and `Println` are called from `Run`'s goroutine only.
+  `RequestFile` and `SendFile` may also be called from a goroutine that `Run` starts and waits for,
+  one file at a time: a second transfer while one runs fails. The writer given to `RequestFile`
+  does not wait for the user's input. Other goroutines may only read the console's `Stdin` (one
+  reader at a time), close it, and write its `Stdout` and `Stderr`; stop every goroutine that uses
+  the console before `Run` returns.
   → https://github.com/BlindspotSoftware/dutctl/blob/main/pkg/module/module.go
 - [MOD-14] A console opens in the mode the module needs: `ConsoleLine`, the zero value, for
   prompts and piped input; `ConsoleRaw` for bridging a terminal line, such as a serial port. The
