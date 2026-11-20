@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.0.0-beta.3](https://github.com/BlindspotSoftware/dutctl/compare/v1.0.0-beta.2...v1.0.0-beta.3) (2026-11-20)
+
+
+### Features
+
+* add a gpio-sensor module ([2598a87](https://github.com/BlindspotSoftware/dutctl/commit/2598a87bf7fe31db7d5b7d87a1317a8c5e528e36))
+
+
+### Bug Fixes
+
+* serial ports work after a worker reboots ([2e6d007](https://github.com/BlindspotSoftware/dutctl/commit/2e6d007872a9e1380cec3d76dea2fecec370654c))
+
+
+### Other Work
+
+* bump charm.land/lipgloss/v2 from 2.0.6 to 2.1.0 ([fe82d1e](https://github.com/BlindspotSoftware/dutctl/commit/fe82d1e067950274aa2281136e05e86c3fe33eec))
+* bump golang.org/x/crypto from 0.58.0 to 0.59.0 ([b71534d](https://github.com/BlindspotSoftware/dutctl/commit/b71534d2ca1114305e9ba37ff77fe65e6a34aaee))
+
 ## [1.0.0-beta.2](https://github.com/BlindspotSoftware/dutctl/compare/v1.0.0-beta.1...v1.0.0-beta.2) (2026-11-16)
 
 
