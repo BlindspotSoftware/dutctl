@@ -1,0 +1,107 @@
+---
+name: GPIO-Sensor
+description: Read GPIO pins with gpio-sensor and check the pull resistors it sets.
+
+defaults:
+  transport_oscar: &transport_oscar
+    proto: ssh
+    options:
+      host: "[[attributes.Host]]"
+      user: oscar
+      identity_file: "/root/.ssh/fwci"
+      # TODO: The ssh keys (identity_file) are hard-coded in the FWCI docker at the moment
+
+stages:
+  # GPIO 21 is wired to GPIO 26, the power switch, so the sensor on 21 reads
+  # back whatever the switch drives.
+  - name: Read the power line back
+    steps:
+      - cmd: cmd
+        name: dutctl power off
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: ["-s", "[[attributes.DutagentEndpoint]]", "[[attributes.DeviceName]]", "power", "off"]
+
+      - cmd: cmd
+        name: sensor reads low while powered off
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: ["-s", "[[attributes.DutagentEndpoint]]", "[[attributes.DeviceName]]", "power-sense"]
+          expect:
+            - regex: ": inactive \\(low\\)"
+
+      - cmd: cmd
+        name: dutctl power on
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: ["-s", "[[attributes.DutagentEndpoint]]", "[[attributes.DeviceName]]", "power", "on"]
+
+      - cmd: cmd
+        name: sensor reads high while powered on
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: ["-s", "[[attributes.DutagentEndpoint]]", "[[attributes.DeviceName]]", "power-sense"]
+          expect:
+            - regex: ": active \\(high\\)"
+
+      - cmd: cmd
+        name: dutctl power off again
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: ["-s", "[[attributes.DutagentEndpoint]]", "[[attributes.DeviceName]]", "power", "off"]
+
+  # The sensors on GPIO 12 and 18 set their pull resistors in Init. pre.yaml
+  # clears both pulls before the agent starts, so a pull found here comes from
+  # Init and not from an earlier run. Nothing is wired to either pin, so the
+  # pull alone decides what the sensor reads. Each pin's register is checked
+  # before its level, so a failing read shows whether the pull was not set or
+  # was set and did not win.
+  - name: Pull resistors
+    steps:
+      - cmd: cmd
+        name: pull-up is set on GPIO 12
+        transport: *transport_oscar
+        parameters:
+          executable: pinctrl
+          args: ["get", "12"]
+          expect:
+            - regex: "ip +pu"
+
+      - cmd: cmd
+        name: pull-up pin reads high
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: ["-s", "[[attributes.DutagentEndpoint]]", "[[attributes.DeviceName]]", "pull-up"]
+          expect:
+            - regex: "GPIO 12: active \\(high\\)"
+
+      - cmd: cmd
+        name: pull-down is set on GPIO 18
+        transport: *transport_oscar
+        parameters:
+          executable: pinctrl
+          args: ["get", "18"]
+          expect:
+            - regex: "ip +pd"
+
+      - cmd: cmd
+        name: pull-down pin reads low
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: ["-s", "[[attributes.DutagentEndpoint]]", "[[attributes.DeviceName]]", "pull-down"]
+          expect:
+            - regex: "GPIO 18: inactive \\(low\\)"
