@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os"
 	"slices"
 	"sync"
@@ -172,6 +173,77 @@ func TestRunWithReleasesTheTerminal(t *testing.T) {
 	if after.Lflag != before.Lflag || after.Iflag != before.Iflag || after.Oflag != before.Oflag {
 		t.Errorf("terminal not restored after the runs: lflag %#x/%#x iflag %#x/%#x oflag %#x/%#x",
 			after.Lflag, before.Lflag, after.Iflag, before.Iflag, after.Oflag, before.Oflag)
+	}
+}
+
+// An interrupted run reaches the agent as a cancellation, not as the end of
+// the client's input: a module that ends on its input would otherwise end
+// before the cancellation arrives, and the run would count as a success. The
+// wrong order of the closes fails this test only when the client's HTTP/2
+// body writer runs between them, as it does on a busy machine.
+func TestRunWithInterruptedCancelsTheAgentsRun(t *testing.T) {
+	ended := make(chan error, 1)
+
+	agent := &scriptedAgent{}
+	agent.run = func(stream runStreamServer) error {
+		if _, err := agent.receive(stream); err != nil {
+			return err
+		}
+
+		if err := stream.Send(openRes(1, pb.ConsoleMode_CONSOLE_MODE_LINE)); err != nil {
+			return err
+		}
+
+		for {
+			if _, err := agent.receive(stream); err != nil {
+				ended <- err
+
+				return nil
+			}
+		}
+	}
+
+	input, feed, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() { _ = input.Close(); _ = feed.Close() })
+
+	app, _, _ := newConsoleApp(t, agent, input, "")
+
+	opened := make(chan struct{}, 1)
+	con := app.console.forRun()
+	con.onConsole = func(open, _ bool) {
+		if open {
+			opened <- struct{}{}
+		}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+
+	go func() { done <- app.runWith(ctx, con, app.agent(), "dev", "cmd", nil) }()
+
+	select {
+	case <-opened:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the console did not open")
+	}
+
+	cancel() // the signal
+
+	if err := awaitRun(t, done); !errors.Is(err, errInterrupted) {
+		t.Errorf("runWith = %v, want errInterrupted", err)
+	}
+
+	select {
+	case err := <-ended:
+		if errors.Is(err, io.EOF) {
+			t.Errorf("the agent saw the end of the client's input, not a cancelled run: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the agent's stream did not end")
 	}
 }
 
