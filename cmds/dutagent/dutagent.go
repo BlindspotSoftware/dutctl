@@ -38,7 +38,7 @@ const (
 	checkConfigInfo = `Only validate the provided DUT configuration, not starting the service`
 	dryRunInfo      = `Only run the initialization phase of the modules, not start the (includes validation of the configuration)`
 	serverInfo      = `Optional DUT Server to register with in the format: address[:port], the port defaults to ` + rpc.DefaultPort
-	versionFlagInfo = `Print version information and exit`
+	versionInfo     = `Print version information and exit`
 	logLevelInfo    = `Log level: debug, info, warn, or error`
 	logJSONInfo     = `Emit logs as JSON instead of human-readable text`
 )
@@ -55,7 +55,7 @@ func newAgent(stdout io.Writer, exitFunc func(int), args []string) *agent {
 	fs.BoolVar(&agt.checkConfig, "check-config", false, checkConfigInfo)
 	fs.BoolVar(&agt.dryRun, "dry-run", false, dryRunInfo)
 	fs.StringVar(&agt.server, "server", "", serverInfo)
-	fs.BoolVar(&agt.versionFlag, "v", false, versionFlagInfo)
+	fs.BoolVar(&agt.version, "v", false, versionInfo)
 	fs.StringVar(&agt.logLevel, "log", "info", logLevelInfo)
 	fs.BoolVar(&agt.logJSON, "log-json", false, logJSONInfo)
 	//nolint:errcheck // flag.Parse always returns no error because of flag.ExitOnError
@@ -70,7 +70,7 @@ type agent struct {
 	exit   func(int)
 
 	// flags
-	versionFlag bool
+	version     bool
 	address     string
 	configPath  string
 	checkConfig bool
@@ -246,7 +246,7 @@ func (agt *agent) start() {
 	base := log.New(os.Stderr, log.ParseLevel(agt.logLevel), agt.logJSON)
 	slog.SetDefault(log.Scope(base, "agent"))
 
-	if agt.versionFlag {
+	if agt.version {
 		agt.printVersion()
 		agt.exit(0)
 	}
