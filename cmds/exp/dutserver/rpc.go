@@ -224,7 +224,7 @@ var (
 // requested device, forwarding messages in both directions and bridging the
 // client and agent version headers.
 //
-//nolint:cyclop,gocognit,funlen
+//nolint:cyclop,gocognit,funlen // sets up the relay and runs both forwarding directions inline, sharing runCtx
 func (s *rpcService) Run(
 	ctx context.Context,
 	downstream *connect.BidiStream[pb.RunRequest, pb.RunResponse],

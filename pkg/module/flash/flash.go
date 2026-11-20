@@ -212,6 +212,9 @@ func (f *Flash) Run(ctx context.Context, sesh module.Session, args ...string) er
 	return nil
 }
 
+// imageArg is the index of the image file name in the arguments.
+const imageArg = 1
+
 // parseArgs returns the operation and the client's image path from "read|write <image>".
 func parseArgs(args []string) (op, string, error) {
 	if len(args) < 1 {
@@ -223,12 +226,11 @@ func parseArgs(args []string) (op, string, error) {
 		return "", "", fmt.Errorf("unknown operation %q", args[0])
 	}
 
-	//nolint:mnd
-	if len(args) < 2 {
+	if len(args) <= imageArg {
 		return "", "", errors.New("missing argument: image file name")
 	}
 
-	return operation, args[1], nil
+	return operation, args[imageArg], nil
 }
 
 func execute(ctx context.Context, sesh module.Session, tool string, args ...string) error {
