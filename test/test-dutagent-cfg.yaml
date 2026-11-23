@@ -77,3 +77,18 @@ devices:
             with:
               pin: 18
               pull: down
+      kvm-power:
+        desc: "ATX power through the tester's PiKVM (on|off|force-off|reset|force-reset|status)"
+        uses:
+          - module: pikvm
+            passthrough: true
+            with:
+              # The PiKVM's ATX board is wired to the tester, where
+              # test/fake-atx/ plays the mainboard. Keep in sync with PikvmHost
+              # in .firmwareci/duts/dut-rpi-dutctl-tester/dut.yaml.
+              host: "https://pikvm30.firmwareci.9e.network"
+              # The pre-stage in .firmwareci/duts/dut-rpi-dutctl-tester/pre.yaml
+              # puts the project secrets PIKVM_USER and PIKVM_PASSWORD here.
+              user: "@PIKVM_USER@"
+              password: "@PIKVM_PASSWORD@"
+              mode: power

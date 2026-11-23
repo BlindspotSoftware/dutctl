@@ -22,9 +22,12 @@ the CI runner, with the demo modules and the modules that need no hardware.
 What runs here is what only the tester can show: the Debian package installed
 on the arm64 target and its dutagent started, with an amd64 client on another
 machine reaching the agent over the network, and the modules that drive
-hardware, GPIO, the PDU, the SPI flash and the serial console, with that
-hardware wired up. The serial tests run against a socat pseudo-terminal pair on
-the tester, not a UART, until the tester gets a real one. Corner cases of
+hardware, GPIO, the PDU, the SPI flash, the serial console and the PiKVM, with
+that hardware wired up. The serial tests run against a socat pseudo-terminal
+pair on the tester, not a UART, until the tester gets a real one, and the PiKVM
+presses the buttons of a fake mainboard on the tester, `test/fake-atx/`. The
+PiKVM's credentials are the project secrets `PIKVM_USER` and `PIKVM_PASSWORD`,
+which `pre.yaml` writes into the agent configuration. Corner cases of
 dutctl itself belong in the layers below; corner cases of the hardware belong
 here.
 

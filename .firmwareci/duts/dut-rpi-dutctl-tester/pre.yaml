@@ -52,12 +52,22 @@ pre-stage:
       source: "[[input.CONFIG]]"
       destination: "[[attributes.ConfigFile]]"
 
+  # The config holds the PiKVM's credentials, and dutagent runs as root.
   - cmd: cmd
     name: chmod config file
     transport: *transport_root
     parameters:
       executable: chmod
-      args: ["644", "[[attributes.ConfigFile]]"]
+      args: ["600", "[[attributes.ConfigFile]]"]
+
+  # The PiKVM's credentials are project secrets, so they stay out of the
+  # repository; FirmwareCI masks them in the job's output. sed takes them
+  # as they are, so neither may contain |, &, \, ' or ".
+  - cmd: shell
+    name: Put the PiKVM credentials into the config file
+    transport: *transport_root
+    parameters:
+      command: "sed -i -e 's|@PIKVM_USER@|[[secrets.PIKVM_USER]]|' -e 's|@PIKVM_PASSWORD@|[[secrets.PIKVM_PASSWORD]]|' [[attributes.ConfigFile]]"
 
   # Clear the pulls the GPIO-Sensor test checks before the agent starts, so the
   # pulls it finds can only come from the gpio-sensor modules' Init, not from
