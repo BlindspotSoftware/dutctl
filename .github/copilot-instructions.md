@@ -26,8 +26,8 @@ needs.
   that keep every contract need none.
   → https://github.com/BlindspotSoftware/dutctl/blob/main/docs/decisions/README.md#when-to-write-an-adr
 - [GEN-2] A change must not contradict an accepted ADR; to reverse a decision, the pull request
-  adds a new ADR that supersedes the old one. ADR-0006, ADR-0012 and ADR-0030 are superseded by
-  ADR-0029, ADR-0028 and ADR-0036: never cite them as current.
+  adds a new ADR that supersedes the old one. ADR-0003, ADR-0006, ADR-0012 and ADR-0030 are
+  superseded by ADR-0040, ADR-0029, ADR-0028 and ADR-0036: never cite them as current.
   → https://github.com/BlindspotSoftware/dutctl/blob/main/docs/decisions/README.md#changing-a-decision
 - [GEN-3] A change users must adapt to is breaking: a renamed or removed configuration key,
   module ID or module option, a changed default or meaning of one, a removed, renamed or

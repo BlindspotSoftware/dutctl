@@ -65,15 +65,17 @@ message DetailsResponse {
 // to interact with the agent while the command runs. The first RunRequest of a
 // stream must carry a Command message.
 message RunRequest {
-  // 2 carried the Console message of older alphas. It stays reserved, so that
-  // a peer of an older alpha cannot misread a message of this one.
-  reserved 2;
-  reserved "console";
+  // 2 carried the Console message and 3 the unchunked File message of older
+  // alphas. They stay reserved, so that a peer of an older alpha cannot misread
+  // a message of this one.
+  reserved 2, 3;
+  reserved "console", "file";
   oneof msg {
     Command command = 1;
-    File file = 3;
     ConsoleInput console_input = 4;
     ConsoleControl console_control = 5;
+    FileChunk file_chunk = 9;
+    FileTransferResponse file_transfer_response = 10;
   }
 }
 
@@ -81,17 +83,21 @@ message RunRequest {
 // (Print), the traffic of a console and the events that frame it, or a file
 // transfer.
 message RunResponse {
-  // 2 carried the Console message of older alphas. It stays reserved, so that
-  // a peer of an older alpha cannot misread a message of this one.
-  reserved 2;
-  reserved "console";
+  // 2 carried the Console message, 3 and 4 the unchunked FileRequest and File
+  // messages of older alphas. They stay reserved, so that a peer of an older
+  // alpha cannot misread a message of this one. FileChunk and
+  // FileTransferResponse have the same numbers in RunRequest, since both
+  // directions carry them.
+  reserved 2, 3, 4;
+  reserved "console", "file_request", "file";
   oneof msg {
     Print print = 1;
-    FileRequest file_request = 3;
-    File file = 4;
     ConsoleOpen console_open = 5;
     ConsoleOutput console_output = 6;
     ConsoleClose console_close = 7;
+    FileTransferRequest file_transfer_request = 8;
+    FileChunk file_chunk = 9;
+    FileTransferResponse file_transfer_response = 10;
   }
 }
 
@@ -177,15 +183,45 @@ message ConsoleControl {
 // file transfers and output keep flowing.
 message ConsoleEof {}
 
-// FileRequest is used by the agent to request a file from the client.
-message FileRequest {
-  string path = 1;
+// FileChunk carries part of a file, from the side that has the file. A chunk
+// carries at most 1 MiB. Chunks are numbered from 0, and the last one is marked
+// final.
+message FileChunk {
+  string transfer_id = 1; // ID of the transfer
+  int32 chunk_number = 2; // Sequential chunk number (0-indexed)
+  bytes chunk_data = 3; // File data chunk (max 1 MiB)
+  int64 chunk_offset = 4; // Byte offset in the file
+  bool is_final = 5; // Whether this is the last chunk
+  int64 file_size = 7; // Size of the whole file, on chunk 0 only; 0 if unknown
 }
 
-// File is used by the client and the agent to transfer a file.
-message File {
-  string path = 1;
-  bytes content = 2;
+// FileTransferRequest is sent by the agent and starts every transfer: it asks
+// the client for a file to upload, or announces a download. No answer follows:
+// the side that has the file sends it as FileChunk messages at once.
+message FileTransferRequest {
+  string transfer_id = 1; // ID of the transfer, unique within the run
+
+  enum Direction {
+    DIRECTION_UNSPECIFIED = 0;
+    DIRECTION_UPLOAD = 1; // Client sending file to agent (agent requesting from client)
+    DIRECTION_DOWNLOAD = 2; // Agent sending file to client
+  }
+  Direction direction = 3; // Direction of file transfer
+  string path = 4; // Path of the file on the client
+}
+
+// FileTransferResponse ends a transfer: the receiver sends TRANSFER_COMPLETE
+// once it has the whole file, and either side sends ERROR when it cannot go
+// on. A sender stops on ERROR.
+message FileTransferResponse {
+  string transfer_id = 1; // ID of the transfer
+  enum Status {
+    STATUS_UNSPECIFIED = 0;
+    STATUS_TRANSFER_COMPLETE = 3; // The receiver has the whole file
+    STATUS_ERROR = 5; // The transfer failed
+  }
+  Status status = 2;
+  string error_message = 4; // Why the transfer failed, for ERROR
 }
 
 // LockRequest is sent by the client to acquire or extend a lock on a device.

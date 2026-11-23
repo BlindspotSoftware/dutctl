@@ -49,14 +49,14 @@ func (w *WrapDownload) Deinit(_ context.Context) error {
 }
 
 // Run sends downloadText as the file named by its argument.
-func (w *WrapDownload) Run(_ context.Context, s module.Session, args ...string) error {
+func (w *WrapDownload) Run(ctx context.Context, s module.Session, args ...string) error {
 	if len(args) != 1 {
 		return fmt.Errorf("expected one file, got %d arguments", len(args))
 	}
 
 	name := args[0]
 
-	err := s.SendFile(name, strings.NewReader(downloadText))
+	err := s.SendFile(ctx, name, int64(len(downloadText)), strings.NewReader(downloadText))
 	if err != nil {
 		return fmt.Errorf("sending %s: %w", name, err)
 	}

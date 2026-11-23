@@ -134,7 +134,13 @@ func TestModulesFile(t *testing.T) {
 		t.Errorf("the downloaded file holds %q (%v)", got, err)
 	}
 
+	// A file the client cannot send leaves the destination as it was.
 	mustFail(t, agt.dutctl(t, "host", "upload", "missing.txt"), 1, `"missing.txt"`)
+
+	got, err = os.ReadFile(filepath.Join(files, "uploaded.txt"))
+	if err != nil || string(got) != "from the client\n" {
+		t.Errorf("after the failed upload, the destination holds %q (%v)", got, err)
+	}
 }
 
 func TestModulesTimeWait(t *testing.T) {

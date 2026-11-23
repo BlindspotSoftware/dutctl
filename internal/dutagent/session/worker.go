@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/BlindspotSoftware/dutctl/internal/chanio"
 	"github.com/BlindspotSoftware/dutctl/internal/log"
 	"github.com/BlindspotSoftware/dutctl/pkg/module"
 
@@ -43,18 +42,60 @@ func wireConsoleMode(mode module.ConsoleMode) pb.ConsoleMode {
 	return pb.ConsoleMode_CONSOLE_MODE_LINE
 }
 
-// toClientWorker sends messages from the module session to the client.
-// It loops until ctx is cancelled (returning nil) or a stream send fails
-// (returning that error).
+// ErrStreamClosed reports that the stream could not accept a message because it
+// is already gone. It is not a run failure: the workers stop quietly on it,
+// since there is no client left to tell. Any other send error is real and
+// terminates the worker with that error.
+var ErrStreamClosed = errors.New("stream closed")
+
+// sendToClient sends res on the bidirectional stream. Only toClientWorker
+// calls it, as the connect BidiStream is not safe for concurrent Send calls.
 //
-// It is the one sender on the stream, so the order it receives in is the order
-// the client sees: a console's open event, which OpenConsole hands over before
-// it returns the console to the module, precedes the console's first output,
-// and the close event, handed over once the console's channels are ended,
-// follows its last. It reads output only from the open console; a console that
-// ended has no reader any more, and a writer still blocked on it fails.
+// A Send on an already-closed stream can panic. That is recovered into
+// ErrStreamClosed rather than a nil error: reporting success for a message that
+// was never sent leaves the caller believing a chunk landed, and leaves this
+// worker looping against a dead stream until something else cancels it.
+func (s *backend) sendToClient(stream Stream, res *pb.RunResponse) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger().Warn("recovered from panic in stream.Send", "err", r)
+
+			err = fmt.Errorf("%w: send panicked: %v", ErrStreamClosed, r)
+		}
+	}()
+
+	return stream.Send(res)
+}
+
+// sendOrStop delivers res and classifies a failure for a worker loop: a closed
+// stream stops the worker without failing the run (there is no client left to
+// report to), any other error is terminal and surfaces on the error channel.
+func (s *backend) sendOrStop(stream Stream, res *pb.RunResponse) (bool, error) {
+	sendErr := s.sendToClient(stream, res)
+
+	switch {
+	case sendErr == nil:
+		return false, nil
+	case errors.Is(sendErr, ErrStreamClosed):
+		return true, nil
+	default:
+		return true, sendErr
+	}
+}
+
+// toClientWorker sends module output, console traffic and the messages of file
+// transfers to the client. It loops until ctx is cancelled (returning nil) or a
+// stream send fails (returning that error).
 //
-//nolint:cyclop, funlen
+// It sends everything, so the order it receives in is the order the client
+// sees: a
+// console's open event, which OpenConsole hands over before it returns the
+// console to the module, precedes the console's first output, and the close
+// event, handed over once the console's channels are ended, follows its last.
+// It reads output only from the open console; a console that ended has no
+// reader any more, and a writer still blocked on it fails.
+//
+//nolint:cyclop // one select over every source of output; inherently branchy
 func toClientWorker(ctx context.Context, stream Stream, s *backend) error {
 	l := log.FromContext(ctx)
 
@@ -68,12 +109,18 @@ func toClientWorker(ctx context.Context, stream Stream, s *backend) error {
 		case <-ctx.Done():
 			return nil
 		case str := <-s.printCh:
+			// No shutdown check: Print refuses new output once shutdown starts, so
+			// anything already on the channel was accepted and must still be sent.
 			res := &pb.RunResponse{
 				Msg: &pb.RunResponse_Print{Print: &pb.Print{Text: []byte(str)}},
 			}
 
-			err := stream.Send(res)
-			if err != nil {
+			stop, err := s.sendOrStop(stream, res)
+			if stop {
+				if err != nil {
+					l.Warn("error sending print", "err", err)
+				}
+
 				return err
 			}
 		case event := <-s.consoleCh:
@@ -82,8 +129,8 @@ func toClientWorker(ctx context.Context, stream Stream, s *backend) error {
 				current = event.console
 			}
 
-			err := stream.Send(event.response())
-			if err != nil {
+			stop, err := s.sendOrStop(stream, event.response())
+			if stop {
 				return err
 			}
 		case bytes := <-current.stdout():
@@ -91,8 +138,8 @@ func toClientWorker(ctx context.Context, stream Stream, s *backend) error {
 				Msg: &pb.RunResponse_ConsoleOutput{ConsoleOutput: &pb.ConsoleOutput{Data: &pb.ConsoleOutput_Stdout{Stdout: bytes}}},
 			}
 
-			err := stream.Send(res)
-			if err != nil {
+			stop, err := s.sendOrStop(stream, res)
+			if stop {
 				return err
 			}
 		case bytes := <-current.stderr():
@@ -100,64 +147,25 @@ func toClientWorker(ctx context.Context, stream Stream, s *backend) error {
 				Msg: &pb.RunResponse_ConsoleOutput{ConsoleOutput: &pb.ConsoleOutput{Data: &pb.ConsoleOutput_Stderr{Stderr: bytes}}},
 			}
 
-			err := stream.Send(res)
-			if err != nil {
+			stop, err := s.sendOrStop(stream, res)
+			if stop {
 				return err
 			}
-		case name := <-s.fileReqCh:
-			// Record the in-flight file before sending the request: the client's
-			// response is driven by this Send, so setting currentFile afterwards
-			// could race a fast response that fromClientWorker validates against
-			// currentFile (see the currentFile guards there).
-			s.setCurrentFile(name)
-
-			res := &pb.RunResponse{
-				Msg: &pb.RunResponse_FileRequest{FileRequest: &pb.FileRequest{Path: name}},
-			}
-
-			err := stream.Send(res)
-			if err != nil {
+		case res := <-s.fileOut:
+			// As for Print, what the module handed over is sent.
+			stop, err := s.sendOrStop(stream, res)
+			if stop {
 				return err
 			}
-		case file := <-s.fileDownCh:
-			// The channel is fed and closed by SendFile right after the
-			// rendezvous, so this read always terminates: pass a nil done.
-			r, err := chanio.NewChanReader(file, nil, l)
-			if err != nil {
-				return err
-			}
-
-			content, err := io.ReadAll(r)
-			if err != nil {
-				return err
-			}
-
-			name := s.currentFileName()
-
-			l.Debug("file received from module", "name", name, "bytes", len(content))
-
-			res := &pb.RunResponse{
-				Msg: &pb.RunResponse_File{
-					File: &pb.File{
-						Path:    name,
-						Content: content,
-					},
-				},
-			}
-
-			err = stream.Send(res)
-			if err != nil {
-				return err
-			}
-
-			s.setCurrentFile("")
 		}
 	}
 }
 
-// fromClientWorker reads messages from the client and passes them to the module session.
-// It loops until ctx is cancelled or the client closes the stream with io.EOF (both
-// returning nil), or a stream/protocol error occurs (returning that error).
+// fromClientWorker reads messages from the client and routes them: console
+// input and control to the open console, and file-transfer messages (chunks
+// and responses) to the transfer they belong to. It loops until ctx is
+// cancelled or the client closes the stream with io.EOF (both returning nil),
+// or a stream error occurs (returning that error).
 //
 //nolint:cyclop,funlen,gocognit
 func fromClientWorker(ctx context.Context, stream Stream, s *backend) error {
@@ -239,49 +247,23 @@ func fromClientWorker(ctx context.Context, stream Stream, s *backend) error {
 				}
 			case *pb.RunRequest_ConsoleControl:
 				handleConsoleControl(ctx, s, msg.ConsoleControl)
-			case *pb.RunRequest_File:
-				fileMsg := msg.File
-				if fileMsg == nil {
-					return fmt.Errorf("%w: received empty file-message", ErrBadFileTransfer)
+			case *pb.RunRequest_FileChunk:
+				// A broken chunk is a protocol violation the client cannot
+				// recover from, so it ends the run, and the RPC's error tells
+				// the client.
+				err := s.deliverUploadChunk(ctx, msg.FileChunk)
+				if err != nil {
+					return err
 				}
-
-				want := s.currentFileName()
-				if want == "" {
-					return fmt.Errorf("%w: received file-message without a former request", ErrBadFileTransfer)
+			case *pb.RunRequest_FileTransferResponse:
+				err := s.endByClient(msg.FileTransferResponse)
+				if err != nil {
+					return err
 				}
+			case *pb.RunRequest_Command:
+				// Command starts a run and is handled by the RPC entrypoint, not
+				// here; it should not arrive during an active session.
 
-				path := fileMsg.GetPath()
-				content := fileMsg.GetContent()
-
-				if content == nil {
-					return fmt.Errorf("%w: received file-message without content", ErrBadFileTransfer)
-				}
-
-				if path != want {
-					return fmt.Errorf("%w: received file-message %q but requested %q", ErrBadFileTransfer, path, want)
-				}
-
-				l.Debug("received file from client", "name", path, "bytes", len(content))
-
-				file := make(chan []byte, 1)
-
-				// Hand the file to the module's RequestFile. Unlike the stdin
-				// send above, the receiver is the module goroutine, which may
-				// already be gone on teardown; guard the send with ctx.Done so an
-				// abandoned transfer cannot wedge this worker (and, through
-				// wg.Wait, the broker) forever. The buffered content send and
-				// close below never block once the rendezvous succeeds.
-				select {
-				case s.fileUpCh <- file:
-				case <-ctx.Done():
-					return nil
-				}
-
-				file <- content
-
-				close(file)
-
-				s.setCurrentFile("")
 			default:
 				l.Warn("unexpected message type", "type", fmt.Sprintf("%T", msg))
 			}

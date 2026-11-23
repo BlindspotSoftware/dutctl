@@ -13,6 +13,8 @@ import (
 
 	"github.com/BlindspotSoftware/dutctl/internal/log"
 	"github.com/BlindspotSoftware/dutctl/pkg/module"
+
+	pb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1"
 )
 
 // numWorkers is the number of broker workers. One worker handles module-to-client communication,
@@ -46,9 +48,7 @@ type Broker struct {
 func (b *Broker) init() {
 	b.session.printCh = make(chan string)
 	b.session.consoleCh = make(chan consoleEvent)
-	b.session.fileReqCh = make(chan string)
-	b.session.fileDownCh = make(chan chan []byte)
-	b.session.fileUpCh = make(chan chan []byte)
+	b.session.fileOut = make(chan *pb.RunResponse)
 }
 
 // CloseConsole ends the console a module has open, if any, and tells the
