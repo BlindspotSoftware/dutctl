@@ -104,3 +104,36 @@ func TestBackendFromOption(t *testing.T) {
 		})
 	}
 }
+
+func TestActiveLevel(t *testing.T) {
+	if got := activeLevel(false); got != High {
+		t.Errorf("activeLevel(false) = %d, want High", got)
+	}
+
+	if got := activeLevel(true); got != Low {
+		t.Errorf("activeLevel(true) = %d, want Low", got)
+	}
+}
+
+func TestDrive(t *testing.T) {
+	tests := []struct {
+		level    State
+		wantHigh bool
+	}{
+		{level: High, wantHigh: true},
+		{level: Low, wantHigh: false},
+	}
+
+	for _, tt := range tests {
+		m := &MockGpio{}
+
+		err := drive(m, 17, tt.level)
+		if err != nil {
+			t.Fatalf("drive(%d): unexpected error: %v", tt.level, err)
+		}
+
+		if m.HighCalled != tt.wantHigh || m.LowCalled == tt.wantHigh {
+			t.Errorf("drive(%d): High called %t, Low called %t", tt.level, m.HighCalled, m.LowCalled)
+		}
+	}
+}

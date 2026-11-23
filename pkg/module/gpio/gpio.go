@@ -40,6 +40,16 @@ const (
 	High State = 1
 )
 
+// activeLevel is the level that means active: [Low] for an active low signal,
+// [High] otherwise. activeLevel(!activeLow) is the inactive level.
+func activeLevel(activeLow bool) State {
+	if activeLow {
+		return Low
+	}
+
+	return High
+}
+
 // pinLabel is "<label> (GPIO <pin>)", or "GPIO <pin>" without a label.
 func pinLabel(label string, pin Pin) string {
 	if label == "" {
@@ -58,6 +68,15 @@ type gpio interface {
 	Input(pin Pin, p pull) error
 	// Read sets pin to input mode and returns its level.
 	Read(pin Pin) (State, error)
+}
+
+// drive sets pin to level through g.
+func drive(g gpio, pin Pin, level State) error {
+	if level == High {
+		return g.High(pin)
+	}
+
+	return g.Low(pin)
 }
 
 // pull is the internal resistor a GPIO input pin is connected through.

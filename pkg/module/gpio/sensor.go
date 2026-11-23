@@ -143,13 +143,8 @@ func (sn *Sensor) Run(_ context.Context, sesh module.Session, args ...string) er
 		return err
 	}
 
-	active := level == High
-	if sn.ActiveLow {
-		active = !active
-	}
-
 	activity, levelName := "inactive", "low"
-	if active {
+	if level == activeLevel(sn.ActiveLow) {
 		activity = "active"
 	}
 

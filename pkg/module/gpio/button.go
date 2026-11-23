@@ -149,11 +149,7 @@ func (b *Button) Run(ctx context.Context, s module.Session, args ...string) erro
 // idle drives the pin to the level of a released button: high if the button is
 // active low, low otherwise.
 func (b *Button) idle() error {
-	if b.ActiveLow {
-		return b.gpio.High(b.Pin)
-	}
-
-	return b.gpio.Low(b.Pin)
+	return drive(b.gpio, b.Pin, activeLevel(!b.ActiveLow))
 }
 
 // sleepCtx pauses for d, returning ctx.Err() if ctx is done first. A non-positive
