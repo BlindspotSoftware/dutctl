@@ -9,7 +9,7 @@ require (
 	connectrpc.com/connect v1.21.1
 	github.com/bougou/go-ipmi v0.8.2
 	github.com/charmbracelet/colorprofile v0.4.3
-	github.com/charmbracelet/x/ansi v0.11.9
+	github.com/charmbracelet/x/ansi v0.11.10
 	github.com/charmbracelet/x/vt v0.1.0
 	github.com/go-playground/validator/v10 v10.30.6
 	github.com/google/go-cmp v0.7.0
