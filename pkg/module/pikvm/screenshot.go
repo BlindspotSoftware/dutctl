@@ -29,14 +29,14 @@ func (p *PiKVM) handleScreenshot(ctx context.Context, s module.Session) error {
 			)
 		}
 
-		return fmt.Errorf("failed to capture screenshot: %v", err)
+		return fmt.Errorf("failed to capture screenshot: %w", err)
 	}
 	defer resp.Body.Close()
 
 	// Read the screenshot data
 	screenshotData, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return fmt.Errorf("failed to read screenshot data: %v", err)
+		return fmt.Errorf("failed to read screenshot data: %w", err)
 	}
 
 	// Generate filename with timestamp
@@ -47,7 +47,7 @@ func (p *PiKVM) handleScreenshot(ctx context.Context, s module.Session) error {
 	// Send the screenshot to the client
 	err = s.SendFile(ctx, filename, int64(len(screenshotData)), bytes.NewReader(screenshotData))
 	if err != nil {
-		return fmt.Errorf("failed to send screenshot to client: %v", err)
+		return fmt.Errorf("failed to send screenshot to client: %w", err)
 	}
 
 	s.Printf("Screenshot sent successfully: %s\n", filename)

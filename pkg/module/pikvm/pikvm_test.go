@@ -81,10 +81,10 @@ func TestInitWithInvalidTimeout(t *testing.T) {
 		Mode:     "screenshot",
 	}
 
-	// Should still succeed but fall back to default timeout
+	// An invalid option fails Init, so that the agent does not start with it.
 	err := p.Init(t.Context())
-	if err != nil {
-		t.Fatalf("Init should succeed with invalid timeout (falls back to default): %v", err)
+	if err == nil || !strings.Contains(err.Error(), "invalid timeout") {
+		t.Fatalf("Init with an invalid timeout = %v, want an invalid timeout error", err)
 	}
 }
 

@@ -7,12 +7,14 @@ package pikvm
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
+	"github.com/BlindspotSoftware/dutctl/internal/log"
 	"github.com/BlindspotSoftware/dutctl/pkg/module"
 )
 
@@ -31,6 +33,7 @@ const (
 	invalidCharNewline = "\n"
 	invalidCharReturn  = "\r"
 	defaultKeyDelay    = 500 * time.Millisecond
+	releaseTimeout     = 5 * time.Second // for the keys still held when a combo fails
 	keyMetaLeft        = "MetaLeft"
 )
 
@@ -85,16 +88,11 @@ func parseKeyboardFlags(args []string) (time.Duration, []string, error) {
 func (p *PiKVM) handleKeyboardCommandRouter(ctx context.Context, s module.Session, args []string) error {
 	delay, remaining, err := parseKeyboardFlags(args)
 	if err != nil {
-		s.Printf("Error: %v\n", err)
-		s.Println("Usage: keyboard [--delay <duration>] <action> ...")
-
-		return nil
+		return fmt.Errorf("%w (usage: [--delay <duration>] <action> [arguments])", err)
 	}
 
 	if len(remaining) == 0 {
-		s.Println("Keyboard command requires an action: type|key|key-combo")
-
-		return nil
+		return errors.New("keyboard requires an action: type, key or key-combo")
 	}
 
 	command := strings.ToLower(remaining[0])
@@ -107,25 +105,19 @@ func (p *PiKVM) handleKeyboardCommand(ctx context.Context, s module.Session, com
 	switch command {
 	case typeCmd:
 		if len(args) < minArgsRequired {
-			s.Println("Error: 'type' command requires text argument")
-
-			return nil
+			return errors.New("type requires the text to type")
 		}
 
 		return p.handleType(ctx, s, strings.Join(args[1:], " "))
 	case key:
 		if len(args) < minArgsRequired {
-			s.Println("Error: 'key' command requires key name argument")
-
-			return nil
+			return errors.New("key requires a key name")
 		}
 
 		return p.handleKey(ctx, s, args[1])
 	case keyCombo:
 		if len(args) < minArgsRequired {
-			s.Println("Error: 'key-combo' command requires key combination argument")
-
-			return nil
+			return errors.New("key-combo requires a key combination such as Ctrl+Alt+Delete")
 		}
 
 		return p.handleCombo(ctx, s, args[1], delay)
@@ -155,7 +147,7 @@ func (p *PiKVM) handleType(ctx context.Context, s module.Session, text string) e
 	// Use the /api/hid/print endpoint for text input
 	resp, err := p.doRequest(ctx, http.MethodPost, "/api/hid/print?slow=true", bytes.NewBufferString(text), "text/plain", requestOptions{})
 	if err != nil {
-		return fmt.Errorf("failed to type text: %v", err)
+		return fmt.Errorf("failed to type text: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -174,7 +166,7 @@ func (p *PiKVM) handleKey(ctx context.Context, s module.Session, keyName string)
 	s.Printf("Sending key: %s\n", keyName)
 
 	// Send key press (press and release)
-	err = p.sendKeyRequest(ctx, fmt.Sprintf("/api/hid/events/send_key?key=%s", url.QueryEscape(mappedKey)))
+	err = p.sendKeyRequest(ctx, keyEvent(mappedKey, ""))
 	if err != nil {
 		return err
 	}
@@ -250,35 +242,73 @@ func (p *PiKVM) validateAndMapComboKeys(modifiers []string, mainKey string) (str
 
 // executeKeyCombo executes a key combination by pressing modifiers, main key, and releasing modifiers.
 func (p *PiKVM) executeKeyCombo(ctx context.Context, modifiers []string, mainKey string, delay time.Duration) error {
-	// Press down all modifier keys
+	// held counts the modifiers that may be down, modifiers[:held]. A modifier
+	// left down stays held on the DUT, so they are released also when a step
+	// fails or the run is cancelled.
+	held := 0
+
+	defer func() { p.releaseKeys(ctx, modifiers[:held]) }()
+
 	for _, modifier := range modifiers {
-		err := p.sendKeyRequest(ctx, fmt.Sprintf("/api/hid/events/send_key?key=%s&state=1", url.QueryEscape(modifier)))
+		// Counted before the request: a press that reached the PiKVM but whose
+		// answer was lost is released too.
+		held++
+
+		err := p.keyStep(ctx, keyEvent(modifier, "1"), delay)
 		if err != nil {
 			return err
 		}
-
-		time.Sleep(delay)
 	}
 
 	// Press and release the main key
-	err := p.sendKeyRequest(ctx, fmt.Sprintf("/api/hid/events/send_key?key=%s", url.QueryEscape(mainKey)))
+	err := p.keyStep(ctx, keyEvent(mainKey, ""), delay)
 	if err != nil {
 		return err
 	}
 
-	time.Sleep(delay)
-
 	// Release all modifier keys in reverse order
-	for idx := len(modifiers) - 1; idx >= 0; idx-- {
-		err := p.sendKeyRequest(ctx, fmt.Sprintf("/api/hid/events/send_key?key=%s&state=0", url.QueryEscape(modifiers[idx])))
+	for ; held > 0; held-- {
+		err := p.keyStep(ctx, keyEvent(modifiers[held-1], "0"), delay)
 		if err != nil {
 			return err
 		}
-
-		time.Sleep(delay)
 	}
 
 	return nil
+}
+
+// keyStep sends the key event at urlPath and then waits for delay.
+func (p *PiKVM) keyStep(ctx context.Context, urlPath string, delay time.Duration) error {
+	err := p.sendKeyRequest(ctx, urlPath)
+	if err != nil {
+		return err
+	}
+
+	return wait(ctx, delay)
+}
+
+// releaseKeys releases keys in reverse order, also once ctx has ended.
+func (p *PiKVM) releaseKeys(ctx context.Context, keys []string) {
+	release, cancel := context.WithTimeout(context.WithoutCancel(ctx), releaseTimeout)
+	defer cancel()
+
+	for idx := len(keys) - 1; idx >= 0; idx-- {
+		err := p.sendKeyRequest(release, keyEvent(keys[idx], "0"))
+		if err != nil {
+			log.FromContext(ctx).Warn("releasing a held key failed", "key", keys[idx], "err", err)
+		}
+	}
+}
+
+// keyEvent returns the path that sends key: pressed with state "1", released
+// with "0", and pressed and released with "".
+func keyEvent(key, state string) string {
+	query := url.Values{"key": {key}}
+	if state != "" {
+		query.Set("state", state)
+	}
+
+	return "/api/hid/events/send_key?" + query.Encode()
 }
 
 // sendKeyRequest sends a key request to PiKVM.

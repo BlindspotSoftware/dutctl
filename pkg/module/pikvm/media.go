@@ -16,8 +16,8 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -35,13 +35,13 @@ const (
 )
 
 const (
-	safetyMargin         = 10 * 1024 * 1024 // 10 MB safety margin
-	scanningDelay        = 5 * time.Second  // Delay after deleting to allow PiKVM storage to update
-	maxDeletionRetries   = 10               // Maximum number of images to delete before giving up
-	bytesPerMB           = 1024 * 1024      // Bytes per megabyte
-	imageWaitTimeout     = 60 * time.Second // Timeout waiting for image to be ready
-	imageWaitInterval    = 1 * time.Second  // Interval between image status checks
-	remoteDownloadTimout = 3600             // Timeout in seconds for remote image downloads
+	safetyMargin          = 10 * 1024 * 1024 // 10 MB safety margin
+	scanningDelay         = 5 * time.Second  // Delay after deleting to allow PiKVM storage to update
+	maxDeletionRetries    = 10               // Maximum number of images to delete before giving up
+	bytesPerMB            = 1024 * 1024      // Bytes per megabyte
+	imageWaitTimeout      = 60 * time.Second // Timeout waiting for image to be ready
+	imageWaitInterval     = 1 * time.Second  // Interval between image status checks
+	remoteDownloadTimeout = 3600             // Timeout in seconds for remote image downloads
 )
 
 var ErrMissingImage = errors.New("image not found in storage")
@@ -98,9 +98,7 @@ type StoragePart struct {
 // handleMediaCommandRouter routes media commands based on the first argument.
 func (p *PiKVM) handleMediaCommandRouter(ctx context.Context, s module.Session, args []string) error {
 	if len(args) == 0 {
-		s.Println("Media command requires an action: mount|mount-url|unmount|media-status")
-
-		return nil
+		return errors.New("media requires an action: mount, mount-url, unmount or media-status")
 	}
 
 	command := strings.ToLower(args[0])
@@ -113,19 +111,13 @@ func (p *PiKVM) handleMediaCommand(ctx context.Context, s module.Session, comman
 	switch command {
 	case mount:
 		if len(args) < minArgsRequired {
-			s.Println("Error: 'mount' command requires file path argument")
-
-			return nil
+			return errors.New("mount requires the path of an image file")
 		}
 
-		precomputedHash, precomputedSize := parseMountArgs(args)
-
-		return p.handleMount(ctx, s, args[1], precomputedHash, precomputedSize)
+		return p.handleMount(ctx, s, args[1])
 	case mountURL:
 		if len(args) < minArgsRequired {
-			s.Println("Error: 'mount-url' command requires URL argument")
-
-			return nil
+			return errors.New("mount-url requires the URL of an image")
 		}
 
 		return p.handleMountURL(ctx, s, args[1])
@@ -138,135 +130,33 @@ func (p *PiKVM) handleMediaCommand(ctx context.Context, s module.Session, comman
 	}
 }
 
-// parseMountArgs extracts the optional precomputed hash and size from the
-// "mount <path> [hash] [size]" arguments. Missing values are returned as zero.
-func parseMountArgs(args []string) (string, int64) {
-	const (
-		hashArgIndex = 2
-		sizeArgIndex = 3
-	)
-
-	var (
-		hash string
-		size int64
-	)
-
-	if len(args) > hashArgIndex {
-		hash = args[hashArgIndex]
-	}
-
-	if len(args) > sizeArgIndex {
-		parsed, err := strconv.ParseInt(args[sizeArgIndex], 10, 64)
-		if err == nil {
-			size = parsed
-		}
-	}
-
-	return hash, size
-}
-
-func (p *PiKVM) handleMount(ctx context.Context, s module.Session, imagePath, precomputedHash string, precomputedSize int64) error {
+// handleMount transfers the image at imagePath from the client to the
+// dutagent, uploads it to the PiKVM if missing, and mounts it. The PiKVM keeps
+// images under their SHA-256, so an image uploaded before is not uploaded again.
+func (p *PiKVM) handleMount(ctx context.Context, s module.Session, imagePath string) error {
 	s.Printf("Preparing to mount image: %s\n", filepath.Base(imagePath))
 
-	// Fast path: if the client precomputed the hash and the image already
-	// exists on the PiKVM, mount it without transferring anything.
-	if precomputedHash != "" {
-		mounted, err := p.tryMountExisting(ctx, s, imagePath, precomputedHash)
-		if err != nil {
-			return err
-		}
-
-		if mounted {
-			return nil
-		}
-	}
-
-	return p.transferAndMount(ctx, s, imagePath, precomputedHash, precomputedSize)
-}
-
-// tryMountExisting attempts to mount an image already present on the PiKVM,
-// identified by its hash. It reports whether the image was found and mounted.
-func (p *PiKVM) tryMountExisting(ctx context.Context, s module.Session, imagePath, hashSum string) (bool, error) {
-	s.Printf("Using precomputed hash: %s\n", hashSum)
-
-	err := p.checkImageExists(ctx, hashSum)
-	if errors.Is(err, ErrMissingImage) {
-		s.Println("Image not found on PiKVM, will transfer from client.")
-
-		return false, nil
-	}
-
+	dir, err := os.MkdirTemp("", "pikvm-")
 	if err != nil {
-		return false, fmt.Errorf("failed to check if image exists: %v", err)
+		return fmt.Errorf("failed to create temporary directory: %w", err)
 	}
+	defer os.RemoveAll(dir)
 
-	s.Println("Image already exists on PiKVM, skipping upload.")
+	tmpPath := filepath.Join(dir, "image")
 
-	err = p.unplugUSBIfConnected(ctx, s)
+	size, hashSum, err := receiveImage(ctx, s, imagePath, tmpPath)
 	if err != nil {
-		return false, err
+		return err
 	}
 
-	err = p.configureAndPlugUSB(ctx, s, hashSum)
-	if err != nil {
-		return false, err
-	}
-
-	s.Printf("Image mounted successfully: %s\n", filepath.Base(imagePath))
-
-	return true, nil
-}
-
-// transferAndMount transfers the image from the client to the dutagent, uploads
-// it to the PiKVM if missing, and mounts it.
-func (p *PiKVM) transferAndMount(ctx context.Context, s module.Session, imagePath, precomputedHash string, precomputedSize int64) error {
-	tmpFile, err := os.CreateTemp("", "pikvm-image-*")
-	if err != nil {
-		return fmt.Errorf("failed to create temporary file: %w", err)
-	}
-
-	tmpPath := tmpFile.Name()
-	defer os.Remove(tmpPath) // Clean up temp file when done
-
-	s.Println("Transferring file from client...")
-
-	err = s.RequestFile(ctx, imagePath, tmpFile)
-	if err != nil {
-		tmpFile.Close()
-
-		return fmt.Errorf("failed to transfer file from client: %w", err)
-	}
-
-	bytesWritten, err := tmpFile.Seek(0, io.SeekCurrent)
-	tmpFile.Close()
-
-	if err != nil {
-		return fmt.Errorf("failed to size transferred file: %w", err)
-	}
-
-	s.Printf("Transferred %d bytes from client\n", bytesWritten)
-
-	hashSum := precomputedHash
-	fileSize := precomputedSize
-
-	// If hash wasn't precomputed, calculate it now.
-	if hashSum == "" {
-		hashSum, err = calcSHA256(tmpPath)
-		if err != nil {
-			return fmt.Errorf("failed to calculate image hash: %v", err)
-		}
-
-		s.Printf("Image hash: %s\n", hashSum)
-
-		fileSize = bytesWritten
-	}
+	s.Printf("Transferred %d bytes from client, image hash: %s\n", size, hashSum)
 
 	err = p.unplugUSBIfConnected(ctx, s)
 	if err != nil {
 		return err
 	}
 
-	err = p.uploadImageIfMissing(ctx, s, tmpPath, hashSum, fileSize)
+	err = p.uploadImageIfMissing(ctx, s, tmpPath, hashSum, size)
 	if err != nil {
 		return err
 	}
@@ -281,11 +171,37 @@ func (p *PiKVM) transferAndMount(ctx context.Context, s module.Session, imagePat
 	return nil
 }
 
+// receiveImage writes the client's file at clientPath to path and returns its
+// size and its SHA-256 in hex.
+func receiveImage(ctx context.Context, s module.Session, clientPath, path string) (int64, string, error) {
+	file, err := os.Create(path)
+	if err != nil {
+		return 0, "", fmt.Errorf("failed to create temporary file: %w", err)
+	}
+
+	s.Println("Transferring file from client...")
+
+	hash := sha256.New()
+
+	// A failed Close of the written file is a failed write.
+	err = errors.Join(s.RequestFile(ctx, clientPath, io.MultiWriter(file, hash)), file.Close())
+	if err != nil {
+		return 0, "", fmt.Errorf("failed to transfer file from client: %w", err)
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		return 0, "", fmt.Errorf("failed to stat transferred file: %w", err)
+	}
+
+	return info.Size(), fmt.Sprintf("%x", hash.Sum(nil)), nil
+}
+
 // unplugUSBIfConnected checks if USB is connected and unplugs it if necessary.
 func (p *PiKVM) unplugUSBIfConnected(ctx context.Context, s module.Session) error {
 	status, err := p.getStatus(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to check USB plug state: %v", err)
+		return fmt.Errorf("failed to check USB plug state: %w", err)
 	}
 
 	if !status.Result.Drive.Connected {
@@ -296,7 +212,7 @@ func (p *PiKVM) unplugUSBIfConnected(ctx context.Context, s module.Session) erro
 
 	resp, err := p.doRequest(ctx, http.MethodPost, "/api/msd/set_connected?connected=0", nil, "", requestOptions{})
 	if err != nil {
-		return fmt.Errorf("failed to unplug USB device: %v", err)
+		return fmt.Errorf("failed to unplug USB device: %w", err)
 	}
 
 	resp.Body.Close()
@@ -314,7 +230,7 @@ func (p *PiKVM) uploadImageIfMissing(ctx context.Context, s module.Session, imag
 	}
 
 	if !errors.Is(err, ErrMissingImage) {
-		return fmt.Errorf("failed to check if image exists: %v", err)
+		return fmt.Errorf("failed to check if image exists: %w", err)
 	}
 
 	s.Println("Image not found in storage, preparing to upload.")
@@ -322,14 +238,14 @@ func (p *PiKVM) uploadImageIfMissing(ctx context.Context, s module.Session, imag
 	// Ensure there's enough free space
 	err = p.ensureFreeSpace(ctx, s, size)
 	if err != nil {
-		return fmt.Errorf("failed to ensure free space: %v", err)
+		return fmt.Errorf("failed to ensure free space: %w", err)
 	}
 
 	s.Printf("Uploading image file: %s (%d bytes)\n", filepath.Base(imagePath), size)
 
 	file, err := os.Open(imagePath)
 	if err != nil {
-		return fmt.Errorf("failed to open image file for upload: %v", err)
+		return fmt.Errorf("failed to open image file for upload: %w", err)
 	}
 	defer file.Close()
 
@@ -380,7 +296,7 @@ func (p *PiKVM) uploadImageFile(ctx context.Context, file *os.File, hashSum stri
 		requestOptions{contentLength: contentLength, noTimeout: true},
 	)
 	if err != nil {
-		return fmt.Errorf("failed to upload image: %v", err)
+		return fmt.Errorf("failed to upload image: %w", err)
 	}
 	defer uploadResp.Body.Close()
 
@@ -392,11 +308,11 @@ func (p *PiKVM) uploadImageFile(ctx context.Context, file *os.File, hashSum stri
 func (p *PiKVM) configureAndPlugUSB(ctx context.Context, s module.Session, imageName string) error {
 	s.Println("Configuring image...")
 
-	configEndpoint := fmt.Sprintf("/api/msd/set_params?image=%s&cdrom=0&rw=1", imageName)
+	configEndpoint := "/api/msd/set_params?" + url.Values{"image": {imageName}, "cdrom": {"0"}, "rw": {"1"}}.Encode()
 
 	configResp, err := p.doRequest(ctx, http.MethodPost, configEndpoint, nil, "", requestOptions{})
 	if err != nil {
-		return fmt.Errorf("failed to configure USB device: %v", err)
+		return fmt.Errorf("failed to configure USB device: %w", err)
 	}
 
 	configResp.Body.Close()
@@ -405,7 +321,7 @@ func (p *PiKVM) configureAndPlugUSB(ctx context.Context, s module.Session, image
 
 	plugResp, err := p.doRequest(ctx, http.MethodPost, "/api/msd/set_connected?connected=1", nil, "", requestOptions{})
 	if err != nil {
-		return fmt.Errorf("failed to plug USB device: %v", err)
+		return fmt.Errorf("failed to plug USB device: %w", err)
 	}
 
 	plugResp.Body.Close()
@@ -414,15 +330,25 @@ func (p *PiKVM) configureAndPlugUSB(ctx context.Context, s module.Session, image
 }
 
 func (p *PiKVM) handleMountURL(ctx context.Context, s module.Session, imageURL string) error {
+	// The image is stored under the last element of the URL's path, without
+	// the query that a download link often carries.
+	parsed, err := url.Parse(imageURL)
+	if err != nil {
+		return fmt.Errorf("invalid image URL %q: %w", imageURL, err)
+	}
+
+	imageName := path.Base(parsed.Path)
+	if imageName == "." || imageName == "/" {
+		return fmt.Errorf("image URL %q names no file", imageURL)
+	}
+
 	s.Printf("Mounting image from URL: %s\n", imageURL)
 
 	// Ensure MSD is disconnected before remote download
-	err := p.unplugUSBIfConnected(ctx, s)
+	err = p.unplugUSBIfConnected(ctx, s)
 	if err != nil {
 		return err
 	}
-
-	imageName := filepath.Base(imageURL)
 
 	// If image already exists, skip download and just mount
 	exists, err := p.checkImageAlreadyExists(ctx, imageName)
@@ -471,18 +397,18 @@ func (p *PiKVM) downloadRemoteImage(ctx context.Context, s module.Session, image
 	// Construct endpoint with URL encoding
 	endpoint := fmt.Sprintf("/api/msd/write_remote?url=%s&timeout=%d&image=%s",
 		url.QueryEscape(imageURL),
-		remoteDownloadTimout,
+		remoteDownloadTimeout,
 		url.QueryEscape(imageName))
 
 	resp, err := p.doRequest(ctx, http.MethodPost, endpoint, nil, "", requestOptions{noTimeout: true})
 	if err != nil {
-		return fmt.Errorf("failed to mount image from URL: %v", err)
+		return fmt.Errorf("failed to mount image from URL: %w", err)
 	}
 	defer resp.Body.Close()
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return fmt.Errorf("failed to read write_remote response: %v", err)
+		return fmt.Errorf("failed to read write_remote response: %w", err)
 	}
 
 	return p.handleRemoteDownloadResponse(s, imageName, bodyBytes)
@@ -550,7 +476,7 @@ func parseStreamingJSON(bodyBytes []byte) (*remoteImageResponse, error) {
 func (p *PiKVM) handleUnmount(ctx context.Context, s module.Session) error {
 	resp, err := p.doRequest(ctx, http.MethodPost, "/api/msd/set_connected?connected=0", nil, "", requestOptions{})
 	if err != nil {
-		return fmt.Errorf("failed to unmount media: %v", err)
+		return fmt.Errorf("failed to unmount media: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -562,7 +488,7 @@ func (p *PiKVM) handleUnmount(ctx context.Context, s module.Session) error {
 func (p *PiKVM) handleMediaStatus(ctx context.Context, s module.Session) error {
 	status, err := p.getStatus(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to get media status: %v", err)
+		return fmt.Errorf("failed to get media status: %w", err)
 	}
 
 	connected := status.Result.Drive.Connected
@@ -609,24 +535,6 @@ func (p *PiKVM) getStatus(ctx context.Context) (*Status, error) {
 	return &status, nil
 }
 
-// calcSHA256 calculates the SHA256 hash of a file.
-func calcSHA256(path string) (string, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return "", fmt.Errorf("failed to open file: %w", err)
-	}
-	defer file.Close()
-
-	hash := sha256.New()
-
-	_, err = io.Copy(hash, file)
-	if err != nil {
-		return "", fmt.Errorf("failed to calculate SHA256: %w", err)
-	}
-
-	return fmt.Sprintf("%x", hash.Sum(nil)), nil
-}
-
 // checkImageExists checks if an image with the given hash already exists in storage.
 func (p *PiKVM) checkImageExists(ctx context.Context, hashSum string) error {
 	status, err := p.getStatus(ctx)
@@ -669,7 +577,7 @@ func getFreeSpace(status *Status) (uint64, error) {
 
 // deleteImage deletes an image from PiKVM storage by its name (hash).
 func (p *PiKVM) deleteImage(ctx context.Context, imageName string) error {
-	resp, err := p.doRequest(ctx, http.MethodPost, fmt.Sprintf("/api/msd/remove?image=%s", imageName), nil, "", requestOptions{})
+	resp, err := p.doRequest(ctx, http.MethodPost, "/api/msd/remove?"+url.Values{"image": {imageName}}.Encode(), nil, "", requestOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to delete image: %w", err)
 	}
@@ -774,7 +682,11 @@ func (p *PiKVM) ensureFreeSpace(ctx context.Context, s module.Session, requiredS
 
 		deletionCount++
 
-		time.Sleep(scanningDelay) // wait a bit for the storage to update
+		// wait a bit for the storage to update
+		err = wait(ctx, scanningDelay)
+		if err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -816,7 +728,10 @@ func (p *PiKVM) waitForImage(ctx context.Context, imageName string, timeout, int
 			return nil
 		}
 
-		time.Sleep(interval)
+		err = wait(ctx, interval)
+		if err != nil {
+			return err
+		}
 	}
 
 	return fmt.Errorf("image %s not ready after %v", imageName, timeout)

@@ -7,6 +7,7 @@ package pikvm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -30,9 +31,7 @@ const (
 // handlePowerCommandRouter routes power commands based on the first argument.
 func (p *PiKVM) handlePowerCommandRouter(ctx context.Context, s module.Session, args []string) error {
 	if len(args) == 0 {
-		s.Println("Power command requires an action: on|off|force-off|reset|force-reset|status")
-
-		return nil
+		return errors.New("power requires an action: on, off, force-off, reset, force-reset or status")
 	}
 
 	command := strings.ToLower(args[0])
@@ -67,7 +66,7 @@ func (p *PiKVM) sendATXPower(ctx context.Context, s module.Session, action strin
 
 	resp, err := p.doRequest(ctx, http.MethodPost, endpoint, nil, "", requestOptions{})
 	if err != nil {
-		return fmt.Errorf("ATX power %s failed: %v", action, err)
+		return fmt.Errorf("ATX power %s failed: %w", action, err)
 	}
 	defer resp.Body.Close()
 
@@ -82,7 +81,7 @@ func (p *PiKVM) sendATXClick(ctx context.Context, s module.Session, button strin
 
 	resp, err := p.doRequest(ctx, http.MethodPost, endpoint, nil, "", requestOptions{})
 	if err != nil {
-		return fmt.Errorf("ATX %s button click failed: %v", button, err)
+		return fmt.Errorf("ATX %s button click failed: %w", button, err)
 	}
 	defer resp.Body.Close()
 
@@ -110,7 +109,7 @@ type ATXStatusResult struct {
 func (p *PiKVM) handleStatusCommand(ctx context.Context, s module.Session) error {
 	resp, err := p.doRequest(ctx, http.MethodGet, "/api/atx", nil, "", requestOptions{})
 	if err != nil {
-		return fmt.Errorf("failed to get ATX status: %v", err)
+		return fmt.Errorf("failed to get ATX status: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -118,7 +117,7 @@ func (p *PiKVM) handleStatusCommand(ctx context.Context, s module.Session) error
 
 	err = json.NewDecoder(resp.Body).Decode(&status)
 	if err != nil {
-		return fmt.Errorf("failed to parse status response: %v", err)
+		return fmt.Errorf("failed to parse status response: %w", err)
 	}
 
 	if !status.Ok {

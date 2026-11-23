@@ -120,8 +120,6 @@ func writeScreenshotHelp(help *strings.Builder) {
 func (p *PiKVM) Init(ctx context.Context) error {
 	l := log.FromContext(ctx)
 
-	l.Debug("pikvm module: Init starting", "host", p.Host)
-
 	err := p.validateMode()
 	if err != nil {
 		return err
@@ -130,19 +128,17 @@ func (p *PiKVM) Init(ctx context.Context) error {
 	// Set default user if not provided
 	if p.User == "" {
 		p.User = defaultUser
-		l.Debug("pikvm module: Using default user", "user", defaultUser)
+		l.Debug("using the default user", "user", defaultUser)
 	}
 
-	// Parse custom timeout if provided
 	timeout := defaultTimeout
 
-	if p.Timeout != "" {
-		parsedTimeout, err := time.ParseDuration(p.Timeout)
-		if err == nil {
-			timeout = parsedTimeout
-			l.Debug("pikvm module: Using custom timeout", "timeout", timeout)
-		} else {
-			l.Warn("pikvm module: Invalid timeout format, using default", "timeout", p.Timeout, "default", defaultTimeout)
+	if p.Timeout == "" {
+		l.Debug("using the default timeout", "timeout", defaultTimeout)
+	} else {
+		timeout, err = time.ParseDuration(p.Timeout)
+		if err != nil || timeout <= 0 {
+			return fmt.Errorf("pikvm: invalid timeout %q: want a positive duration such as 10s", p.Timeout)
 		}
 	}
 
@@ -158,13 +154,14 @@ func (p *PiKVM) Init(ctx context.Context) error {
 		Transport: transport,
 	}
 
-	l.Debug("pikvm module: Init completed successfully", "url", p.baseURL.String())
-
 	return nil
 }
 
-func (p *PiKVM) Deinit(ctx context.Context) error {
-	log.FromContext(ctx).Debug("pikvm module: Deinit called")
+// Deinit closes the idle connections to the PiKVM. Nothing else outlives a run.
+func (p *PiKVM) Deinit(_ context.Context) error {
+	if p.client != nil {
+		p.client.CloseIdleConnections()
+	}
 
 	return nil
 }
@@ -294,19 +291,27 @@ func (p *PiKVM) setRequestHeaders(req *http.Request, contentType string, opts re
 	}
 }
 
-// selectHTTPClient returns the appropriate HTTP client based on options.
+// selectHTTPClient returns the appropriate HTTP client based on options. A
+// request without a timeout still ends with its context.
 func (p *PiKVM) selectHTTPClient(opts requestOptions) *http.Client {
 	if opts.noTimeout {
-		return &http.Client{
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{
-					InsecureSkipVerify: true, //nolint:gosec // PiKVM uses self-signed certificates
-				},
-			},
-		}
+		return &http.Client{Transport: p.client.Transport}
 	}
 
 	return p.client
+}
+
+// wait pauses for d, or returns the context's error once ctx ends first.
+func wait(ctx context.Context, d time.Duration) error {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // checkResponseStatus validates the HTTP response status code.
@@ -333,7 +338,7 @@ func normalizeAndParseHost(host string) (*url.URL, error) {
 
 	baseURL, err := url.Parse(strings.TrimRight(host, "/"))
 	if err != nil {
-		return nil, fmt.Errorf("pikvm: invalid host URL: %v", err)
+		return nil, fmt.Errorf("pikvm: invalid host URL: %w", err)
 	}
 
 	return baseURL, nil
