@@ -13,14 +13,14 @@ import (
 	"github.com/BlindspotSoftware/dutctl/pkg/module"
 )
 
-// pull is the internal resistor a GPIO input pin is connected through.
-type pull uint8
-
-const (
-	pullOff  pull = iota // no resistor; the pin floats unless the DUT drives it
-	pullUp               // the pin reads high unless the DUT drives it low
-	pullDown             // the pin reads low unless the DUT drives it high
-)
+func init() {
+	module.Register(module.Record{
+		ID: "gpio-sensor",
+		New: func() module.Module {
+			return &Sensor{backendParser: backendFromOption}
+		},
+	})
+}
 
 // pullOffName is the Pull option that leaves the pin without a resistor, and
 // what an unset Pull means.
