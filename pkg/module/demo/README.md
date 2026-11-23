@@ -107,11 +107,12 @@ against them:
 | Line console, lines assembled from what the module reads            | Prompt                        |
 | Raw console                                                         | Raw, Console                  |
 | Print while a console is open                                       | Prompt, Raw                   |
+| Print while a file arrives in chunks                                | Upload                        |
 | The user's input ends, the output goes on                           | Raw, Console                  |
 | The session is torn down, a write fails with io.ErrClosedPipe       | Raw, Console                  |
 | Stdin.Close ends a read on another goroutine                        | Console                       |
 | RequestFile, a file the user cannot provide                         | Upload, Flash                 |
-| SendFile                                                            | Download, Flash               |
+| SendFile, which returns once the user has the file                  | Download, Flash               |
 | An error returned by Run                                            | Fault, Switch, Flash          |
 | A panic in Run, recovered by the agent                              | Fault                         |
 | The context ends when the command is cancelled                      | Switch                        |
@@ -163,7 +164,7 @@ _none_
 
 # Upload
 
-Receives a file from your machine and tells its size and SHA-256.
+Receives a file from your machine and tells its size and SHA-256, reporting each MiB as it arrives.
 
 ```
 ARGUMENTS:

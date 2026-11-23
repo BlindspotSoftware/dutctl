@@ -111,8 +111,12 @@ type Module interface {
 // opaquely (no sentinel to match) and typically means the client declined the file
 // or the transfer stream failed.
 //
-// OpenConsole, Print, RequestFile and SendFile must be called only from the module's
-// Run goroutine.
+// OpenConsole and Print must be called only from the module's Run goroutine.
+// RequestFile and SendFile may also be called from a goroutine that Run starts
+// and waits for before it returns.
+//
+// A session carries one file transfer at a time: while one runs, RequestFile
+// and SendFile return an error. Each transfer runs until its call returns.
 type Session interface {
 	// Print sends a message to the client. Implementations should wrap [fmt.Sprint].
 	// The message is displayed in the console or GUI of the client.
@@ -161,11 +165,30 @@ type Session interface {
 	// first, whose Stdin then reports io.EOF and whose writers fail. Print may
 	// be used while a console is open.
 	OpenConsole(opts ConsoleOptions) Console
-	// RequestFile requests a file from the client.
-	// The file is identified by its name and is made available to the module via the returned io.Reader.
-	RequestFile(name string) (io.Reader, error)
-	// SendFile sends a file to the client.
-	SendFile(name string, r io.Reader) error
+	// RequestFile requests the named file from the client and writes it to w as
+	// it arrives, on the calling goroutine. It returns once the whole file is in
+	// w, or with the reason the file did not arrive.
+	//
+	// w must not wait for the user's input, on a console say: while w writes,
+	// that input can wait behind the next part of the file.
+	//
+	// ctx bounds the transfer: cancelling it ends the transfer between two
+	// writes to w, as an error from w does, and the client is told. Pass Run's
+	// context, or a deadline derived from it. The session imposes no limit of
+	// its own.
+	RequestFile(ctx context.Context, name string, w io.Writer) error
+	// SendFile sends a file to the client. size is the file size in bytes, or 0
+	// if it is unknown. The client gets it with the start of the file, and
+	// SendFile fails if r delivers another number of bytes.
+	//
+	// It reads r to its end on the calling goroutine and returns once the client
+	// has confirmed the whole file, or with the reason the file did not arrive.
+	// The caller keeps r and closes it.
+	//
+	// ctx bounds the transfer: cancelling it ends the transfer between two reads
+	// of r, which fails the run on the client. A Read that blocks is the
+	// caller's to end, as for any reader it reads itself.
+	SendFile(ctx context.Context, name string, size int64, r io.Reader) error
 }
 
 // ConsoleMode is how a module uses its console. Only the module knows, and the

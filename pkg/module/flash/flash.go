@@ -10,7 +10,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -174,7 +173,7 @@ func (f *Flash) Run(ctx context.Context, sesh module.Session, args ...string) er
 	localImagePath := filepath.Join(dir, "image")
 
 	if operation == opWrite {
-		err := uploadImage(sesh, clientImagePath, localImagePath)
+		err := uploadImage(ctx, sesh, clientImagePath, localImagePath)
 		if err != nil {
 			return err
 		}
@@ -203,7 +202,7 @@ func (f *Flash) Run(ctx context.Context, sesh module.Session, args ...string) er
 	time.Sleep(1 * time.Second)
 
 	if operation == opRead {
-		err := downloadImage(sesh, localImagePath, clientImagePath)
+		err := downloadImage(ctx, sesh, localImagePath, clientImagePath)
 		if err != nil {
 			return err
 		}
@@ -298,36 +297,36 @@ func (f *Flash) cmdline(operation op, image string) []string {
 }
 
 // uploadImage receives the flash image file from sesh and saves it locally.
-func uploadImage(sesh module.Session, remote, local string) error {
-	img, err := sesh.RequestFile(remote)
-	if err != nil {
-		return fmt.Errorf("request flash image from client for write operation: %w", err)
-	}
-
+func uploadImage(ctx context.Context, sesh module.Session, remote, local string) error {
 	imgFile, err := os.Create(local)
 	if err != nil {
 		return fmt.Errorf("save flash image on dutagent for write operation: %w", err)
 	}
 
-	_, err = io.Copy(imgFile, img)
+	err = sesh.RequestFile(ctx, remote, imgFile)
 	// A failed close can mean the image did not reach the disk in full.
 	err = errors.Join(err, imgFile.Close())
 	if err != nil {
-		return fmt.Errorf("save flash image on dutagent for write operation: %w", err)
+		return fmt.Errorf("receive flash image from client for write operation: %w", err)
 	}
 
 	return nil
 }
 
 // downloadImage sends the local flash image file to sesh.
-func downloadImage(sesh module.Session, local, remote string) error {
+func downloadImage(ctx context.Context, sesh module.Session, local, remote string) error {
 	file, err := os.Open(local)
 	if err != nil {
 		return fmt.Errorf("open flash image on dutagent after read operation: %w", err)
 	}
 	defer file.Close()
 
-	err = sesh.SendFile(remote, file)
+	fileInfo, err := file.Stat()
+	if err != nil {
+		return fmt.Errorf("stat flash image on dutagent after read operation: %w", err)
+	}
+
+	err = sesh.SendFile(ctx, remote, fileInfo.Size(), file)
 	if err != nil {
 		return fmt.Errorf("send flash image to client after read operation: %w", err)
 	}
