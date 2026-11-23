@@ -98,9 +98,9 @@ const DefaultButtonPressDuration = 500 * time.Millisecond
 
 // A Button simulates a button press by changing the state of a GPIO pin.
 type Button struct {
-	gpio
 	backendParser
 
+	gpio      gpio   // pin access, selected in Init
 	Pin       Pin    // Raw BCM2835/BCM2711 pin number
 	ActiveLow bool   // If set, the idle state is high, and low when pressed. Default is false
 	Backend   string // For future use. Name of the backend to use. Default and fallback is "devmem"
@@ -199,7 +199,7 @@ func (b *Button) Run(ctx context.Context, s module.Session, args ...string) erro
 		duration = DefaultButtonPressDuration
 	}
 
-	err = b.Toggle(b.Pin)
+	err = b.gpio.Toggle(b.Pin)
 	if err != nil {
 		return err
 	}
@@ -209,7 +209,7 @@ func (b *Button) Run(ctx context.Context, s module.Session, args ...string) erro
 	// held.
 	waitErr := sleepCtx(ctx, duration)
 
-	err = b.Toggle(b.Pin)
+	err = b.gpio.Toggle(b.Pin)
 	if err != nil {
 		return err
 	}
@@ -228,10 +228,10 @@ func (b *Button) Run(ctx context.Context, s module.Session, args ...string) erro
 // active low, low otherwise.
 func (b *Button) idle() error {
 	if b.ActiveLow {
-		return b.High(b.Pin)
+		return b.gpio.High(b.Pin)
 	}
 
-	return b.Low(b.Pin)
+	return b.gpio.Low(b.Pin)
 }
 
 // sleepCtx pauses for d, returning ctx.Err() if ctx is done first. A non-positive
@@ -262,9 +262,9 @@ const (
 // A Switch simulates an on/off switch by changing the state of a GPIO pin.
 // By default, the switch is off and off means the pin is low.
 type Switch struct {
-	gpio
 	backendParser
 
+	gpio gpio // pin access, selected in Init
 	// Raw BCM2835/BCM2711 pin number
 	Pin Pin
 	// Initial state of the switch: "on" or "off" (case insensitive). Default and fallback is "off".
@@ -394,7 +394,7 @@ func (s *Switch) Run(ctx context.Context, sesh module.Session, args ...string) e
 
 		return nil
 	case "toggle":
-		err := s.Toggle(s.Pin)
+		err := s.gpio.Toggle(s.Pin)
 		if err != nil {
 			return err
 		}
@@ -419,16 +419,16 @@ func (s *Switch) Run(ctx context.Context, sesh module.Session, args ...string) e
 
 func (s *Switch) on() error {
 	if s.ActiveLow {
-		return s.Low(s.Pin)
+		return s.gpio.Low(s.Pin)
 	}
 
-	return s.High(s.Pin)
+	return s.gpio.High(s.Pin)
 }
 
 func (s *Switch) off() error {
 	if s.ActiveLow {
-		return s.High(s.Pin)
+		return s.gpio.High(s.Pin)
 	}
 
-	return s.Low(s.Pin)
+	return s.gpio.Low(s.Pin)
 }

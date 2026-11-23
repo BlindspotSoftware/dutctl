@@ -43,9 +43,9 @@ func parsePull(s string) (pull, error) {
 // A Sensor reads the level of a GPIO pin that the DUT drives, such as a
 // power-good signal or a status LED. The module never drives the pin.
 type Sensor struct {
-	gpio
 	backendParser
 
+	gpio gpio // pin access, selected in Init
 	// Raw BCM2835/BCM2711 pin number
 	Pin Pin
 	// If true, the signal is active low: a low pin reads as active. Default is false.
@@ -124,7 +124,7 @@ func (sn *Sensor) Init(ctx context.Context) error {
 
 	log.FromContext(ctx).Debug(fmt.Sprintf("initializing pin %d as input", sn.Pin))
 
-	return sn.Input(sn.Pin, pull)
+	return sn.gpio.Input(sn.Pin, pull)
 }
 
 // Deinit leaves the pin alone: an input pin drives nothing, and driving it now
@@ -138,7 +138,7 @@ func (sn *Sensor) Run(_ context.Context, sesh module.Session, args ...string) er
 		return fmt.Errorf("unexpected argument: %s (gpio-sensor takes no arguments)", args[0])
 	}
 
-	level, err := sn.Read(sn.Pin)
+	level, err := sn.gpio.Read(sn.Pin)
 	if err != nil {
 		return err
 	}
