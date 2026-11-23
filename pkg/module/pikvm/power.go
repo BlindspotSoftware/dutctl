@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/BlindspotSoftware/dutctl/pkg/module"
@@ -61,8 +62,10 @@ func (p *PiKVM) handlePowerCommand(ctx context.Context, s module.Session, comman
 
 // sendATXPower sends an ATX power action using the /api/atx/power endpoint.
 // This endpoint is intelligent: 'on' does nothing if already on, 'off' is graceful shutdown.
+// With wait=1, the PiKVM answers once the press is over, so a status read right
+// after sees its effect; a long press for a forced off takes about 5.5 s.
 func (p *PiKVM) sendATXPower(ctx context.Context, s module.Session, action string) error {
-	endpoint := fmt.Sprintf("/api/atx/power?action=%s", action)
+	endpoint := "/api/atx/power?" + url.Values{"action": {action}, "wait": {"1"}}.Encode()
 
 	resp, err := p.doRequest(ctx, http.MethodPost, endpoint, nil, "", requestOptions{})
 	if err != nil {
@@ -75,9 +78,10 @@ func (p *PiKVM) sendATXPower(ctx context.Context, s module.Session, action strin
 	return nil
 }
 
-// sendATXClick sends an ATX button click using the /api/atx/click endpoint.
+// sendATXClick sends an ATX button click using the /api/atx/click endpoint. With
+// wait=1, the PiKVM answers once the click is over.
 func (p *PiKVM) sendATXClick(ctx context.Context, s module.Session, button string) error {
-	endpoint := fmt.Sprintf("/api/atx/click?button=%s", button)
+	endpoint := "/api/atx/click?" + url.Values{"button": {button}, "wait": {"1"}}.Encode()
 
 	resp, err := p.doRequest(ctx, http.MethodPost, endpoint, nil, "", requestOptions{})
 	if err != nil {

@@ -101,6 +101,26 @@ func TestRunMissingArgumentsFail(t *testing.T) {
 	}
 }
 
+// A power action and a click return once the PiKVM pressed the button, so a
+// status read right after sees the effect.
+func TestPowerWaitsForThePress(t *testing.T) {
+	f := &fakePiKVM{}
+	p := startPiKVM(t, f, cmdTypePower)
+
+	for _, action := range []string{"on", "reset"} {
+		err := p.Run(t.Context(), &mock.Session{}, action)
+		if err != nil {
+			t.Fatalf("Run %s: %v", action, err)
+		}
+	}
+
+	for _, want := range []string{"/api/atx/power?action=on&wait=1", "/api/atx/click?button=reset&wait=1"} {
+		if !f.called(want) {
+			t.Errorf("no request %s; requests: %q", want, f.calls)
+		}
+	}
+}
+
 // A key combination that fails halfway releases the modifiers it pressed, or
 // they stay held on the DUT.
 func TestKeyComboReleasesHeldKeysOnFailure(t *testing.T) {
