@@ -188,17 +188,9 @@ func (s *Switch) Run(ctx context.Context, sesh module.Session, args ...string) e
 }
 
 func (s *Switch) on() error {
-	if s.ActiveLow {
-		return s.gpio.Low(s.Pin)
-	}
-
-	return s.gpio.High(s.Pin)
+	return drive(s.gpio, s.Pin, activeLevel(s.ActiveLow))
 }
 
 func (s *Switch) off() error {
-	if s.ActiveLow {
-		return s.gpio.High(s.Pin)
-	}
-
-	return s.gpio.Low(s.Pin)
+	return drive(s.gpio, s.Pin, activeLevel(!s.ActiveLow))
 }
