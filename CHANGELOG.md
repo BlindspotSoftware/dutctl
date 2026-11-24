@@ -1,5 +1,45 @@
 # Changelog
 
+## [1.0.0-beta.3](https://github.com/BlindspotSoftware/dutctl/compare/v1.0.0-beta.2...v1.0.0-beta.3) (2026-11-24)
+
+
+### ⚠ BREAKING CHANGES
+
+* FileTransferRequest, FileChunk and FileTransferResponse replace the File and FileRequest messages on the Run stream, so dutagent and dutctl must be upgraded together. In module.Session, RequestFile takes a context and writes the file to a writer, and SendFile takes a context and an optional size and returns once the client has the file.
+
+### Features
+
+* add a gpio-sensor module ([2598a87](https://github.com/BlindspotSoftware/dutctl/commit/2598a87bf7fe31db7d5b7d87a1317a8c5e528e36))
+* files transfer in 1 MiB chunks ([347902f](https://github.com/BlindspotSoftware/dutctl/commit/347902f3737ec544c43f69c8708e6308ffdb4c22))
+
+
+### Bug Fixes
+
+* gpio modules no longer expose their backend's methods ([c0f7aa8](https://github.com/BlindspotSoftware/dutctl/commit/c0f7aa8b95de8ecf7b79fd9ccbe272fc943b5e3b))
+* serial ports work after a worker reboots ([2e6d007](https://github.com/BlindspotSoftware/dutctl/commit/2e6d007872a9e1380cec3d76dea2fecec370654c))
+
+
+### Documentation
+
+* record why files transfer in chunks ([d61dea9](https://github.com/BlindspotSoftware/dutctl/commit/d61dea98e02af1feca95f5f3900d5f5ec30aaf75))
+
+
+### Other Work
+
+* bump charm.land/bubbles/v2 from 2.2.1 to 2.2.2 ([cf7d863](https://github.com/BlindspotSoftware/dutctl/commit/cf7d863afd92c28ff0212599e0b55850aa2a73b5))
+* bump charm.land/bubbletea/v2 from 2.1.1 to 2.1.2 ([3342aa8](https://github.com/BlindspotSoftware/dutctl/commit/3342aa899aba1377048e55ed557f2e07345a7b42))
+* bump charm.land/lipgloss/v2 from 2.0.6 to 2.1.0 ([fe82d1e](https://github.com/BlindspotSoftware/dutctl/commit/fe82d1e067950274aa2281136e05e86c3fe33eec))
+* bump github.com/charmbracelet/x/ansi from 0.11.9 to 0.11.10 ([a6f0512](https://github.com/BlindspotSoftware/dutctl/commit/a6f05121fc6a5cae659b67b0dbad6394f86bbe0f))
+* bump golang.org/x/crypto from 0.58.0 to 0.59.0 ([b71534d](https://github.com/BlindspotSoftware/dutctl/commit/b71534d2ca1114305e9ba37ff77fe65e6a34aaee))
+* decide the gpio active level in one place ([ecf8ca4](https://github.com/BlindspotSoftware/dutctl/commit/ecf8ca4b3390aa9d03adc5a2e9fe99b4c3cd3bc6))
+* drop the Flag suffix from the version flag variable ([360662b](https://github.com/BlindspotSoftware/dutctl/commit/360662b9ea06dc9a5f3fac5759369f596ed6bfe5))
+* give dutserver's Run nolint directive a reason ([8194a15](https://github.com/BlindspotSoftware/dutctl/commit/8194a152dd92cfa3b8533d39f56c4291b3212053))
+* give every nolint directive a reason and one spelling ([55c7fe0](https://github.com/BlindspotSoftware/dutctl/commit/55c7fe0d7fce463966c3b1aef4044a3f7931d976))
+* give the gpio package one file per module ([893a429](https://github.com/BlindspotSoftware/dutctl/commit/893a42990ea35c8c10f0e25e6a3570a13314e712))
+* name the numbers mnd flagged in the config parser and flash ([f67c10d](https://github.com/BlindspotSoftware/dutctl/commit/f67c10debff9a3b6ffcc765b09246151b9589e13))
+* read the run response's message through its getter ([b40790d](https://github.com/BlindspotSoftware/dutctl/commit/b40790d06d2a327d569fa53c0830b7d68547a649))
+* remove nolint directives from test files ([7d65438](https://github.com/BlindspotSoftware/dutctl/commit/7d65438f46f395fe8f088f0e5ddd92f316e3a973))
+
 ## [1.0.0-beta.2](https://github.com/BlindspotSoftware/dutctl/compare/v1.0.0-beta.1...v1.0.0-beta.2) (2026-11-16)
 
 
