@@ -1,0 +1,135 @@
+---
+name: PiKVM-Power
+description: Press the ATX buttons through the tester's PiKVM against a fake mainboard.
+
+defaults:
+  transport_root: &transport_root
+    proto: ssh
+    options:
+      host: "[[attributes.Host]]"
+      user: root
+      identity_file: "/root/.ssh/fwci"
+      # TODO: The ssh keys (identity_file) are hard-coded in the FWCI docker at the moment
+
+# The PiKVM's ATX board is wired to the tester, where the fake-atx service of
+# test/fake-atx/ plays the mainboard: it logs every press it sees and drives
+# the power LED the PiKVM reads. The PiKVM answers ok also when it pressed
+# nothing, so each step checks what arrived: the power status reads the LED
+# the fake board drives, and its log shows a reset and a long press. Each
+# expected log line differs from the one before it, so an old line cannot
+# pass for the new press.
+stages:
+  - name: Power on, reset and power off
+    steps:
+      # The fake board keeps its state between runs.
+      - cmd: cmd
+        name: force off whatever an earlier run left on
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: ["-s", "[[attributes.DutagentEndpoint]]", "[[attributes.DeviceName]]", "kvm-power", "force-off"]
+
+      - cmd: cmd
+        name: status is off
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: ["-s", "[[attributes.DutagentEndpoint]]", "[[attributes.DeviceName]]", "kvm-power", "status"]
+          expect:
+            - regex: "Device power status: Off"
+
+      - cmd: cmd
+        name: power on
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: ["-s", "[[attributes.DutagentEndpoint]]", "[[attributes.DeviceName]]", "kvm-power", "on"]
+
+      - cmd: cmd
+        name: status is on
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: ["-s", "[[attributes.DutagentEndpoint]]", "[[attributes.DeviceName]]", "kvm-power", "status"]
+          expect:
+            - regex: "Device power status: On"
+
+      - cmd: cmd
+        name: reset
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: ["-s", "[[attributes.DutagentEndpoint]]", "[[attributes.DeviceName]]", "kvm-power", "reset"]
+
+      - cmd: shell
+        name: the fake board saw the reset press
+        transport: *transport_root
+        parameters:
+          command: "for i in $(seq 1 30); do journalctl -u fake-atx -n 1 -o cat --no-pager | grep -E 'reset press [0-9.]+ s: reset$' && exit 0; sleep 0.1; done; journalctl -u fake-atx -n 5 -o cat --no-pager; exit 1"
+
+      - cmd: cmd
+        name: power off
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: ["-s", "[[attributes.DutagentEndpoint]]", "[[attributes.DeviceName]]", "kvm-power", "off"]
+
+      - cmd: cmd
+        name: status is off after power off
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: ["-s", "[[attributes.DutagentEndpoint]]", "[[attributes.DeviceName]]", "kvm-power", "status"]
+          expect:
+            - regex: "Device power status: Off"
+
+  - name: Force off with a long press
+    steps:
+      - cmd: cmd
+        name: power on again
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: ["-s", "[[attributes.DutagentEndpoint]]", "[[attributes.DeviceName]]", "kvm-power", "on"]
+
+      - cmd: cmd
+        name: status is on again
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: ["-s", "[[attributes.DutagentEndpoint]]", "[[attributes.DeviceName]]", "kvm-power", "status"]
+          expect:
+            - regex: "Device power status: On"
+
+      - cmd: cmd
+        name: force off
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: ["-s", "[[attributes.DutagentEndpoint]]", "[[attributes.DeviceName]]", "kvm-power", "force-off"]
+
+      - cmd: shell
+        name: the fake board saw a long press
+        transport: *transport_root
+        parameters:
+          command: "for i in $(seq 1 30); do journalctl -u fake-atx -n 1 -o cat --no-pager | grep -E 'power press [0-9.]+ s: forced off$' && exit 0; sleep 0.1; done; journalctl -u fake-atx -n 5 -o cat --no-pager; exit 1"
+
+      - cmd: cmd
+        name: status is off after force off
+        transport:
+          proto: local
+        parameters:
+          executable: "[[input.DUTCTL]]"
+          args: ["-s", "[[attributes.DutagentEndpoint]]", "[[attributes.DeviceName]]", "kvm-power", "status"]
+          expect:
+            - regex: "Device power status: Off"

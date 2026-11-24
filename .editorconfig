@@ -13,6 +13,10 @@ indent_style = tab
 indent_style = space
 indent_size = 2
 
+[*.py]
+indent_style = space
+indent_size = 4
+
 [{*.md,LICENSE}]
 indent_style = unset
 indent_size = unset
