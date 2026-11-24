@@ -114,9 +114,7 @@ type Module interface {
 // Transfers are checksummed by the framework, and one damaged in transit fails
 // the run. RequestFile writes a file to w as it arrives, so w can hold damaged
 // content until RequestFile returns: a module that acts on the file only once
-// RequestFile returned nil never acts on damaged content. The exception is a
-// client from before the checksum: it sends none, and the agent takes its
-// upload unchecked and logs a warning.
+// RequestFile returned nil never acts on damaged content.
 //
 // OpenConsole and Print must be called only from the module's Run goroutine.
 // RequestFile and SendFile may also be called from a goroutine that Run starts

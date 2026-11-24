@@ -29,13 +29,6 @@ func New() hash.Hash {
 	return sha256.New()
 }
 
-// Missing reports whether a peer omitted the digest, which happens only when it
-// predates the field. Kept apart from [Match] so an absent digest can warn
-// while a wrong one fails.
-func Missing(want []byte) bool {
-	return len(want) == 0
-}
-
 // Match reports whether a digest computed with [New] equals the one received.
 func Match(sum, want []byte) bool {
 	return bytes.Equal(sum, want)

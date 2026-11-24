@@ -288,45 +288,60 @@ func TestHandleFileChunk_BrokenDownloadKeepsOldFile(t *testing.T) {
 	}
 }
 
-// A download that does not match the agent's digest was damaged on the way: it
-// fails the run and leaves the destination as it was.
-func TestHandleFileChunk_CorruptDownloadKeepsOldFile(t *testing.T) {
+// A download that does not match the agent's digest was damaged on the way,
+// and one without a digest cannot be checked: both fail the run and leave the
+// destination as it was.
+func TestHandleFileChunk_UnverifiedDownloadKeepsOldFile(t *testing.T) {
 	t.Parallel()
 
-	dir := t.TempDir()
-	dest := filepath.Join(dir, "image.bin")
-
-	if err := os.WriteFile(dest, []byte("last good image"), 0o600); err != nil {
-		t.Fatalf("writing old file: %v", err)
-	}
-
-	m, reported := newTestManager()
-	stream := &recordingStream{}
-
-	announceDownload(t, m, "t1", dest, stream)
-
 	sent := sha256.Sum256([]byte("what the agent read"))
-	final := downloadChunk("t1", 0, []byte("what arrived"), true)
-	final.Sha256 = sent[:]
 
-	if err := m.handleFileChunk(final, stream); !errors.Is(err, digest.ErrMismatch) {
-		t.Errorf("handleFileChunk err = %v, want digest.ErrMismatch", err)
-	}
+	for _, tc := range []struct {
+		name string
+		sum  []byte
+	}{
+		{"damaged", sent[:]},
+		{"no digest", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 
-	if !hasStatus(stream.responses(), pb.FileTransferResponse_STATUS_ERROR) {
-		t.Errorf("expected an ERROR, got %v", statuses(stream.responses()))
-	}
+			dir := t.TempDir()
+			dest := filepath.Join(dir, "image.bin")
 
-	if got, _ := os.ReadFile(dest); string(got) != "last good image" {
-		t.Errorf("destination = %q, want the old content", got)
-	}
+			if err := os.WriteFile(dest, []byte("last good image"), 0o600); err != nil {
+				t.Fatalf("writing old file: %v", err)
+			}
 
-	if left := leftovers(t, dir, "image.bin"); len(left) != 0 {
-		t.Errorf("temporary files left behind: %v", left)
-	}
+			m, reported := newTestManager()
+			stream := &recordingStream{}
 
-	if got := reported.all(); len(got) != 0 {
-		t.Errorf("a corrupted download was reported: %+v", got)
+			announceDownload(t, m, "t1", dest, stream)
+
+			final := downloadChunk("t1", 0, []byte("what arrived"), true)
+			final.Sha256 = tc.sum
+
+			err := m.handleFileChunk(final, stream)
+			if err == nil || tc.sum != nil && !errors.Is(err, digest.ErrMismatch) {
+				t.Errorf("handleFileChunk err = %v, want an error (digest.ErrMismatch for a damaged file)", err)
+			}
+
+			if !hasStatus(stream.responses(), pb.FileTransferResponse_STATUS_ERROR) {
+				t.Errorf("expected an ERROR, got %v", statuses(stream.responses()))
+			}
+
+			if got, _ := os.ReadFile(dest); string(got) != "last good image" {
+				t.Errorf("destination = %q, want the old content", got)
+			}
+
+			if left := leftovers(t, dir, "image.bin"); len(left) != 0 {
+				t.Errorf("temporary files left behind: %v", left)
+			}
+
+			if got := reported.all(); len(got) != 0 {
+				t.Errorf("an unverified download was reported: %+v", got)
+			}
+		})
 	}
 }
 

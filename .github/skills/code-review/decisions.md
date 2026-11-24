@@ -72,8 +72,8 @@ Links point to the ADR's Decision outcome.
   `cmds/dutctl`, `internal/digest`. The sender puts the SHA-256 of the whole file on the final
   chunk; the receiver checks it before the file counts. The agent checks an upload before the
   final chunk reaches `RequestFile`, and a mismatch fails the run with `DataLoss`. The client
-  checks a download before it moves the file into place. A peer without the field sends no
-  digest, and the receiver takes its file unchecked with a warning.
+  checks a download before it moves the file into place. The digest is required: a final chunk
+  without one breaks the protocol (`InvalidArgument` on the agent).
 
 ## Configuration and command line
 

@@ -439,8 +439,8 @@ func (m *clientFileTransferManager) finishDownload(state *clientFileTransferStat
 
 	// Verified before the rename: damaged bytes must not replace the destination.
 	switch {
-	case digest.Missing(want):
-		slog.Warn("agent sent no checksum, file not verified", "path", state.path)
+	case len(want) == 0:
+		return m.dropTransfer(state.transferID, fmt.Errorf("received file %q: the agent sent no checksum", state.path), stream)
 	case !digest.Match(sum, want):
 		return m.dropTransfer(state.transferID, fmt.Errorf("received file %q: %w: want %s, got %s (%d bytes)",
 			state.path, digest.ErrMismatch, digest.Hex(want), digest.Hex(sum), state.bytes), stream)

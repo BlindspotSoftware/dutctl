@@ -55,23 +55,3 @@ func TestMatch(t *testing.T) {
 		t.Error("Match on altered content = true, want false")
 	}
 }
-
-func TestMissing(t *testing.T) {
-	tests := []struct {
-		name string
-		want []byte
-		miss bool
-	}{
-		{"nil", nil, true},
-		{"empty", []byte{}, true},
-		{"present", digestOf([]byte("x")), false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := digest.Missing(tt.want); got != tt.miss {
-				t.Errorf("Missing = %v, want %v", got, tt.miss)
-			}
-		})
-	}
-}

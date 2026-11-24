@@ -119,8 +119,8 @@ anywhere.
 Files move in chunks of up to 1 MiB, so neither side holds a whole file in memory, and other messages pass between two
 chunks. A transfer has an ID that the agent assigns, and its chunks are numbered from 0; the last one is marked final
 and carries the SHA-256 of the whole file. The receiver checks it before the file counts, and a mismatch fails the run:
-TCP and HTTP/2 check their framing, not the content. A peer from before the checksum sends none; the receiver then takes
-the file unchecked and logs a warning. A run can move several files, one at a time, mixed with Print
+TCP and HTTP/2 check their framing, not the content. The checksum is required: a final chunk without one also fails the
+run. A run can move several files, one at a time, mixed with Print
 messages and consoles. Note that while a console is open, a file transfer waits behind the module's reading of the
 console input.
 

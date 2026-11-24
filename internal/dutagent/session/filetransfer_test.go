@@ -142,11 +142,18 @@ func awaitResult(t *testing.T, result <-chan error) error {
 	}
 }
 
-// uploadChunk is the client's chunk number num of the upload id.
+// uploadChunk is the client's chunk number num of the upload id. A final chunk
+// carries the digest of data, which is the whole file only if the file has one
+// chunk; a test of a longer file sets the digest itself.
 func uploadChunk(id string, num int32, data string, final bool) *pb.RunRequest {
-	return &pb.RunRequest{Msg: &pb.RunRequest_FileChunk{FileChunk: &pb.FileChunk{
-		TransferId: id, ChunkNumber: num, ChunkData: []byte(data), IsFinal: final,
-	}}}
+	chunk := &pb.FileChunk{TransferId: id, ChunkNumber: num, ChunkData: []byte(data), IsFinal: final}
+
+	if final {
+		sum := sha256.Sum256([]byte(data))
+		chunk.Sha256 = sum[:]
+	}
+
+	return &pb.RunRequest{Msg: &pb.RunRequest_FileChunk{FileChunk: chunk}}
 }
 
 // rejectStream takes the download announcement, answers ERROR, then stays
@@ -557,8 +564,12 @@ func TestUploadHappyPath(t *testing.T) {
 
 	id := awaitAnnouncement(t, stream, pb.FileTransferRequest_DIRECTION_UPLOAD)
 
+	final := uploadChunk(id, 1, " contents", true)
+	sum := sha256.Sum256([]byte("firmware image contents"))
+	final.GetFileChunk().Sha256 = sum[:]
+
 	stream.reply <- uploadChunk(id, 0, "firmware image", false)
-	stream.reply <- uploadChunk(id, 1, " contents", true)
+	stream.reply <- final
 
 	if err := awaitResult(t, result); err != nil {
 		t.Fatalf("RequestFile: %v", err)
@@ -588,9 +599,9 @@ func TestUploadHappyPath(t *testing.T) {
 }
 
 // TestUploadDigest covers the three digest outcomes of an upload: verified,
-// unverified (the client predates the field), and damaged. A damaged upload
-// makes RequestFile fail before its final chunk reaches the writer, and fails
-// the run, so the client learns of it even when the module ignores the error.
+// missing and damaged. A missing or wrong digest makes RequestFile fail before
+// the final chunk reaches the writer, and fails the run, so the client learns
+// of it even when the module ignores the error.
 func TestUploadDigest(t *testing.T) {
 	const content = "firmware payload"
 
@@ -603,7 +614,7 @@ func TestUploadDigest(t *testing.T) {
 		wantErr error
 	}{
 		{name: "verified", sum: good[:]},
-		{name: "no digest is accepted", sum: nil},
+		{name: "no digest breaks the protocol", sum: nil, wantErr: ErrBadFileTransfer},
 		{name: "mismatch is rejected", sum: wrong[:], wantErr: ErrFileCorrupt},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -640,16 +651,16 @@ func TestUploadDigest(t *testing.T) {
 			}
 
 			if got.Len() != 0 {
-				t.Errorf("the module got %q of a damaged file", got.String())
+				t.Errorf("the module got %q of an unverified file", got.String())
 			}
 
 			select {
 			case <-runCtx.Done():
-				if cause := context.Cause(runCtx); !errors.Is(cause, ErrFileCorrupt) {
-					t.Errorf("worker failure = %v, want ErrFileCorrupt", cause)
+				if cause := context.Cause(runCtx); !errors.Is(cause, tc.wantErr) {
+					t.Errorf("worker failure = %v, want %v", cause, tc.wantErr)
 				}
 			case <-time.After(5 * time.Second):
-				t.Fatal("a damaged upload did not fail the run")
+				t.Fatal("the upload did not fail the run")
 			}
 		})
 	}

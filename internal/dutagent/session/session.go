@@ -507,13 +507,13 @@ func (s *backend) deliverUploadChunk(ctx context.Context, chunk *pb.FileChunk) e
 // the client sent with the final chunk. It runs before the final chunk reaches
 // RequestFile, so RequestFile returns the error instead of nil, and a module
 // that acts on the file only once RequestFile returned nil never acts on
-// damaged content.
+// damaged content. A final chunk without a digest breaks the protocol.
 func (s *backend) verifyUpload(xfer *transfer, want []byte) error {
 	got := xfer.sum.Sum(nil)
 
 	switch {
-	case digest.Missing(want):
-		log.Scope(s.logger(), scopeSessionUpstream).Warn("client sent no checksum, file not verified", "name", xfer.path)
+	case len(want) == 0:
+		return fmt.Errorf("%w: the final chunk of %q carries no checksum", ErrBadFileTransfer, xfer.path)
 	case !digest.Match(got, want):
 		return fmt.Errorf("%w: %q: want %s, got %s", ErrFileCorrupt, xfer.path, digest.Hex(want), digest.Hex(got))
 	}
