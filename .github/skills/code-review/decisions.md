@@ -66,6 +66,14 @@ Links point to the ADR's Decision outcome.
   confirmed the file or with the reason it failed; the module keeps and closes its reader. A
   session carries one transfer at a time, and a second one while the first runs fails. The
   client writes a download to a temporary file and moves it into place once it is complete.
+- **ADR-0041 Check every file transfer against a SHA-256**
+  → https://github.com/BlindspotSoftware/dutctl/blob/main/docs/decisions/0041-check-every-file-transfer-against-a-sha-256.md#decision-outcome
+  Governs `protobuf/dutctl/v1`, `internal/dutagent/session`, `cmds/dutagent/errmap.go`,
+  `cmds/dutctl`, `internal/digest`. The sender puts the SHA-256 of the whole file on the final
+  chunk; the receiver checks it before the file counts. The agent checks an upload before the
+  final chunk reaches `RequestFile`, and a mismatch fails the run with `DataLoss`. The client
+  checks a download before it moves the file into place. A peer without the field sends no
+  digest, and the receiver takes its file unchecked with a warning.
 
 ## Configuration and command line
 

@@ -205,9 +205,10 @@ func sha256Hex(s string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// corruptingProxy forwards connections to target and flips a byte of the first
-// marker a client sends, once across all connections. Every byte keeps its
-// place, so the stream stays well-formed and only the payload is wrong.
+// corruptingProxy forwards connections to target and flips the last byte of
+// the first marker a client sends, once across all connections. Every byte
+// keeps its place, so the stream stays well-formed and only the payload is
+// wrong.
 func corruptingProxy(t *testing.T, target string, marker []byte) string {
 	t.Helper()
 
@@ -250,12 +251,20 @@ func proxyConn(client net.Conn, target string, marker []byte, done *atomic.Bool)
 
 	buf := make([]byte, 64*1024)
 
+	// tail is the end of the reads before, so a marker that TCP splits across
+	// two reads is found too. The marker's last byte is always in the newest
+	// read, which is not forwarded yet, so that is the byte to flip.
+	var tail []byte
+
 	for {
 		n, err := client.Read(buf)
 
-		if i := bytes.Index(buf[:n], marker); i >= 0 && done.CompareAndSwap(false, true) {
-			buf[i] ^= 0x20
+		seen := append(append([]byte(nil), tail...), buf[:n]...)
+		if i := bytes.Index(seen, marker); i >= 0 && done.CompareAndSwap(false, true) {
+			buf[i+len(marker)-1-len(tail)] ^= 0x20
 		}
+
+		tail = seen[max(0, len(seen)-len(marker)+1):]
 
 		if _, werr := agent.Write(buf[:n]); werr != nil || err != nil {
 			return

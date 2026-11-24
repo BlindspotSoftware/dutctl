@@ -141,8 +141,9 @@ func acquireAutoLock(lk *locker.Locker, device, user, command string) (*locker.L
 // cancellation. It also returns only once the broker's workers have stopped.
 //
 // Errors: when ctx is done, via cancelError (CodeAborted if the agent aborted
-// the run, otherwise CodeCanceled/CodeDeadlineExceeded); a failed stream or a
-// client protocol violation via brokerError; a module failure via moduleError.
+// the run, otherwise CodeCanceled/CodeDeadlineExceeded); a failed stream, a
+// client protocol violation or a damaged upload via brokerError; a module
+// failure via moduleError.
 func runInSession(ctx context.Context, stream session.Stream, mods []dut.Module, moduleArgs [][]string) error {
 	var broker session.Broker
 

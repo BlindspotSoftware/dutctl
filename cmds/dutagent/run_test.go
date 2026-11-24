@@ -1017,10 +1017,10 @@ func TestRunModules(t *testing.T) {
 func TestRunHoldsDeviceUntilModulesReturn(t *testing.T) {
 	tests := []struct {
 		name string
-		// breakUpload makes the module request a file, and the client answer
-		// with a chunk out of sequence. Without it or agentAborts, the client
-		// cancels and hangs up.
-		breakUpload bool
+		// upload makes the module request a file, and the client answer with
+		// the chunk it returns for the transfer's ID. Without it or
+		// agentAborts, the client cancels and hangs up.
+		upload      func(id string) *pb.FileChunk
 		agentAborts bool // the agent aborts its running commands while stopping
 		wantCode    connect.Code
 		wantCause   error // the cause the module's context reports
@@ -1039,10 +1039,22 @@ func TestRunHoldsDeviceUntilModulesReturn(t *testing.T) {
 		{
 			// A gap in an upload's chunks is a protocol violation that fails
 			// the upstream worker, which aborts the modules.
-			name:        "client breaks the file protocol",
-			breakUpload: true,
-			wantCode:    connect.CodeInvalidArgument,
-			wantCause:   session.ErrBadFileTransfer,
+			name: "client breaks the file protocol",
+			upload: func(id string) *pb.FileChunk {
+				return &pb.FileChunk{TransferId: id, ChunkNumber: 1}
+			},
+			wantCode:  connect.CodeInvalidArgument,
+			wantCause: session.ErrBadFileTransfer,
+		},
+		{
+			// An upload that does not match its digest fails the run, also when
+			// the module ignores what RequestFile returned.
+			name: "upload arrives damaged",
+			upload: func(id string) *pb.FileChunk {
+				return &pb.FileChunk{TransferId: id, ChunkData: []byte("image"), IsFinal: true, Sha256: make([]byte, 32)}
+			},
+			wantCode:  connect.CodeDataLoss,
+			wantCause: session.ErrFileCorrupt,
 		},
 	}
 
@@ -1060,8 +1072,8 @@ func TestRunHoldsDeviceUntilModulesReturn(t *testing.T) {
 			svc = newRunService(func(ctx context.Context, s module.Session, _ ...string) error {
 				close(started)
 
-				if tt.breakUpload {
-					// Returns once the broken file protocol ended the run.
+				if tt.upload != nil {
+					// Returns once the client's chunk ended the run.
 					_ = s.RequestFile(ctx, "image.bin", io.Discard)
 				}
 
@@ -1100,14 +1112,12 @@ func TestRunHoldsDeviceUntilModulesReturn(t *testing.T) {
 			}
 
 			switch {
-			case tt.breakUpload:
+			case tt.upload != nil:
 				id := stream.awaitSent(t, func(res *pb.RunResponse) bool {
 					return res.GetFileTransferRequest().GetDirection() == pb.FileTransferRequest_DIRECTION_UPLOAD
 				}).GetFileTransferRequest().GetTransferId()
 
-				stream.push(&pb.RunRequest{Msg: &pb.RunRequest_FileChunk{
-					FileChunk: &pb.FileChunk{TransferId: id, ChunkNumber: 1},
-				}})
+				stream.push(&pb.RunRequest{Msg: &pb.RunRequest_FileChunk{FileChunk: tt.upload(id)}})
 			case tt.agentAborts:
 				abortAgent(errAbortedByShutdown)
 			default:
