@@ -15,7 +15,19 @@ transfers, and a damaged image written to a flash chip can leave a device that
 does not boot. [ADR-0040](0040-transfer-files-in-chunks-over-the-run-stream.md)
 left room for a checksum on the chunks without a change to the module API.
 
+## Considered options
+
+- **Required digest**: a final chunk without a digest breaks the protocol.
+- **Optional digest**: a receiver takes a file without a digest unchecked and
+  logs a warning, as ADR-0040 asks of a field that a later change adds.
+
 ## Decision outcome
+
+Chosen option: **Required digest**, because no release has the chunked
+transfer without the digest. The digest is part of the first version of the
+protocol, not a later change under the rules of ADR-0040, so there is no older
+peer to stay compatible with, and an optional digest would only let a file
+pass unchecked.
 
 Every file transfer carries the SHA-256 of its file, and the receiver checks
 it before the file counts.
@@ -32,8 +44,8 @@ it before the file counts.
   [ADR-0025](0025-map-errors-to-connect-codes-only-in-rpc-handlers.md): the
   request was valid and no module failed, so neither `InvalidArgument` nor
   `Aborted` fits, and `Internal` would hide that the transport is at fault.
-- A peer from before the field sends no digest. The receiver then takes the
-  file unchecked and logs a warning.
+- A final chunk without a digest breaks the protocol. The agent ends the run
+  with `InvalidArgument`, and the client fails the download.
 - The client shows the digest of each file it moved, so a user can compare it
   with the digest of the source.
 
@@ -46,8 +58,8 @@ it before the file counts.
 - Bad, because `RequestFile` writes the file to the module's writer as it
   arrives, so the writer holds damaged content until `RequestFile` returns the
   error. A module acts on the file only once `RequestFile` returned nil.
-- Bad, because a file from a peer without the field passes unchecked, and only
-  the warning in the log shows it.
+- Bad, because a build from between the chunked transfer and the digest
+  cannot transfer files with a later one. No release has such a build.
 - Bad, because both sides hash every byte, which costs CPU time on a small
   agent.
 
@@ -57,7 +69,7 @@ it before the file counts.
 [internal/dutagent/session/filetransfer_test.go](../../internal/dutagent/session/filetransfer_test.go),
 the case "upload arrives damaged" of `TestRunHoldsDeviceUntilModulesReturn` in
 [cmds/dutagent/run_test.go](../../cmds/dutagent/run_test.go),
-`TestHandleFileChunk_CorruptDownloadKeepsOldFile` in
+`TestHandleFileChunk_UnverifiedDownloadKeepsOldFile` in
 [cmds/dutctl/file_transfer_test.go](../../cmds/dutctl/file_transfer_test.go),
 and `TestModulesFileChecksum` in
 [test/integration/modules_test.go](../../test/integration/modules_test.go),
