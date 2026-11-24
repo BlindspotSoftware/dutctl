@@ -514,12 +514,15 @@ func (r *run) releaseInput(input cancelreader.CancelReader) {
 // the run's context once the agent answered, so a cancelled run ends its
 // stream, and the agent its module, only when the client closes it, not
 // before the process exits. The run is cancelled first, so the close does not
-// wait for an answer.
+// wait for an answer. The response is closed first: that resets the stream,
+// which cancels the run on the agent. A request closed first can reach the
+// agent as the end of the user's input, and a module that ends on it ends the
+// run as a success.
 func (r *run) closeStream() {
 	r.cancel()
 
-	_ = r.stream.CloseRequest()
 	_ = r.stream.CloseResponse()
+	_ = r.stream.CloseRequest()
 }
 
 // receiveLoop is the receive routine: it renders the agent's responses, drives
