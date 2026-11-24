@@ -7,6 +7,7 @@ package session
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"io"
 	"slices"
@@ -16,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/BlindspotSoftware/dutctl/internal/digest"
 	"github.com/BlindspotSoftware/dutctl/pkg/module"
 
 	pb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1"
@@ -140,11 +142,18 @@ func awaitResult(t *testing.T, result <-chan error) error {
 	}
 }
 
-// uploadChunk is the client's chunk number num of the upload id.
+// uploadChunk is the client's chunk number num of the upload id. A final chunk
+// carries the digest of data, which is the whole file only if the file has one
+// chunk; a test of a longer file sets the digest itself.
 func uploadChunk(id string, num int32, data string, final bool) *pb.RunRequest {
-	return &pb.RunRequest{Msg: &pb.RunRequest_FileChunk{FileChunk: &pb.FileChunk{
-		TransferId: id, ChunkNumber: num, ChunkData: []byte(data), IsFinal: final,
-	}}}
+	chunk := &pb.FileChunk{TransferId: id, ChunkNumber: num, ChunkData: []byte(data), IsFinal: final}
+
+	if final {
+		sum := sha256.Sum256([]byte(data))
+		chunk.Sha256 = sum[:]
+	}
+
+	return &pb.RunRequest{Msg: &pb.RunRequest_FileChunk{FileChunk: chunk}}
 }
 
 // rejectStream takes the download announcement, answers ERROR, then stays
@@ -365,8 +374,9 @@ func awaitStatus(t *testing.T, s *scriptedStream, want pb.FileTransferResponse_S
 }
 
 // TestDownloadHappyPath covers the agent's download state machine end to end:
-// announce, stream every chunk in order, mark the last one final, and return
-// from SendFile only once the client confirms completion.
+// announce, stream every chunk in order, mark the last one final with the
+// file's digest, and return from SendFile only once the client confirms
+// completion.
 func TestDownloadHappyPath(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -377,6 +387,8 @@ func TestDownloadHappyPath(t *testing.T) {
 	for i := range content {
 		content[i] = byte(i % 251)
 	}
+
+	sum := sha256.Sum256(content)
 
 	stream := newScriptedStream()
 	defer close(stream.stop)
@@ -418,6 +430,16 @@ func TestDownloadHappyPath(t *testing.T) {
 
 		if c.GetFileSize() != wantSize {
 			t.Errorf("chunk %d file size = %d, want %d", i, c.GetFileSize(), wantSize)
+		}
+
+		// The digest of the whole file goes on the final chunk only.
+		var wantSum []byte
+		if c.GetIsFinal() {
+			wantSum = sum[:]
+		}
+
+		if !bytes.Equal(c.GetSha256(), wantSum) {
+			t.Errorf("chunk %d digest = %s, want %s", i, digest.Hex(c.GetSha256()), digest.Hex(wantSum))
 		}
 
 		offset += int64(len(c.GetChunkData()))
@@ -542,8 +564,12 @@ func TestUploadHappyPath(t *testing.T) {
 
 	id := awaitAnnouncement(t, stream, pb.FileTransferRequest_DIRECTION_UPLOAD)
 
+	final := uploadChunk(id, 1, " contents", true)
+	sum := sha256.Sum256([]byte("firmware image contents"))
+	final.GetFileChunk().Sha256 = sum[:]
+
 	stream.reply <- uploadChunk(id, 0, "firmware image", false)
-	stream.reply <- uploadChunk(id, 1, " contents", true)
+	stream.reply <- final
 
 	if err := awaitResult(t, result); err != nil {
 		t.Fatalf("RequestFile: %v", err)
@@ -569,6 +595,74 @@ func TestUploadHappyPath(t *testing.T) {
 	// at once.
 	if carried(&b.session) != nil {
 		t.Error("upload still registered after RequestFile returned")
+	}
+}
+
+// TestUploadDigest covers the three digest outcomes of an upload: verified,
+// missing and damaged. A missing or wrong digest makes RequestFile fail before
+// the final chunk reaches the writer, and fails the run, so the client learns
+// of it even when the module ignores the error.
+func TestUploadDigest(t *testing.T) {
+	const content = "firmware payload"
+
+	good := sha256.Sum256([]byte(content))
+	wrong := sha256.Sum256([]byte("something else entirely"))
+
+	for _, tc := range []struct {
+		name    string
+		sum     []byte
+		wantErr error
+	}{
+		{name: "verified", sum: good[:]},
+		{name: "no digest breaks the protocol", sum: nil, wantErr: ErrBadFileTransfer},
+		{name: "mismatch is rejected", sum: wrong[:], wantErr: ErrFileCorrupt},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stream := newScriptedStream()
+			defer close(stream.stop)
+
+			b := &Broker{}
+			sess, runCtx := b.Start(context.Background(), stream)
+
+			var got bytes.Buffer
+
+			result := requestFileAsync(context.Background(), sess, "fw.bin", &got)
+			id := awaitAnnouncement(t, stream, pb.FileTransferRequest_DIRECTION_UPLOAD)
+
+			chunk := uploadChunk(id, 0, content, true)
+			chunk.GetFileChunk().Sha256 = tc.sum
+			stream.reply <- chunk
+
+			err := awaitResult(t, result)
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("RequestFile err = %v, want %v", err, tc.wantErr)
+			}
+
+			if tc.wantErr == nil {
+				if got.String() != content {
+					t.Errorf("module got %q, want %q", got.String(), content)
+				}
+
+				return
+			}
+
+			if !strings.Contains(err.Error(), digest.Hex(tc.sum)) {
+				t.Errorf("err = %q, want it to name the expected digest", err)
+			}
+
+			if got.Len() != 0 {
+				t.Errorf("the module got %q of an unverified file", got.String())
+			}
+
+			select {
+			case <-runCtx.Done():
+				if cause := context.Cause(runCtx); !errors.Is(cause, tc.wantErr) {
+					t.Errorf("worker failure = %v, want %v", cause, tc.wantErr)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("the upload did not fail the run")
+			}
+		})
 	}
 }
 

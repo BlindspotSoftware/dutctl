@@ -9,12 +9,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"log/slog"
 	"strconv"
 	"sync"
 	"sync/atomic"
 
+	"github.com/BlindspotSoftware/dutctl/internal/digest"
 	"github.com/BlindspotSoftware/dutctl/internal/log"
 
 	pb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/v1"
@@ -47,10 +49,11 @@ type transfer struct {
 	// back.
 	chunks chan *pb.FileChunk
 	// lastChunk is the number of the upload's last chunk handed over, for the
-	// order check, and final says that it was the final one. Only
-	// fromClientWorker uses them.
+	// order check, final says that it was the final one, and sum digests the
+	// chunks handed over. Only fromClientWorker uses them.
 	lastChunk int32
 	final     bool
+	sum       hash.Hash
 
 	// done is closed once the transfer ended, and err is its outcome then: nil
 	// once the receiver has the whole file, or why it does not.
@@ -210,10 +213,13 @@ func (s *backend) SendFile(ctx context.Context, name string, size int64, r io.Re
 }
 
 // streamDownload reads r a chunk at a time and hands each chunk to
-// toClientWorker, reading the next once the last one went out. After the final
-// chunk it waits for the client's confirmation. It returns the outcome.
+// toClientWorker, reading the next once the last one went out. The final chunk
+// carries the digest of the whole file. After it, streamDownload waits for the
+// client's confirmation. It returns the outcome.
 func (s *backend) streamDownload(ctx context.Context, xfer *transfer, size int64, r io.Reader) error {
 	var offset int64
+
+	sum := digest.New()
 
 	for number := int32(0); ; number++ {
 		buf := make([]byte, chunkSize)
@@ -239,9 +245,7 @@ func (s *backend) streamDownload(ctx context.Context, xfer *transfer, size int64
 			ChunkOffset: offset,
 			IsFinal:     final,
 		}
-		if number == 0 {
-			chunk.FileSize = size
-		}
+		describe(chunk, size, sum)
 
 		// Track the real offset rather than number*chunkSize: a short read is
 		// legal and leaves chunks smaller than the maximum.
@@ -260,6 +264,21 @@ func (s *backend) streamDownload(ctx context.Context, xfer *transfer, size int64
 
 			return err
 		}
+	}
+}
+
+// describe puts what the sender knows of its file on chunk: the size on chunk
+// 0, and on the final chunk the digest of the whole file, which sum has taken
+// in by then.
+func describe(chunk *pb.FileChunk, size int64, sum hash.Hash) {
+	sum.Write(chunk.GetChunkData())
+
+	if chunk.GetChunkNumber() == 0 {
+		chunk.FileSize = size
+	}
+
+	if chunk.GetIsFinal() {
+		chunk.Sha256 = sum.Sum(nil)
 	}
 }
 
@@ -320,6 +339,7 @@ func (s *backend) startTransfer(ctx context.Context, path string, direction pb.F
 		path:      path,
 		direction: direction,
 		lastChunk: -1,
+		sum:       digest.New(),
 		chunks:    make(chan *pb.FileChunk),
 		done:      make(chan struct{}),
 	}
@@ -463,11 +483,39 @@ func (s *backend) deliverUploadChunk(ctx context.Context, chunk *pb.FileChunk) e
 
 	xfer.lastChunk = chunk.GetChunkNumber()
 	xfer.final = chunk.GetIsFinal()
+	xfer.sum.Write(chunk.GetChunkData())
+
+	if xfer.final {
+		err := s.verifyUpload(xfer, chunk.GetSha256())
+		if err != nil {
+			_ = xfer.finish(err)
+
+			return err
+		}
+	}
 
 	select {
 	case xfer.chunks <- chunk:
 	case <-xfer.done:
 	case <-ctx.Done():
+	}
+
+	return nil
+}
+
+// verifyUpload checks the digest of a complete upload against want, the one
+// the client sent with the final chunk. It runs before the final chunk reaches
+// RequestFile, so RequestFile returns the error instead of nil, and a module
+// that acts on the file only once RequestFile returned nil never acts on
+// damaged content. A final chunk without a digest breaks the protocol.
+func (s *backend) verifyUpload(xfer *transfer, want []byte) error {
+	got := xfer.sum.Sum(nil)
+
+	switch {
+	case len(want) == 0:
+		return fmt.Errorf("%w: the final chunk of %q carries no checksum", ErrBadFileTransfer, xfer.path)
+	case !digest.Match(got, want):
+		return fmt.Errorf("%w: %q: want %s, got %s", ErrFileCorrupt, xfer.path, digest.Hex(want), digest.Hex(got))
 	}
 
 	return nil

@@ -1346,6 +1346,7 @@ type FileChunk struct {
 	ChunkData     []byte                 `protobuf:"bytes,3,opt,name=chunk_data,json=chunkData,proto3" json:"chunk_data,omitempty"`        // File data chunk (max 1 MiB)
 	ChunkOffset   int64                  `protobuf:"varint,4,opt,name=chunk_offset,json=chunkOffset,proto3" json:"chunk_offset,omitempty"` // Byte offset in the file
 	IsFinal       bool                   `protobuf:"varint,5,opt,name=is_final,json=isFinal,proto3" json:"is_final,omitempty"`             // Whether this is the last chunk
+	Sha256        []byte                 `protobuf:"bytes,6,opt,name=sha256,proto3" json:"sha256,omitempty"`                               // Raw 32-byte SHA-256 of the whole file, required on the final chunk, empty on the others
 	FileSize      int64                  `protobuf:"varint,7,opt,name=file_size,json=fileSize,proto3" json:"file_size,omitempty"`          // Size of the whole file, on chunk 0 only; 0 if unknown
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1414,6 +1415,13 @@ func (x *FileChunk) GetIsFinal() bool {
 		return x.IsFinal
 	}
 	return false
+}
+
+func (x *FileChunk) GetSha256() []byte {
+	if x != nil {
+		return x.Sha256
+	}
+	return nil
 }
 
 func (x *FileChunk) GetFileSize() int64 {
@@ -1822,7 +1830,7 @@ const file_dutctl_v1_dutctl_proto_rawDesc = "" +
 	"\x03eof\x18\x02 \x01(\v2\x15.dutctl.v1.ConsoleEofH\x00R\x03eofB\t\n" +
 	"\acontrol\"\f\n" +
 	"\n" +
-	"ConsoleEof\"\xc9\x01\n" +
+	"ConsoleEof\"\xe1\x01\n" +
 	"\tFileChunk\x12\x1f\n" +
 	"\vtransfer_id\x18\x01 \x01(\tR\n" +
 	"transferId\x12!\n" +
@@ -1830,7 +1838,8 @@ const file_dutctl_v1_dutctl_proto_rawDesc = "" +
 	"\n" +
 	"chunk_data\x18\x03 \x01(\fR\tchunkData\x12!\n" +
 	"\fchunk_offset\x18\x04 \x01(\x03R\vchunkOffset\x12\x19\n" +
-	"\bis_final\x18\x05 \x01(\bR\aisFinal\x12\x1b\n" +
+	"\bis_final\x18\x05 \x01(\bR\aisFinal\x12\x16\n" +
+	"\x06sha256\x18\x06 \x01(\fR\x06sha256\x12\x1b\n" +
 	"\tfile_size\x18\a \x01(\x03R\bfileSize\"\xe8\x01\n" +
 	"\x13FileTransferRequest\x12\x1f\n" +
 	"\vtransfer_id\x18\x01 \x01(\tR\n" +

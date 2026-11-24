@@ -148,3 +148,5 @@ cover both ends of the protocol.
 - [docs/README.md](../README.md): the messages of a download and an upload.
 - [protobuf/dutctl/v1/dutctl.proto](../../protobuf/dutctl/v1/dutctl.proto): the
   transfer messages.
+- [ADR-0041](0041-check-every-file-transfer-against-a-sha-256.md): adds the
+  SHA-256 on the final chunk.

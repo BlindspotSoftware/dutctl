@@ -95,5 +95,7 @@ mapping helpers return.
     aborts while it stops (see
     [ADR-0029](0029-run-the-run-rpc-as-straight-line-code.md) to
     [ADR-0032](0032-stop-the-agent-in-stages.md)).
+- [ADR-0041](0041-check-every-file-transfer-against-a-sha-256.md): adds
+  `DataLoss` for an upload that does not match its checksum.
 
 Recorded retroactively in October 2026.

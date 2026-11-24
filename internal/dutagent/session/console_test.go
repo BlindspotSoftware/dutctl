@@ -285,9 +285,7 @@ func TestConsoleInputWithoutConsoleKeepsFilesFlowing(t *testing.T) {
 	assertKinds(t, announced, "file-request:f.txt")
 
 	id := announced[0].GetFileTransferRequest().GetTransferId()
-	stream.push(t, &pb.RunRequest{Msg: &pb.RunRequest_FileChunk{FileChunk: &pb.FileChunk{
-		TransferId: id, ChunkData: []byte("data"), IsFinal: true,
-	}}})
+	stream.push(t, uploadChunk(id, 0, "data", true))
 
 	select {
 	case res := <-got:

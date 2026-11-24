@@ -100,9 +100,10 @@ superseding ADR or is breaking.
   of a busy device, a client of another major version or a stopping agent; PermissionDenied for
   releasing another owner's lock; Unauthenticated for locking, or a release without force, by a
   caller without a name; Aborted for a failed module, a run that broke off before its command
-  came, or a run aborted by the stop; Internal for anything else, while a connect error from the
-  transport keeps its code.
+  came, or a run aborted by the stop; DataLoss for an upload that does not match its checksum;
+  Internal for anything else, while a connect error from the transport keeps its code.
   → https://github.com/BlindspotSoftware/dutctl/blob/main/docs/decisions/0025-map-errors-to-connect-codes-only-in-rpc-handlers.md#decision-outcome
+  → https://github.com/BlindspotSoftware/dutctl/blob/main/docs/decisions/0041-check-every-file-transfer-against-a-sha-256.md#decision-outcome
 
 ## Tests
 

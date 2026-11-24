@@ -346,7 +346,8 @@ func (a *rpcService) Unlock(
 // device or command; CodeFailedPrecondition when another owner holds the device,
 // it is already running the same command for the caller or the agent is
 // shutting down; CodeAborted if the initial receive or a module fails, or the
-// agent aborts the run while it stops;
+// agent aborts the run while it stops; CodeDataLoss if an upload does not
+// match its checksum (session.ErrFileCorrupt);
 // CodeCanceled/CodeDeadlineExceeded on cancellation; a failed stream keeps the
 // transport's connect code; CodeInternal otherwise.
 func (a *rpcService) Run(

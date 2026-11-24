@@ -192,6 +192,7 @@ message FileChunk {
   bytes chunk_data = 3; // File data chunk (max 1 MiB)
   int64 chunk_offset = 4; // Byte offset in the file
   bool is_final = 5; // Whether this is the last chunk
+  bytes sha256 = 6; // Raw 32-byte SHA-256 of the whole file, required on the final chunk, empty on the others
   int64 file_size = 7; // Size of the whole file, on chunk 0 only; 0 if unknown
 }
 
