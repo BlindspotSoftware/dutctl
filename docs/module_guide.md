@@ -114,6 +114,24 @@ With this in place, the _dutagent_ can use modules by using anonymous imports, e
 _ "github.com/BlindspotSoftware/dutctl/pkg/module/demo"
 ```
 
+## Package layout
+
+A package under `pkg/module` holds one or more modules. Its file names show where each module starts and
+which files are backends:
+
+- A module starts in the file named after its `ID`, without the package name in front: `gpio-button` starts
+  in `gpio/button.go`, and `serial` in `serial/serial.go`. That file has the module's `init()` with
+  `module.Register`, its struct and its `Help()`.
+- `<package>.go` holds what the modules of a package share, such as the package comment and common
+  types. A package with a single module named like the package keeps it all in that file. A module can be
+  split into more files by topic, for example `serial/engine.go`.
+- A backend is one of several ways to reach the hardware, chosen in `Init` by an option in the `with` map.
+  The backend interface and the code that picks an implementation belong to the shared code in `<package>.go`.
+  Each implementation is in `backend_<value>.go`, where `<value>` is the option value that selects it.
+
+`gpio` is an example: `button.go`, `sensor.go` and `switch.go` are its modules, `gpio.go` is the shared code with
+the backend interface, and `backend_devmem.go` is its only backend.
+
 ## Configuration
 A module can be dynamically configured when starting a _dutagent_ using the `with` map in the
 [_dutagent_ configuration](./dutagent-config.md#module). A module must be of type `struct` and have the configuration as
