@@ -283,6 +283,22 @@ Links point to the ADR's Decision outcome.
   convention changes its rule too. Rules leave out what CI and the linters check and what concerns
   single commits.
 
+## Documentation
+
+- **ADR-0041 Structure the documentation by Diátaxis with a guide per role**
+  → https://github.com/BlindspotSoftware/dutctl/blob/main/docs/decisions/0041-structure-the-documentation-by-diataxis-with-a-guide-per-role.md#decision-outcome
+  Governs `docs/`, the READMEs, `site/data/pages.yaml`, the help texts of `cmds/dutctl` and
+  `cmds/dutagent`, the doc comments of `pkg/module`. Each page is one Diátaxis type: tutorials in
+  Get started, how-to guides in the guide of their role, reference and explanation shared. Every
+  fact has one home; what the code states, the help texts, doc comments and code examples, is
+  embedded, not copied, and improved in the code. A split keeps the file of one part.
+- **ADR-0042 Publish the documentation with Hugo and Relearn on GitHub Pages**
+  → https://github.com/BlindspotSoftware/dutctl/blob/main/docs/decisions/0042-publish-the-documentation-with-hugo-and-relearn-on-github-pages.md#decision-outcome
+  Governs `site/`, `.github/workflows/docs.yml`. `site/data/pages.yaml` places each file; a file
+  starts with its `#` title and has no front matter. Program output comes from `site/generate.sh` at
+  build time and is never committed. The build fails on a broken Markdown link, an unplaced page of
+  `docs/` or a failed embed; the Hugo version is pinned in the workflow.
+
 ## Superseded: never cite as current
 
 - ADR-0003 Run a command over one bidirectional stream: superseded by ADR-0040.
