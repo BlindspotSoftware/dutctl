@@ -1,0 +1,8 @@
+{{- /* An image of the repository, linked relative to the page's file, comes
+from GitHub, as it does on GitHub. */}}
+{{- $dest := .Destination }}
+{{- $u := urls.Parse $dest }}
+{{- with and .Page.Params.source (not $u.Scheme) (not (hasPrefix $dest "/")) }}
+  {{- $dest = printf "https://raw.githubusercontent.com/BlindspotSoftware/dutctl/main/%s" (path.Clean (path.Join (path.Dir $.Page.Params.source) $u.Path)) }}
+{{- end }}
+<img src="{{ $dest }}" alt="{{ .Text }}"{{ with .Title }} title="{{ . }}"{{ end }} loading="lazy">

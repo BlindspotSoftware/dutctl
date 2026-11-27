@@ -1,18 +1,17 @@
-# WiFi Socket (Tasmota) module
+# WiFi socket (Tasmota)
 
-This module controls Tasmota-based WiFi sockets (for example NOUS A1T) via the device HTTP API (/cm endpoint).
+The module `wifisocket` controls Tasmota-based WiFi sockets (for example NOUS A1T) via the device HTTP API (/cm endpoint).
 
 **Note**: This module currently supports only Tasmota-based WiFi sockets.
 
 This module is intended to be used as part of `dutagent`, allowing automated power control of a DUT (Device Under Test) through a network-accessible wifisocket.
 
-## Usage
+## Arguments
 
 ```
 wifisocket [on|off|toggle|status]
 ```
 
-### Commands
 
 | Command  | Description                                   |
 | -------- | --------------------------------------------- |
@@ -31,3 +30,7 @@ If no command is provided, the module prints a usage message and exits.
 | `user`     | string | (Optional) HTTP Basic Auth username                                         |
 | `password` | string | (Optional) HTTP Basic Auth password                                         |
 | `channel`  | int    | Channel number to control (1 for single-outlet devices)                     |
+
+## Example
+
+See [wifisocket-example-cfg.yml](./wifisocket-example-cfg.yml).

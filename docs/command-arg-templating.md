@@ -1,20 +1,13 @@
-# Command Arguments Guide
+# Let a command take arguments
 
-This guide explains the three ways to handle arguments in dutctl commands: static, passthrough, and templating.
+A command hands arguments to its modules in one of three ways: fixed in the configuration, passed through from the
+user to one module, or declared by the command and placed into the modules' arguments. This guide shows how to
+configure each in the agent's configuration file. The [configuration reference](./dutagent-config.md#command-arguments)
+lists the rules.
 
-## Three Mutually Exclusive Approaches
+## Fix the arguments
 
-Commands support three approaches for arguments. **These approaches are mutually exclusive** - a command must use exactly one:
-
-1. **Static Commands** - Static values only, no runtime arguments
-2. **Passthrough Commands** - Single passthrough module receives all runtime arguments
-3. **Command-Level Templating** - Named arguments distributed to modules via templates
-
-You cannot mix approaches (e.g., a command cannot have both a passthrough module AND command-level args).
-
-## Static Commands
-
-For commands without runtime arguments, you specify static values directly in module args:
+If the user passes nothing, give each module its arguments with `args`:
 
 ```yaml
 devices:
@@ -37,17 +30,16 @@ devices:
             args: ["on"]
 ```
 
-Usage:
+Users run:
 
 ```bash
 dutctl my-device power-cycle
 ```
 
-No runtime arguments needed - all values are configured in the YAML.
+## Pass the user's arguments through to one module
 
-## Passthrough Commands
-
-Commands with a passthrough module pass all runtime arguments directly to that module:
+If the command takes exactly the arguments of one module, in that module's syntax, mark the module as the
+passthrough module. Its help becomes the command's help.
 
 ```yaml
 devices:
@@ -60,19 +52,18 @@ devices:
             passthrough: true
 ```
 
-Usage:
+Users run:
 
 ```bash
 dutctl my-device run-command "ls -la /tmp"
 ```
 
-The passthrough module receives: `["ls -la /tmp"]`. The shell module expects the whole command as one argument, hence the quotes.
+The module receives `["ls -la /tmp"]`. The shell module expects the whole command as one argument, so users quote it.
 
-All runtime arguments go to the passthrough module - you cannot have multiple passthrough modules in one command.
+## Name the arguments and place them
 
-## Command-Level Templating
-
-Declare named arguments at the command level and distribute them to modules using `${arg-name}` template syntax. Arguments are mapped positionally in declaration order.
+If the command takes arguments of its own and hands them to several modules, declare them under the command's `args`,
+and put `${name}` where a module needs a value:
 
 ```yaml
 flash-firmware:
@@ -95,17 +86,21 @@ flash-firmware:
       args: ["write", "${firmware-file}"]
 ```
 
-Usage: `dutctl device flash-firmware fw.bin /backup/old.bin`
+Users pass the values in the order of the declaration:
 
-Templates can be embedded in strings (`/configs/${name}.yaml`) and mixed with static values (`["${file}", "static", "${other}"]`).
+```bash
+dutctl device flash-firmware fw.bin /backup/old.bin
+```
 
-> **Note:** Arguments are matched by position, not by name. The first runtime
-> argument maps to the first declared arg, the second to the second, and so on.
-> Reordering the `args` declarations changes which runtime value each template receives.
+> **Note:** Arguments are matched by position, not by name. Reordering the `args` declarations changes which value
+> each template receives.
+
+A template may be part of a longer argument, such as `/configs/${name}.yaml`, and stand beside fixed values, such as
+`["${file}", "static", "${other}"]`.
 
 ## Examples
 
-### Flash with Verification
+### Flash with verification
 
 ```yaml
 flash-verify:
@@ -131,7 +126,7 @@ flash-verify:
 dutctl device flash-verify /path/to/firmware.bin
 ```
 
-### GPIO Control with Parameters
+### Pulse a GPIO line
 
 ```yaml
 gpio-pulse:

@@ -1,0 +1,15 @@
+{{- /* Builds every page of the site, but the home page, from data/pages.yaml.
+A page shows a file of the repository, or a part of one, or the output of a
+program written to generated/ by generate.sh. The files stay plain GitHub
+Markdown: the title is the first heading, and no front matter is added. */}}
+{{- range $i, $s := hugo.Data.pages.sections }}
+  {{- partial "dutctl/section.gotmpl" (dict "ctx" $ "s" $s "parent" "" "weight" (add $i 1) "type" "" "roles" slice) }}
+{{- end }}
+{{- /* Every page of docs/ is on the site; docs/README.md points to it. */}}
+{{- $placed := hugo.Store.Get "placed" | default slice }}
+{{- range resources.Match "repo/docs/*.md" }}
+  {{- $f := strings.TrimPrefix "repo/" (strings.TrimPrefix "/" .Name) }}
+  {{- if and (ne $f "docs/README.md") (not (in $placed $f)) }}
+    {{- errorf "%s is not placed in site/data/pages.yaml" $f }}
+  {{- end }}
+{{- end }}

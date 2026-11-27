@@ -108,7 +108,7 @@ through pipes and checks the bytes in both directions.
 
 ## More information
 
-- [docs/README.md](../README.md#communication-design) describes the console
+- [docs/rpc-protocol.md](../rpc-protocol.md) describes the console
   protocol, and [docs/module_guide.md](../module_guide.md#console) the module
   contract. [cmds/dutctl/console.go](../../cmds/dutctl/console.go) and
   [session/console.go](../../internal/dutagent/session/console.go) hold the

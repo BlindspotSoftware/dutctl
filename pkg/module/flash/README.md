@@ -1,8 +1,8 @@
-The _flash_ package provides a single module:
-
 # Flash
 
-Read or write the SPI flash on the DUT.
+The module `flash` reads or writes the SPI flash on the DUT.
+
+## Arguments
 
 ```
 ARGUMENTS:
@@ -19,11 +19,13 @@ Functionality is tested with DediProg programmers.
 
 While a run lasts, the image is kept on the _dutagent_ in a directory of its own under the temporary directory (`$TMPDIR`, `/tmp` if unset), which the run removes when it ends. Flash runs that overlap never see each other's image. The temporary directory needs room for the images of all flash runs at once; on a `tmpfs` that room is RAM.
 
-See [flash-example-cfg.yml](./flash-example-cfg.yml) for examples.
-
 ## Configuration Options
 
-| Option     | Value  | Description                                                                                       |
+| Option     | Type   | Description                                                                                       |
 |------------|--------|---------------------------------------------------------------------------------------------------|
 | tool       | string | Path to the flasher tool binary on the _dutagent_. Supported: flashrom, flashprog, dpcmd. |
 | programmer | string | Specifics of the flasher hardware. For flashrom/flashprog: programmer name (e.g., "dediprog"). For dpcmd: (Optional) USB device number. Required for flashrom/flashprog, optional for dpcmd. See the respective flash-tool documentation for supported values. |
+
+## Example
+
+See [flash-example-cfg.yml](./flash-example-cfg.yml).

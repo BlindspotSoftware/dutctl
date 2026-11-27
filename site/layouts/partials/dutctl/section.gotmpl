@@ -1,0 +1,50 @@
+{{- /* Adds a section of data/pages.yaml, its pages and its subsections.
+Arguments: ctx, the content adapter; s, the section; parent, the parent's
+path; weight; type and roles, inherited from the parent. */}}
+{{- $s := .s }}
+{{- $path := $s.slug }}
+{{- with .parent }}{{ $path = printf "%s/%s" . $s.slug }}{{ end }}
+{{- $type := $s.type | default .type }}
+{{- $roles := $s.roles | default .roles }}
+{{- $doc := dict "title" "" "body" "" "params" dict "description" "" }}
+{{- with $s.source }}
+  {{- hugo.Store.Add "placed" (slice .) }}
+  {{- $doc = partial "dutctl/read.gotmpl" (dict "source" . "parts" $s.parts) }}
+{{- end }}
+{{- $intro := $s.intro | default "" }}
+{{- $body := printf "%s\n\n%s\n\n{{< hub >}}\n" $intro $doc.body }}
+{{- $params := dict
+  "type" $type
+  "roles" $roles
+  "source" ($s.source | default "")
+  "parts" ($s.parts | default slice)
+  "listing" ($s.listing | default "")
+  "featured" ($s.featured | default false)
+  "description" ($s.description | default $doc.description | default (partial "dutctl/description.gotmpl" $intro))
+  "menuPost" (partial "dutctl/roles.gotmpl" $roles)
+}}
+{{- .ctx.AddPage (dict
+  "kind" "section"
+  "path" $path
+  "title" ($s.title | default $doc.title)
+  "description" $params.description
+  "weight" ($s.weight | default .weight)
+  "params" $params
+  "content" (dict "mediaType" "text/markdown" "value" $body)
+) }}
+{{- $n := 0 }}
+{{- range $s.pages }}
+  {{- $n = add $n 1 }}
+  {{- partial "dutctl/page.gotmpl" (dict "ctx" $.ctx "p" . "parent" $path "weight" $n "type" $type "roles" $roles) }}
+{{- end }}
+{{- with $s.glob }}
+  {{- range resources.Match (printf "repo/%s" .) }}
+    {{- $n = add $n 1 }}
+    {{- $src := strings.TrimPrefix "repo/" (strings.TrimPrefix "/" .Name) }}
+    {{- partial "dutctl/page.gotmpl" (dict "ctx" $.ctx "p" (dict "source" $src "hidden" ($s.hidepages | default false)) "parent" $path "weight" $n "type" $type "roles" $roles) }}
+  {{- end }}
+{{- end }}
+{{- range $s.sections }}
+  {{- $n = add $n 1 }}
+  {{- partial "dutctl/section.gotmpl" (dict "ctx" $.ctx "s" . "parent" $path "weight" $n "type" $type "roles" $roles) }}
+{{- end }}

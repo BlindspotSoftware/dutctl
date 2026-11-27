@@ -13,7 +13,8 @@ license headers, the build and race-free tests of every commit, and where `slog`
 
 More rules apply by path, from `.github/instructions/`. The `code-review` skill in
 `.github/skills/code-review/` lists the constraint of every ADR and which test layer a change
-needs.
+needs. The `docs-review` skill in `.github/skills/docs-review/` holds the
+checks for documentation, by Diátaxis type.
 
 ## Decisions and public interfaces
 

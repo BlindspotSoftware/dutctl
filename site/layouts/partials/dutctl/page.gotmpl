@@ -1,0 +1,41 @@
+{{- /* Adds a page of data/pages.yaml. Arguments: ctx, the content adapter; p,
+the page entry; parent, the section's path; weight; type and roles, inherited
+from the section. */}}
+{{- $p := .p }}
+{{- $type := $p.type | default .type }}
+{{- $roles := $p.roles | default .roles }}
+{{- $doc := dict "title" "" "body" "" "params" dict "description" "" }}
+{{- with $p.source }}
+  {{- $doc = partial "dutctl/read.gotmpl" (dict "source" . "parts" $p.parts) }}
+{{- end }}
+{{- with $p.source }}{{ hugo.Store.Add "placed" (slice .) }}{{ end }}
+{{- $body := $doc.body }}
+{{- with $p.embed }}
+  {{- $body = printf "%s\n\n%s\n\n%s" ($p.lead | default "") (partial "dutctl/embed.gotmpl" (dict "path" .)) $body }}
+{{- end }}
+{{- $slug := $p.slug }}
+{{- if not $slug }}
+  {{- $slug = path.BaseName $p.source }}
+  {{- if eq $slug "README" }}{{ $slug = path.Base (path.Dir $p.source) }}{{ end }}
+{{- end }}
+{{- $badge := partial "dutctl/badge.gotmpl" (dict "type" $type "roles" $roles "params" $doc.params "source" ($p.source | default "")) }}
+{{- $params := merge $doc.params (dict
+  "type" $type
+  "roles" $roles
+  "source" ($p.source | default $p.for | default "")
+  "parts" ($p.parts | default slice)
+  "featured" ($p.featured | default false)
+  "description" ($p.description | default $doc.description | default (partial "dutctl/description.gotmpl" ($p.lead | default "")))
+  "menuPost" (partial "dutctl/roles.gotmpl" $roles)
+  "headingPost" $badge
+  "hidden" ($p.hidden | default false)
+) }}
+{{- .ctx.AddPage (dict
+  "kind" "page"
+  "path" (printf "%s/%s" .parent $slug)
+  "title" ($p.title | default $doc.title)
+  "description" $params.description
+  "weight" ($p.weight | default .weight)
+  "params" $params
+  "content" (dict "mediaType" "text/markdown" "value" $body)
+) }}

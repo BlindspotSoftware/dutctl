@@ -1,10 +1,8 @@
-The _time_ package is a collection of the following dutagent modules:
-
-- [Wait](#Wait)
-
 # Wait
 
-This module waits for a specific amount of time. 
+The module `time-wait` waits for a specific amount of time.
+
+## Arguments
 
 ```
 SYNOPSIS:
@@ -18,14 +16,15 @@ Valid time units are "ns", "us" (or "µs"), "ms", "s", "m", "h".`
 If no duration is passed the module waits for a default duration. This is either set via
 the module's configuration or falls back to an internal default. The value passed via the
 command line overrides the configured duration, the configured duration override the internal
-default value. 
-
-See [time-example-cfg.yml](./time-example-cfg.yml) for examples. 
+default value.
 
 ## Configuration Options
 
+| Option   | Type   | Description                          |
+|----------|--------|--------------------------------------|
+| duration | string | See the description of the argument. |
 
-| Option | Value | Description
-|----------|--------|------------------------------------|
-| duration | string | See description of cmdline argument
+## Example
+
+See [time-example-cfg.yml](./time-example-cfg.yml).
 

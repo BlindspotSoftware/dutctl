@@ -47,7 +47,7 @@ If a device and a command are provided, dutctl will execute the command on the d
 The optional args are passed to the command.
 
 To list all available devices, use the list command. If only a device is provided,
-dutctl list all available commands for the device.
+dutctl lists all available commands for the device.
 
 If a device, a command and the keyword help are provided, dutctl will show usage
 information for the command.
@@ -80,6 +80,23 @@ TUI: a prompt that walks from hosts to devices to commands and runs them there.
 Elsewhere, or with a structured output format, it defaults to the list command.
 `
 
+const usageEnvironment = `
+ENVIRONMENT:
+	USER, host name  make up the default identity <user>@<host> of -u; where one
+	                 is missing, as in some CI containers, pass -u.
+	TERM             a bare dutctl opens the TUI only if TERM is set and not dumb.
+	NO_COLOR         any value turns colour off in the TUI.
+	XDG_STATE_HOME   the TUI keeps its history in $XDG_STATE_HOME/dutctl/history,
+	                 by default in ~/.local/state/dutctl/history.
+
+EXIT STATUS:
+	0    success
+	1    the command failed or was refused, the agent was not reached, or the
+	     command line was invalid
+	2    an unknown option
+	130  interrupted by Ctrl-C, SIGTERM or SIGHUP
+`
+
 // Usage strings for the command-line flags, shown in the OPTIONS section of dutctl -h.
 const (
 	serverAddrUsage   = `Address of the dutagent to connect to in the format: address[:port], the port defaults to ` + rpc.DefaultPort
@@ -87,7 +104,7 @@ const (
 	verboseUsage      = `Annotate output with connection/RPC context (metadata)`
 	noColorUsage      = `Disable colored output`
 	userUsage         = `User Identity of the user of the device, defaults to <user>@<host>`
-	logUsage          = `Client-side diagnostic logging (on stderr), debug|warn|none, default is warn`
+	logUsage          = `Client-side diagnostic logging (on stderr), debug|warn|none`
 )
 
 func newApp(stdin io.Reader, stdout, stderr io.Writer, exitFunc func(int), args []string) *application {
@@ -104,7 +121,7 @@ func newApp(stdin io.Reader, stdout, stderr io.Writer, exitFunc func(int), args 
 		fs.PrintDefaults()
 	}
 	fs.Usage = func() {
-		fmt.Fprint(stderr, usageAbstract, usageSynopsis, usageDescription)
+		fmt.Fprint(stderr, usageAbstract, usageSynopsis, usageDescription, usageEnvironment, "\n")
 		app.printFlagDefaults()
 	}
 	// Flags
@@ -112,7 +129,9 @@ func newApp(stdin io.Reader, stdout, stderr io.Writer, exitFunc func(int), args 
 	fs.StringVar(&app.outputFormat, "f", "", outputFormatUsage)
 	fs.BoolVar(&app.verbose, "v", false, verboseUsage)
 	fs.BoolVar(&app.noColor, "no-color", false, noColorUsage)
-	fs.StringVar(&app.user, "u", auth.Default().User(), userUsage)
+	// The default identity is resolved after parsing, so that dutctl -h shows
+	// the same text on every machine.
+	fs.StringVar(&app.user, "u", "", userUsage)
 
 	mode := logModeWarn
 	fs.Var(&mode, "log", logUsage)
@@ -121,7 +140,16 @@ func newApp(stdin io.Reader, stdout, stderr io.Writer, exitFunc func(int), args 
 	fs.Parse(args[1:])
 	app.args = fs.Args()
 
-	fs.Visit(func(f *flag.Flag) { app.serverGiven = app.serverGiven || f.Name == "s" })
+	userGiven := false
+
+	fs.Visit(func(f *flag.Flag) {
+		app.serverGiven = app.serverGiven || f.Name == "s"
+		userGiven = userGiven || f.Name == "u"
+	})
+
+	if !userGiven {
+		app.user = auth.Default().User()
+	}
 
 	app.tui = app.runTUI
 

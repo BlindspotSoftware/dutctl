@@ -7,6 +7,8 @@ _dutctl_ stands for "Device-under-Test Control" and is an open-source command-li
 ![Build Status](https://img.shields.io/github/actions/workflow/status/BlindspotSoftware/dutctl/go.yml?branch=main)
 [![License](https://img.shields.io/github/license/BlindspotSoftware/dutctl)](https://github.com/BlindspotSoftware/dutctl/blob/main/LICENSE)
 
+**Documentation: <https://blindspotsoftware.github.io/dutctl/>**
+
 
 ---
 
@@ -31,7 +33,7 @@ Key features include:
 - Multi-architecture and distributed testing
 - Extensible plugin system for new hardware and protocols
 
-For detailed information on the system architecture, see the [Documentation](./docs/README.md).
+For detailed information on the system architecture, see [About the architecture](./docs/architecture.md).
 
 | Supported Client OS | Recommended DUT Agent Hardware |
 | ------------------- | ------------------------------ |
@@ -50,27 +52,8 @@ go install github.com/BlindspotSoftware/dutctl/cmds/dutagent@v1.0.0-beta.2
 <!-- x-release-please-end -->
 
 
-1. **Start the DUT Agent**
-   ```bash
-   dutagent -a localhost:2024 -c ./pkg/module/demo/demo-example-cfg.yml
-   ```
-   Run the DUT Agent locally with an example configuration in a separate terminal session.
-   This configuration sets up two devices that the [demo modules](pkg/module/demo) provide, so it does not require a
-   connected DUT: `agent`, whose commands each show one thing a module can do, and `demo-board`, a simulated board.
-
-2. **Play around with the DUT Client**
-   ```bash
-   # dutctl connect to localhost:2024 by default.
-   # Use 'list' to see the available devices that are managed be the agent:
-   dutctl list
-
-   # You can discover the available commands per device and run them. 
-   # Check out the usage information to learn how:
-   dutctl -h
-   ```
-   On a terminal, a bare `dutctl` opens a TUI (terminal user interface) instead: type to filter, Enter to open a host,
-   a device or a command, Esc to go up, ctrl+d to quit. In a pipe or a script it lists the devices as `dutctl list`
-   does. See [docs/dutctl-tui.md](docs/dutctl-tui.md).
+To try it on your machine without any hardware, follow [Get started](./docs/getting-started.md): it runs an agent
+with a simulated board, and walks you through controlling it with dutctl.
 
 ## Release Plan
 
@@ -119,27 +102,9 @@ compatibility promise:
 ## Individual Setup
 
 If you are ready to get your hands dirty, hook up your DUT to a single board computer (we recommend RPi4) and launch the
-DUT agent on it. Below you can find the currently supported modules with example configurations. Read on 
-[here](./docs/dutagent-config.md), to learn how you can adapt the agent's configuration to your needs
-
-| Modules                                                            | Status                   |
-| ------------------------------------------------------------------ | ------------------------ |
-| [Agent Status](./pkg/module/agent/README.md)                       | :white_check_mark:       |
-| [File Transfer](./pkg/module/file/README.md)                       | :white_check_mark:       |
-| [GPIO Button](./pkg/module/gpio/README.md)                         | :white_check_mark:       |
-| [GPIO Switch](./pkg/module/gpio/README.md)                         | :white_check_mark:       |
-| [GPIO Sensor](./pkg/module/gpio/README.md)                         | :white_check_mark:       |
-| [IPMI Power Control](./pkg/module/ipmi/README.md)                  | :white_check_mark:       |
-| [Power Distribution Unit (Intellinet)](./pkg/module/pdu/README.md) | :white_check_mark:       |
-| Power Distribution Unit (Delock)                                   | :hourglass_flowing_sand: |
-| [SPI Flash Emulator](./pkg/module/flash-emulate/README.md)         | :white_check_mark:       |
-| [SPI Flasher](./pkg/module/flash/README.md)                        | :white_check_mark:       |
-| [Serial Console](./pkg/module/serial/README.md)                    | :white_check_mark:       |
-| [Shell Execution](./pkg/module/shell/README.md)                    | :white_check_mark:       |
-| [Secure Shell (SSH)](./pkg/module/ssh/README.md)                   | :white_check_mark:       |
-| [Time Wait](./pkg/module/time/README.md)                           | :white_check_mark:       |
-| [WiFi Socket (Tasmota)](./pkg/module/wifisocket/README.md)         | :white_check_mark:       |
-
+DUT agent on it. Read on [here](./docs/dutagent-config.md) to learn how you can adapt the agent's configuration to your
+needs, with the [modules](./pkg/module) that dutagent ships with: each describes its options in its README, and the
+[documentation](https://blindspotsoftware.github.io/dutctl/reference/modules/) lists them all.
 
 If you have special needs, you can extend the system with your own modules. Read about the [module plugin system](./docs/module_guide.md).
 

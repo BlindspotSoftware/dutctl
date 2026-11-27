@@ -1,8 +1,6 @@
-The serial package provides a single module:
-
 # Serial
 
-This module connects to the DUT's serial port from the _dutagent_, forwards the
+The module `serial` connects to the DUT's serial port from the _dutagent_, forwards the
 serial output it reads to the _dutctl_ client, and (optionally) drives a
 scripted `send`/`expect` sequence against the port, or bridges the port to your
 terminal as an interactive console.
@@ -12,6 +10,8 @@ makes the module suitable for scripts and automated callers. With **no step
 arguments** it runs in **monitor** mode: it streams the serial output until the
 session is cancelled (or `-t` elapses). With `-i` it runs in **interactive**
 mode: see [Interactive mode](#interactive-mode).
+
+## Arguments
 
 ```
 ARGUMENTS:
@@ -203,7 +203,7 @@ example.
 
 ## Configuration Options
 
-| Option | Value  | Description                                                         |
+| Option | Type   | Description                                                         |
 |--------|--------|---------------------------------------------------------------------|
 | port   | string | Path to the serial device on the dutagent (e.g. `/dev/ttyUSB0`)     |
 | baud   | int    | Baud rate of the serial connection (default: 115200)                |

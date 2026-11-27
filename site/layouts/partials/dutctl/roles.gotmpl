@@ -1,0 +1,10 @@
+{{- /* Returns the icons of the roles given, keys of `roles` in
+data/pages.yaml, for the menu and lists. The name is read out to screen
+readers and shown on hover. */}}
+{{- $out := "" }}
+{{- range . }}
+  {{- with index (where hugo.Data.pages.roles "key" .) 0 }}
+    {{- $out = printf `%s<span class="dutctl-role" title="for %s"><i class="fa-fw fas fa-%s" aria-hidden="true"></i><span class="dutctl-sr">for %s</span></span>` $out .name .icon .name }}
+  {{- end }}
+{{- end }}
+{{- return $out }}

@@ -1,0 +1,9 @@
+{{- /* Replaces each <!-- embed: PATH --> and <!-- embed: PATH#NAME --> in the
+Markdown text given with that file or that Go function, as a code block. GitHub
+shows such a comment as nothing, so a page links the file next to the marker. */}}
+{{- $body := . }}
+{{- range findRESubmatch `(?m)^<!-- embed: ([^#\s]+)(?:#(\S+))? -->$` $body }}
+  {{- $block := partial "dutctl/embed.gotmpl" (dict "path" (index . 1) "name" (index . 2)) }}
+  {{- $body = replace $body (index . 0) $block }}
+{{- end }}
+{{- return $body }}

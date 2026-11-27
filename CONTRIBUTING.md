@@ -49,9 +49,11 @@ Unsure where to begin contributing to dutctl? You can start by looking through t
 
 GitHub Copilot reviews every pull request before the maintainers do. It checks the change against
 short rules in [`.github/copilot-instructions.md`](.github/copilot-instructions.md), in
-[`.github/instructions/`](.github/instructions) by path, and in the skill
+[`.github/instructions/`](.github/instructions) by path, and in the skills
 [`.github/skills/code-review/`](.github/skills/code-review), which lists the constraints of the
-[decision records](docs/decisions/README.md). Each rule has an ID and links the document it
+[decision records](docs/decisions/README.md), and
+[`.github/skills/docs-review/`](.github/skills/docs-review), which holds the checks for
+documentation. Each rule has an ID and links the document it
 summarizes. Copilot's comments are hints: they do not block a merge, and they miss things, so the
 maintainers' review decides.
 
@@ -247,10 +249,53 @@ Levels:
 
 ### Documentation Style Guide
 
-- Use Markdown for documentation
-- Keep README.md and other documentation up to date with code changes
-- Use clear, concise language
-- Include examples where appropriate
+The documentation is published at <https://blindspotsoftware.github.io/dutctl/>. It follows
+[Diátaxis](https://diataxis.fr) with a guide per role
+([ADR-0041](docs/decisions/0041-structure-the-documentation-by-diataxis-with-a-guide-per-role.md)),
+and the site takes its pages from the files of this repository where they are
+([ADR-0042](docs/decisions/0042-publish-the-documentation-with-hugo-and-relearn-on-github-pages.md)).
+
+Each page is of one type, which depends on what its reader does while reading it:
+
+| The reader …                  | Type         | Where the page goes                                                                                                      |
+| ----------------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| learns by doing, step by step | tutorial     | Get started                                                                                                              |
+| gets a task done              | how-to guide | the guide of their role: Use dutctl (users), Set up agents (admins), Write modules (module developers), Project (contributors) |
+| looks a fact up while working | reference    | Reference, arranged like dutctl: dutctl, dutagent, modules, module API and protocol                                     |
+| wants to understand why       | explanation  | Concepts, and the decision records                                                                                       |
+
+- A tutorial follows one path that works, and shows what each step prints. A how-to guide is titled
+  by its task, starts from the reader's goal and does not teach. Reference describes and does not
+  instruct. Explanation is titled "About …", weighs alternatives and links its decision records.
+- Text of another type goes on a page of its own, linked. A page that mixes types is split: the file
+  keeps one part, so that links to it stay valid, and keeps the headings that others link.
+- A fact has one home. What a program or the code can state, it states, and the site shows it: the
+  help of `dutctl -h` and `dutagent -h`, the doc comments of `pkg/module`, and code examples. Improve
+  the help text or the doc comment instead of describing it again. A line `<!-- embed: path -->` or
+  `<!-- embed: path#Func -->` shows a file or a Go function on the site; GitHub shows nothing for it,
+  so link the file next to it.
+- A new page is a Markdown file in `docs/` that starts with its `#` title and has no front matter,
+  with an entry in [site/data/pages.yaml](site/data/pages.yaml): its section, type and roles. A
+  section lists at most seven entries.
+- A module's README describes the module for admins and users, in this structure:
+
+  ```
+  # <Name>
+  What the package drives, the IDs of its modules, and what the agent needs:
+  tools, permissions, hardware.
+  ## Arguments              as Help() describes them
+  ## Configuration Options  Option | Type | Description, with the default
+  ## Example                a link to <package>-example-cfg.yml
+  ```
+
+  A package of several modules has a `## <module-id>` section per module, with these sections one
+  level down. Keep the arguments in step with `Help()`, and the options with the module's struct.
+- Keep the documentation up to date with code changes, in the same commit (see
+  [Documentation commits](#documentation-commits)). Use clear, concise language, and include
+  examples where they help.
+- `task docs` builds the site, and fails on a broken link, a page of `docs/` that is not placed, or a
+  failed embed; `task docs:serve` serves it at <http://localhost:1313/dutctl/>. Both need `hugo` on
+  the PATH, in the version that [the docs workflow](.github/workflows/docs.yml) pins.
 
 ---
 

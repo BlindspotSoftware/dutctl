@@ -1,0 +1,40 @@
+{{- /* The overview of a section, from data/pages.yaml: its pages and
+subsections with their roles and first paragraphs, the decision records as a
+table. The guide of a role adds the reference and explanation for its role, so
+that no list of links is kept by hand. */}}
+{{- $p := .Page }}
+{{- if eq $p.Params.listing "decisions" }}
+<table class="dutctl-decisions">
+  <thead><tr><th>ADR</th><th>Decision</th><th>Status</th><th>Date</th></tr></thead>
+  <tbody>
+  {{- range $p.Pages.ByWeight }}
+    <tr>
+      <td>{{ substr (path.Base .Params.source) 0 4 }}</td>
+      <td><a href="{{ .RelPermalink }}">{{ .Title }}</a></td>
+      <td>{{ .Params.status }}</td>
+      <td>{{ .Params.date }}</td>
+    </tr>
+  {{- end }}
+  </tbody>
+</table>
+{{- else }}
+{{- partial "dutctl/list.html" $p.Pages.ByWeight }}
+{{- end }}
+{{- $roles := $p.Params.roles }}
+{{- if and $roles (eq $p.Params.type "how-to") (not $p.Parent.Parent) }}
+  {{- range slice (dict "type" "reference" "title" "Look up") (dict "type" "explanation" "title" "Understand") }}
+    {{- $type := .type }}
+    {{- $found := slice }}
+    {{- range site.Home.Sections.ByWeight }}
+      {{- range .Pages.ByWeight }}
+        {{- if and (eq .Params.type $type) (intersect .Params.roles $roles) }}
+          {{- $found = $found | append . }}
+        {{- end }}
+      {{- end }}
+    {{- end }}
+    {{- with $found }}
+<h2>{{ index (dict "reference" "Look up" "explanation" "Understand") $type }}</h2>
+{{ partial "dutctl/list.html" . }}
+    {{- end }}
+  {{- end }}
+{{- end }}

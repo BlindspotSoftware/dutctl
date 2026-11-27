@@ -83,7 +83,7 @@ which paths the file module accepts from the command line.
   file requests and files.
 - [ADR-0026](0026-defer-authentication-to-mtls.md): why the transport
   authenticates neither side yet.
-- [docs/README.md](../README.md): the upload and download messages on the Run
+- [docs/rpc-protocol.md](../rpc-protocol.md): the upload and download messages on the Run
   stream.
 - [pkg/module/file/README.md](../../pkg/module/file/README.md): the file
   module's path rules.

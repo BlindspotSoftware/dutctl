@@ -1,19 +1,10 @@
 # DUT Agent Configuration
 
-The _DUT Agent_ is configured by a YAML configuration file.
+The _DUT Agent_ is configured by a YAML configuration file: the devices connected to the agent, the commands of each
+device, and the modules each command runs. [About the architecture](./architecture.md#devices-commands-and-modules)
+explains how commands are built from modules.
 
-The configuration mainly consists of a list of devices connected to an agent and a list of the _Commands_ available
-for those devices. Commands are meant to be the high-level tasks you want to perform on the device, e.g.
-"Flash the firmware with the given image." To achieve this high-level task, commands can be built up of one or multiple
-_Modules_. Modules represent the basic operations and represent the actual implementation for the hardware interaction.
-The implementation of a Module determines its capabilities and also exposes information on how to use and configure it.
-
-The DUT Control project offers a collection of Module implementations but also allows for easy integration of [custom modules](./module_guide.md).
-Often a _Command_ can consist of only one _Module_ to get the job done, e.g., power cycles the device. But in some cases
-like the flash example mentioned earlier, eventually it is mandatory to toggle some GPIOs before doing the actual SPI flash
-operation. In this case the command is built up of a Module dealing with GPIO manipulation and a Module performing a
-flash writing with a specific programmer.
-Commands support three approaches for arguments: static values, passthrough modules that receive all runtime arguments directly, and command-level argument templating that distributes named arguments to modules via template syntax (see [Command Argument Templating](./command-arg-templating.md)).
+[Let a command take arguments](./command-arg-templating.md) shows how to configure the arguments of a command.
 
 ## DUT Agent Configuration Schema
 
@@ -41,6 +32,18 @@ Commands support three approaches for arguments: static values, passthrough modu
 
 Command arguments define named parameters that can be passed at runtime and distributed to modules via template syntax.
 
+A command hands arguments to its modules in exactly one of three ways:
+
+- **Fixed**: the modules have `args`, and the command neither declares `args` nor has a passthrough module. The command
+  takes no arguments.
+- **Passthrough**: one module has `passthrough: true`, and the command declares no `args`. All runtime arguments go to
+  that module, and its usage information is the command's help text. A command has at most one passthrough module.
+- **Templated**: the command declares `args`. A module's `args` may contain `${name}` for a declared name, as the whole
+  argument or within a longer one, such as `/configs/${name}.yaml`. The runtime arguments are matched to the declared
+  ones by position, in the order of the declaration, not by name.
+
+A command cannot have both declared `args` and a passthrough module.
+
 | Attribute | Type   | Default | Description                          | Mandatory |
 |-----------|--------|---------|--------------------------------------|-----------|
 | name      | string |         | Argument name (used in templates)    | yes       |
@@ -61,6 +64,8 @@ Command arguments define named parameters that can be passed at runtime and dist
 
 ### Example config file
 
-See [demo-example-cfg.yml](../pkg/module/demo/demo-example-cfg.yml), the configuration of the demo modules: commands of
+[demo-example-cfg.yml](../pkg/module/demo/demo-example-cfg.yml), the configuration of the demo modules: commands of
 one module each on the device `agent`, and commands of several modules, with fixed, declared and passed through
 arguments and module options, on the simulated `demo-board`.
+
+<!-- embed: pkg/module/demo/demo-example-cfg.yml -->

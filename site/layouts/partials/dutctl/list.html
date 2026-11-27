@@ -1,0 +1,12 @@
+{{- /* A list of pages, each title with its role icons and description.
+Called with the pages, or with a dict of pages and plain, which leaves the
+descriptions out. */}}
+{{- $pages := . }}
+{{- $plain := false }}
+{{- if reflect.IsMap . }}{{ $pages = .pages }}{{ $plain = .plain }}{{ end }}
+<ul class="dutctl-list">
+{{- range $pages }}
+  <li><a href="{{ .RelPermalink }}">{{ .LinkTitle }}</a>{{ .Params.menuPost | safeHTML }}
+  {{- if not $plain }}{{ with .Description }}<br><span class="dutctl-desc">{{ . }}</span>{{ end }}{{ end }}</li>
+{{- end }}
+</ul>

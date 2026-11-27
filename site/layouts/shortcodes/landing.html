@@ -1,0 +1,43 @@
+{{- /* The routing of the home page, from data/pages.yaml: one start for
+everyone, a card per role with its featured pages, and the shared sections.
+Nothing here names a page by hand. */}}
+{{- $start := index (site.GetPage "/get-started").Pages.ByWeight 0 }}
+{{- $release := "" }}
+{{- with resources.Get "repo/.release-please-manifest.json" }}{{ $release = index (. | transform.Unmarshal) "." }}{{ end }}
+<div class="dutctl-hero">
+  <pre class="dutctl-diagram" aria-label="dutctl on a laptop or in CI talks over the network to dutagent on a Raspberry Pi, which is wired to the device under test">laptop or CI ──network──▶ dutagent on a Raspberry Pi ──wires──▶ device under test</pre>
+  <p>
+    <a class="dutctl-start" href="{{ $start.RelPermalink }}">{{ $start.Title }}: try it without hardware</a>
+    {{- with $release }}
+    <span class="dutctl-release">Release v{{ . }}{{ if strings.Contains . "-" }}: a pre-release, its interfaces may still change{{ end }}</span>
+    {{- end }}
+  </p>
+</div>
+<h2>What do you want to do?</h2>
+<div class="dutctl-cards">
+{{- range site.Home.Sections.ByWeight }}
+  {{- if and (eq .Params.type "how-to") .Params.roles }}
+    {{- $roles := .Params.roles }}
+    {{- $featured := slice }}
+    {{- range partial "dutctl/walk.gotmpl" site.Home }}
+      {{- if and .Params.featured (intersect .Params.roles $roles) (lt (len $featured) 3) }}
+        {{- $featured = $featured | append . }}
+      {{- end }}
+    {{- end }}
+  <div class="dutctl-card">
+    <h3><a href="{{ .RelPermalink }}">{{ .Title }}</a>{{ .Params.menuPost | safeHTML }}</h3>
+    <p>{{ .Description }}</p>
+    {{- with $featured }}{{ partial "dutctl/list.html" (dict "pages" . "plain" true) }}{{ end }}
+  </div>
+  {{- end }}
+{{- end }}
+</div>
+{{- range slice "reference" "explanation" }}
+  {{- $type := . }}
+  {{- range site.Home.Sections }}
+    {{- if eq .Params.type $type }}
+<p class="dutctl-strip"><strong><a href="{{ .RelPermalink }}">{{ cond (eq $type "reference") "Look up" "Understand" }}</a>:</strong>
+      {{- range $i, $p := .Pages.ByWeight }}{{ if $i }} ·{{ end }} <a href="{{ $p.RelPermalink }}">{{ $p.LinkTitle }}</a>{{ end }}</p>
+    {{- end }}
+  {{- end }}
+{{- end }}

@@ -145,6 +145,6 @@ cover both ends of the protocol.
 - Supersedes [ADR-0003](0003-run-a-command-over-one-bidirectional-stream.md).
 - [ADR-0033](0033-add-the-module-api-to-the-primary-public-interfaces.md): the
   module API, which this changes, is a primary public interface.
-- [docs/README.md](../README.md): the messages of a download and an upload.
+- [docs/rpc-protocol.md](../rpc-protocol.md): the messages of a download and an upload.
 - [protobuf/dutctl/v1/dutctl.proto](../../protobuf/dutctl/v1/dutctl.proto): the
   transfer messages.

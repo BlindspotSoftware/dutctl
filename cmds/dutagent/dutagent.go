@@ -31,12 +31,25 @@ import (
 	relaypb "github.com/BlindspotSoftware/dutctl/protobuf/gen/dutctl/relay/v1alpha1"
 )
 
+// usage heads dutagent -h. It names no path, so the text is the same however
+// dutagent was started.
+const usage = `dutagent - The agent of the DUT Control system.
+
+SYNOPSIS:
+	dutagent [options]
+
+dutagent serves the devices of its configuration file to dutctl clients and
+runs their commands with the modules compiled into it.
+
+OPTIONS:
+`
+
 const (
 	addressInfo = `Address to run the agent on in the format: address[:port], the port defaults to ` + rpc.DefaultPort +
 		`; an empty address as in :port means all interfaces`
 	configPathInfo  = `Path to DUT configuration file`
 	checkConfigInfo = `Only validate the provided DUT configuration, not starting the service`
-	dryRunInfo      = `Only run the initialization phase of the modules, not start the (includes validation of the configuration)`
+	dryRunInfo      = `Only run the initialization phase of the modules, not starting the service (includes validation of the configuration)`
 	serverInfo      = `Optional DUT Server to register with in the format: address[:port], the port defaults to ` + rpc.DefaultPort
 	versionInfo     = `Print version information and exit`
 	logLevelInfo    = `Log level: debug, info, warn, or error`
@@ -50,6 +63,10 @@ func newAgent(stdout io.Writer, exitFunc func(int), args []string) *agent {
 	agt.exit = exitFunc
 
 	fs := flag.NewFlagSet(args[0], flag.ExitOnError)
+	fs.Usage = func() {
+		fmt.Fprint(fs.Output(), usage)
+		fs.PrintDefaults()
+	}
 	fs.StringVar(&agt.address, "a", "localhost:"+rpc.DefaultPort, addressInfo)
 	fs.StringVar(&agt.configPath, "c", "dutctl.yaml", configPathInfo)
 	fs.BoolVar(&agt.checkConfig, "check-config", false, checkConfigInfo)

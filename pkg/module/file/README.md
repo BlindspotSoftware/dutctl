@@ -1,8 +1,8 @@
-The _file_ package provides a single module:
-
 # File
 
-This module transfers files between client and dutagent, supporting both upload and download operations.
+The module `file` transfers files between client and dutagent, supporting both upload and download operations.
+
+## Arguments
 
 ```
 ARGUMENTS:
@@ -27,7 +27,7 @@ Path Processing:
   - Internal '..' references are resolved: dir/../other/file.bin → other/file.bin
 ```
 
-## Examples
+## Example
 
 The commands below refer to the configuration in
 [file-example-cfg.yml](./file-example-cfg.yml). `$WD` is a placeholder for the
@@ -56,7 +56,7 @@ dutctl example-device upload-config
 
 ## Configuration Options
 
-| Option      | Value  | Required | Description                                                                                        |
+| Option      | Type   | Required | Description                                                                                        |
 |-------------|--------|----------|----------------------------------------------------------------------------------------------------|
 | operation   | string | yes      | Operation type: "upload" or "download"                                                             |
 | source      | string | no       | Source path. If set, argument path becomes the destination. Cannot be used with colon syntax       |

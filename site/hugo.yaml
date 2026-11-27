@@ -1,0 +1,53 @@
+# The documentation site, published to GitHub Pages by .github/workflows/docs.yml.
+# Its pages are files of the repository, placed by data/pages.yaml; see
+# CONTRIBUTING.md, "Documentation", and docs/decisions/0042-*.md.
+baseURL: https://blindspotsoftware.github.io/dutctl/
+locale: en-us
+title: dutctl
+disableKinds: [taxonomy, term, rss]
+
+module:
+  hugoVersion:
+    min: 0.166.0
+  imports:
+    - path: github.com/McShelby/hugo-theme-relearn
+  mounts:
+    - {source: content, target: content}
+    - {source: layouts, target: layouts}
+    - {source: data, target: data}
+    # Output of the programs, written by `task docs:generate` before Hugo runs.
+    - {source: generated, target: assets/generated}
+    # The repository's own files, read by content/_content.gotmpl.
+    - source: ..
+      target: assets/repo
+      files:
+        - "/*.md"
+        - "/.release-please-manifest.json"
+        - "/docs/**"
+        - "/pkg/module/**"
+        - "/packaging/*.md"
+        - "/cmds/exp/dutserver/*.md"
+        - "/protobuf/*.md"
+        - "/protobuf/dutctl/**"
+        - "/internal/test/*.md"
+        - "/.firmwareci/*.md"
+        - "/.github/**"
+
+markup:
+  goldmark:
+    renderer:
+      # The role icons and badges in generated Markdown are HTML.
+      unsafe: true
+
+params:
+  repoURL: https://github.com/BlindspotSoftware/dutctl
+  author:
+    name: Blindspot Software GmbH
+  themeVariant:
+    - identifier: auto
+      auto: [zen-light, zen-dark]
+  disableLandingPageButton: true
+  disableTagHiddenPages: true
+  disableShortcutsTitle: true
+  alwaysopen: false
+  collapsibleMenu: true

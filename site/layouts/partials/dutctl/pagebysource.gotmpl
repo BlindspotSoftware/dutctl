@@ -1,0 +1,9 @@
+{{- /* Returns the page that shows the repository file given, or nil.
+Arguments: source; fragment, an anchor of the link. Of several pages that show
+parts of one file, the one with the part of that anchor wins. */}}
+{{- $pages := where site.Pages "Params.source" .source }}
+{{- $page := index $pages 0 }}
+{{- range $pages }}
+  {{- if in .Params.parts $.fragment }}{{ $page = . }}{{ end }}
+{{- end }}
+{{- return $page }}
