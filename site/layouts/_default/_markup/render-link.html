@@ -1,0 +1,28 @@
+{{- /* Resolves a relative link as GitHub does, against the repository path of
+the page's file, so that the same Markdown works on GitHub and here: a file the
+site shows links to its page, any other file to GitHub. A link to a Markdown
+file that does not exist fails the build. The link itself is rendered by the
+theme. */}}
+{{- $dest := .Destination }}
+{{- $u := urls.Parse $dest }}
+{{- $src := .Page.Params.source }}
+{{- if and $src (not $u.Scheme) (not (hasPrefix $dest "/")) (ne $u.Path "") }}
+  {{- $target := path.Clean (path.Join (path.Dir $src) $u.Path) }}
+  {{- $page := partial "dutctl/pagebysource.gotmpl" (dict "source" $target "fragment" $u.Fragment) }}
+  {{- with $page }}
+    {{- $dest = .RelPermalink }}
+  {{- else }}
+    {{- $exists := resources.Get (printf "repo/%s" $target) }}
+    {{- if and (hasSuffix $target ".md") (not $exists) }}
+      {{- errorf "%s: the link to %s leads to no file" $src $target }}
+    {{- end }}
+    {{- $dest = printf "%s/blob/main/%s" site.Params.repoURL $target }}
+  {{- end }}
+  {{- with $u.Fragment }}{{ $dest = printf "%s#%s" $dest . }}{{ end }}
+{{- end }}
+{{- partial "shortcodes/link.html" (dict
+  "page" .Page
+  "url" $dest
+  "title" .Title
+  "content" .Text
+) }}

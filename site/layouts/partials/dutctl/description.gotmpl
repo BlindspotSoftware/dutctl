@@ -1,0 +1,14 @@
+{{- /* Returns the first paragraph of the Markdown text given, as plain text
+for a page's description: the text under a link in a section's list, and the
+description search engines show. Content adapters cannot render Markdown, so
+links, code and emphasis are stripped by hand. */}}
+{{- $desc := "" }}
+{{- range split . "\n\n" }}
+  {{- $b := trim . " \n" }}
+  {{- if and (not $desc) (findRE `\A[A-Za-z_*\x60]` $b 1) }}
+    {{- $desc = $b }}
+  {{- end }}
+{{- end }}
+{{- $desc = replaceRE `!?\[([^\]]*)\]\([^)]*\)` "$1" $desc }}
+{{- $desc = replaceRE "[`*]|\\b_|_\\b" "" $desc }}
+{{- return ($desc | replaceRE `\s+` " " | truncate 200 | htmlUnescape) }}

@@ -1,0 +1,20 @@
+{{- /* Returns a code block of a file: of the repository, or of generated/
+for a path that starts with generated/. Arguments: path; name, optional, a Go
+function or method to show instead of the whole file. A Go file is shown
+without its license header. */}}
+{{- $path := .path }}
+{{- $key := cond (hasPrefix $path "generated/") $path (printf "repo/%s" $path) }}
+{{- $r := resources.Get $key }}
+{{- if not $r }}{{ errorf "embed: %s does not exist; for generated/, run task docs:generate" $path }}{{ end }}
+{{- $src := replace $r.Content "\r\n" "\n" }}
+{{- $lang := strings.TrimPrefix "." (path.Ext $path) }}
+{{- if eq $lang "go" }}
+  {{- $src = replaceRE `\A(//[^\n]*\n)+\n` "" $src 1 }}
+{{- end }}
+{{- with .name }}
+  {{- $fn := findRE (printf `(?ms)^func (\([^)]*\) )?%s\(.*?^}$` .) $src 1 }}
+  {{- if not $fn }}{{ errorf "embed: no func %s in %s" . $path }}{{ end }}
+  {{- $src = index $fn 0 }}
+{{- end }}
+{{- $lang = cond (in (slice "go" "yml" "yaml" "proto" "sh") $lang) $lang "text" }}
+{{- return printf "```%s\n%s\n```" $lang (strings.TrimRight "\n" $src) }}

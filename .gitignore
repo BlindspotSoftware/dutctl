@@ -10,3 +10,7 @@
 /keys/
 /bin/
 /.firmwareci/*dummy_*.rom
+/site/public/
+/site/generated/
+/site/resources/
+/site/.hugo_build.lock

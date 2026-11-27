@@ -1,0 +1,12 @@
+{{- /* Returns the line under a page's title: its Diátaxis type and roles, or
+for a decision record its number, status and date. Arguments: type, roles,
+params (the front matter), source. */}}
+{{- $label := index hugo.Data.pages.types .type | default "" }}
+{{- $roles := slice }}
+{{- range .roles }}{{ with index (where hugo.Data.pages.roles "key" .) 0 }}{{ $roles = $roles | append .name }}{{ end }}{{ end }}
+{{- $text := $label }}
+{{- with $roles }}{{ $text = printf "%s · for %s" $text (delimit . ", " " and ") }}{{ end }}
+{{- with .params.status }}
+  {{- $text = printf "Decision record ADR-%s · %s · %s" (substr (path.Base $.source) 0 4) . ($.params.date | default "") }}
+{{- end }}
+{{- return (cond (eq $text "") "" (printf `<span class="dutctl-badge">%s</span>` $text)) }}

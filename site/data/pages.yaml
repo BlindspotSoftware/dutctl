@@ -1,0 +1,183 @@
+# The structure of the documentation site: where each file of the repository
+# appears, as which Diátaxis type, and for which roles. CONTRIBUTING.md,
+# "Documentation Style Guide", says where a new text goes; ADR-0041 and
+# ADR-0042 say why. A section lists at most seven entries.
+#
+# A section has a slug, title, type, roles and intro, and lists its pages,
+# the pages of a glob, and its subsections. With source, a file, or the ##
+# sections of it that parts names ("intro" for the text before the first),
+# is its page too.
+#
+# A page shows a Markdown file (source), titled by its first heading, or the
+# output of a program (embed, with title and lead), standing for the file
+# that `for` names, so that links to that file lead to it. type and roles
+# default to the section's; featured puts a page on its role's card on the
+# home page; weight orders it before or after its neighbours. hidepages on a
+# section keeps the pages of its glob out of the menu, for a section that lists
+# them itself.
+
+roles:
+  - {key: user, name: users, icon: terminal}
+  - {key: admin, name: admins, icon: screwdriver-wrench}
+  - {key: dev, name: module developers, icon: code}
+  - {key: contributor, name: contributors, icon: code-branch}
+
+types:
+  tutorial: Tutorial
+  how-to: How-to guide
+  reference: Reference
+  explanation: Explanation
+  project: Project document
+
+sections:
+  - slug: get-started
+    title: Get started
+    type: tutorial
+    roles: [user]
+    intro: >-
+      A tutorial in parts: from using dutctl, to setting up an agent, to writing a module, each part building on the
+      one before. The first needs no hardware.
+    pages:
+      - {source: docs/getting-started.md, slug: control-a-simulated-board}
+
+  - slug: use
+    title: Use dutctl
+    type: how-to
+    roles: [user]
+    intro: >-
+      For users: the lab is set up, and you power, flash and talk to its devices with dutctl, by hand, in scripts and
+      in CI. You need no access to the agent's machine.
+    pages:
+      - {source: docs/run-commands-side-by-side.md, featured: true}
+      - {source: docs/use-dutctl-in-ci.md, slug: scripts-and-ci, featured: true}
+
+  - slug: setup
+    title: Set up agents
+    type: how-to
+    roles: [admin]
+    intro: >-
+      For admins: you wire devices to a Raspberry Pi, run dutagent on it and write its configuration. You know Linux
+      and your hardware; you need no Go.
+    pages:
+      - {source: docs/command-arg-templating.md, slug: command-arguments, featured: true}
+      - {source: docs/shared-hardware.md}
+      - {source: docs/stop-dutagent.md}
+      - {source: cmds/exp/dutserver/README.md, slug: dutserver}
+
+  - slug: develop
+    title: Write modules
+    type: how-to
+    roles: [dev]
+    intro: >-
+      For module developers: you support new hardware with a module, Go code that dutagent runs as a step of a
+      command.
+    pages:
+      - {source: docs/module_guide.md, slug: add-a-module, featured: true}
+
+  - slug: reference
+    title: Reference
+    type: reference
+    intro: Facts to look up while you work, arranged like dutctl itself.
+    pages:
+      - source: README.md
+        slug: compatibility
+        title: Compatibility and versions
+        parts: [release-plan, public-interfaces]
+        roles: [user, admin, dev]
+        weight: 10
+    sections:
+      - slug: dutctl
+        title: dutctl
+        roles: [user]
+        intro: The client, on the command line and in its TUI.
+        pages:
+          - slug: command-line
+            title: dutctl command line
+            embed: generated/dutctl-help.txt
+            lead: The help that `dutctl -h` prints, taken from the dutctl this site was built from.
+            featured: true
+          - {source: docs/dutctl-tui.md, slug: tui}
+          - {source: docs/access-rules.md}
+      - slug: dutagent
+        title: dutagent
+        roles: [admin]
+        intro: The agent, its configuration and its service.
+        pages:
+          - slug: command-line
+            title: dutagent command line
+            embed: generated/dutagent-help.txt
+            lead: The help that `dutagent -h` prints, taken from the dutagent this site was built from.
+          - {source: docs/dutagent-config.md, slug: configuration, featured: true}
+          - {source: docs/stop-causes.md}
+          - {source: packaging/README.md, slug: packaging}
+      - slug: modules
+        title: Modules
+        roles: [admin, user]
+        featured: true
+        intro: >-
+          The modules that dutagent ships with, one page per package: what each drives, its arguments and its
+          options. Each page is the README next to the module's code.
+        glob: pkg/module/*/README.md
+      - slug: development
+        title: Module API and protocol
+        roles: [dev]
+        intro: The interfaces a module and a client program against.
+        pages:
+          - slug: module-api
+            title: Module API
+            for: pkg/module/module.go
+            embed: generated/module-api.txt
+            lead: >-
+              The documentation of the Go package `pkg/module`, as `go doc` prints it from the source this site was
+              built from. [pkg.go.dev](https://pkg.go.dev/github.com/BlindspotSoftware/dutctl/pkg/module) shows it
+              for the latest release, with its example.
+            featured: true
+          - {source: docs/rpc-protocol.md}
+
+  - slug: concepts
+    title: Concepts
+    type: explanation
+    intro: Background, and why dutctl works the way it does.
+    pages:
+      - {source: docs/architecture.md, roles: [user, admin, dev]}
+      - {source: docs/device-access.md, roles: [user, admin]}
+      - {source: docs/dutagent-shutdown.md, slug: agent-lifecycle, roles: [admin, dev]}
+    sections:
+      - slug: decisions
+        title: Design decisions
+        source: docs/decisions/README.md
+        parts: [intro]
+        listing: decisions
+        hidepages: true
+        roles: [dev, contributor]
+        glob: docs/decisions/[0-9]*.md
+
+  - slug: project
+    title: Project
+    type: project
+    roles: [contributor]
+    intro: How the project works, and how to contribute to it.
+    pages:
+      - {source: CONTRIBUTING.md, slug: contributing}
+      - source: docs/decisions/README.md
+        slug: write-a-decision-record
+        title: Write a decision record
+        type: how-to
+        parts: [when-to-write-an-adr, how-to-add-one, status, changing-a-decision, records-written-after-the-fact]
+      - {source: AI_POLICY.md, slug: ai-policy}
+      - {source: CHANGELOG.md, slug: release-notes, title: Release notes}
+    sections:
+      - slug: community
+        title: Community
+        intro: Who decides, how we treat each other, and how to report a vulnerability.
+        pages:
+          - {source: GOVERNANCE.md, slug: governance}
+          - {source: CODE_OF_CONDUCT.md, slug: code-of-conduct}
+          - {source: SECURITY.md, slug: security}
+      - slug: development
+        title: Development
+        intro: How the code is generated and tested.
+        pages:
+          - {source: protobuf/README.md, slug: code-generation}
+          - {source: internal/test/README.md, slug: test-doubles}
+          - {source: .firmwareci/README.md, slug: hardware-tests}

@@ -1,0 +1,38 @@
+{{- /* Reads a Markdown file of the repository. Arguments: source, its path
+from the repository's root; parts, the anchors of the ## sections to keep, where
+"intro" names the text before the first ## section (all when empty).
+Returns title (the # heading, which the file must start with), body (without
+it), params (the front matter) and description (the first paragraph). */}}
+{{- $r := resources.Get (printf "repo/%s" .source) }}
+{{- if not $r }}{{ errorf "data/pages.yaml: %s does not exist" .source }}{{ end }}
+{{- $raw := replace $r.Content "\r\n" "\n" }}
+{{- $params := dict }}
+{{- with findRESubmatch `(?s)\A---\n(.*?)\n---\n(.*)\z` $raw 1 }}
+  {{- $params = transform.Unmarshal (index . 0 1) }}
+  {{- $raw = index . 0 2 }}
+{{- end }}
+{{- $raw = strings.TrimLeft "\n" $raw }}
+{{- $m := findRESubmatch `\A# ([^\n]+)\n` $raw 1 }}
+{{- if not $m }}{{ errorf "%s: the file must start with its title, a single # heading" .source }}{{ end }}
+{{- $title := index $m 0 1 }}
+{{- $body := strings.TrimPrefix (index $m 0 0) $raw }}
+{{- with .parts }}
+  {{- $want := . }}
+  {{- $keep := slice }}
+  {{- range $i, $c := split (printf "\n%s" $body) "\n## " }}
+    {{- if eq $i 0 }}
+      {{- if in $want "intro" }}{{ $keep = $keep | append $c }}{{ end }}
+    {{- else if in $want (anchorize (index (split $c "\n") 0)) }}
+      {{- $keep = $keep | append (printf "## %s" $c) }}
+    {{- end }}
+  {{- end }}
+  {{- if not $keep }}{{ errorf "data/pages.yaml: none of the parts %v found in %s" $want $.source }}{{ end }}
+  {{- $body = delimit $keep "\n" }}
+{{- end }}
+{{- $body = partial "dutctl/embeds.gotmpl" $body }}
+{{- return dict
+  "title" $title
+  "body" $body
+  "params" $params
+  "description" (partial "dutctl/description.gotmpl" $body)
+}}

@@ -1,0 +1,6 @@
+{{- /* The legend of the role icons, under the menu. */}}
+<div class="dutctl-legend">
+{{- range $role := hugo.Data.pages.roles }}
+  <span><i class="fa-fw fas fa-{{ $role.icon }}" aria-hidden="true"></i> for {{ $role.name }}</span>
+{{- end }}
+</div>

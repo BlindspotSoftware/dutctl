@@ -61,6 +61,29 @@ tasks:
     env:
       GITHUB_TOKEN: "dummy"
 
+  #===============
+  # Documentation
+  #===============
+
+  docs:generate:
+    desc: Write the program output that the documentation site shows to site/generated
+    cmds:
+      - sh site/generate.sh
+
+  docs:
+    desc: Build the documentation site to site/public, with hugo on the PATH
+    deps: [docs:generate]
+    dir: site
+    cmds:
+      - hugo --panicOnWarning --minify
+
+  docs:serve:
+    desc: Serve the documentation site at http://localhost:1313/dutctl/
+    deps: [docs:generate]
+    dir: site
+    cmds:
+      - hugo server --panicOnWarning
+
   #========================
   # Formatting and linting
   #========================

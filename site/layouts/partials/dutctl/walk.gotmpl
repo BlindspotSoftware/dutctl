@@ -1,0 +1,8 @@
+{{- /* Returns the pages under the page given, in the order of the menu:
+each followed by the pages under it. */}}
+{{- $out := slice }}
+{{- range .Pages.ByWeight }}
+  {{- $out = $out | append . }}
+  {{- if .IsSection }}{{ $out = $out | append (partial "dutctl/walk.gotmpl" .) }}{{ end }}
+{{- end }}
+{{- return $out }}

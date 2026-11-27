@@ -1,0 +1,30 @@
+<style>
+/* The role icons beside a link, and their text for screen readers. */
+.dutctl-role { margin-inline-start: .3em; opacity: .75; font-size: .85em; }
+.dutctl-sr {
+  position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
+}
+/* The line under a page's title: its type and roles. */
+.dutctl-badge {
+  display: block; margin-top: .4rem; font-size: .9rem; font-weight: normal; opacity: .75;
+}
+.dutctl-list { list-style: none; padding-inline-start: 0; }
+.dutctl-list li { margin-bottom: .6rem; }
+.dutctl-desc { font-size: .9em; opacity: .8; }
+.dutctl-decisions td:first-child, .dutctl-decisions td:last-child { white-space: nowrap; }
+/* The home page. */
+.dutctl-hero { margin: 1.5rem 0; }
+.dutctl-diagram { white-space: pre-wrap; }
+.dutctl-start {
+  display: inline-block; padding: .6rem 1.1rem; border-radius: .4rem; margin-inline-end: 1rem;
+  background: var(--MAIN-LINK-color, #2d6a8a); color: var(--MAIN-BG-color, #fff) !important; text-decoration: none;
+}
+.dutctl-release { font-size: .9em; opacity: .8; }
+.dutctl-cards { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); }
+.dutctl-card { border: 1px solid color-mix(in srgb, currentColor 20%, transparent); border-radius: .5rem; padding: 0 1rem; }
+.dutctl-card h3 { margin-top: 1rem; }
+.dutctl-card h3 .dutctl-role { font-size: .5em; vertical-align: middle; }
+.dutctl-legend { padding: 1rem; font-size: .85em; opacity: .8; }
+.dutctl-legend span { display: block; }
+</style>
