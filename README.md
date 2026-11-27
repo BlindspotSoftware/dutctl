@@ -31,7 +31,7 @@ Key features include:
 - Multi-architecture and distributed testing
 - Extensible plugin system for new hardware and protocols
 
-For detailed information on the system architecture, see the [Documentation](./docs/README.md).
+For detailed information on the system architecture, see [About the architecture](./docs/architecture.md).
 
 | Supported Client OS | Recommended DUT Agent Hardware |
 | ------------------- | ------------------------------ |

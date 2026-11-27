@@ -1,18 +1,9 @@
 # DUT Agent Configuration
 
-The _DUT Agent_ is configured by a YAML configuration file.
+The _DUT Agent_ is configured by a YAML configuration file: the devices connected to the agent, the commands of each
+device, and the modules each command runs. [About the architecture](./architecture.md#devices-commands-and-modules)
+explains how commands are built from modules.
 
-The configuration mainly consists of a list of devices connected to an agent and a list of the _Commands_ available
-for those devices. Commands are meant to be the high-level tasks you want to perform on the device, e.g.
-"Flash the firmware with the given image." To achieve this high-level task, commands can be built up of one or multiple
-_Modules_. Modules represent the basic operations and represent the actual implementation for the hardware interaction.
-The implementation of a Module determines its capabilities and also exposes information on how to use and configure it.
-
-The DUT Control project offers a collection of Module implementations but also allows for easy integration of [custom modules](./module_guide.md).
-Often a _Command_ can consist of only one _Module_ to get the job done, e.g., power cycles the device. But in some cases
-like the flash example mentioned earlier, eventually it is mandatory to toggle some GPIOs before doing the actual SPI flash
-operation. In this case the command is built up of a Module dealing with GPIO manipulation and a Module performing a
-flash writing with a specific programmer.
 Commands support three approaches for arguments: static values, passthrough modules that receive all runtime arguments directly, and command-level argument templating that distributes named arguments to modules via template syntax (see [Command Argument Templating](./command-arg-templating.md)).
 
 ## DUT Agent Configuration Schema
