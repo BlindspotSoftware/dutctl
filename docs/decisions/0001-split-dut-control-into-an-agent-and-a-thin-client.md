@@ -56,7 +56,7 @@ DUT Control is a client-agent system.
 
 ## More information
 
-- [docs/README.md](../README.md): the system overview.
+- [docs/architecture.md](../architecture.md): the system overview.
 - [ADR-0002](0002-speak-grpc-over-cleartext-http-2-with-connect-go.md): how client and agent talk.
 - [ADR-0003](0003-run-a-command-over-one-bidirectional-stream.md): how a command runs
   between client and agent.

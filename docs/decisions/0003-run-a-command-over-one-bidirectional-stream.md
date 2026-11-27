@@ -53,7 +53,7 @@ did not request, both fail with `InvalidArgument`.
 
 - Superseded by [ADR-0040](0040-transfer-files-in-chunks-over-the-run-stream.md),
   which moves files in chunks and carries over the rest of this decision.
-- [docs/README.md](../README.md#communication-design): the message scenarios on
+- [docs/rpc-protocol.md](../rpc-protocol.md): the message scenarios on
   the Run stream.
 - [protobuf/dutctl/v1/dutctl.proto](../../protobuf/dutctl/v1/dutctl.proto):
   `RunRequest` and `RunResponse`.
