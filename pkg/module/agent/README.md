@@ -1,25 +1,27 @@
-The _agent_ package is a collection of the following dutagent modules:
+# Agent status
 
-- [Status](#Status)
+The module `agent-status` prints information about the system on which the dutagent itself is running, the output of
+`uname -a`.
 
-# Status
+## Arguments
 
-The Status module prints information about the system on which the dutagent itself
-is running. 
+None; arguments are ignored.
 
 ## Configuration Options
 
-_none_
+None.
 
-# Examples
-The agent-status module can be used in a command like so. 
+## Example
 
-``` yaml
+A command that reports the agent's system:
+
+```yaml
 cmds:
-      system-info:
-        desc: "This simple command reports information about the dutagent system via the agent-status module."
-        uses:
-          - module: agent-status
-            passthrough: true
+  system-info:
+    desc: "Report information about the dutagent system."
+    uses:
+      - module: agent-status
+        passthrough: true
 ```
-See [here](../demo/demo-example-cfg.yml) for a complete dutagent configuration example.
+
+See [demo-example-cfg.yml](../demo/demo-example-cfg.yml) for a complete dutagent configuration.
