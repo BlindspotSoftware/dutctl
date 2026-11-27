@@ -27,52 +27,8 @@ exists only in the agent's memory, it is off and holds its factory firmware when
 
 ## Try it
 
-The [example configuration](./demo-example-cfg.yml) sets up two devices. Start an agent with it from the repository's
-root, and run the commands of the device `agent` in a second terminal. Each runs one wrap module:
-
-```
-dutagent -c pkg/module/demo/demo-example-cfg.yml
-
-dutctl agent echo hello world
-dutctl agent hello Ada
-dutctl agent prompt
-dutctl agent keys
-dutctl agent upload README.md
-dutctl agent download note.txt
-dutctl agent fail
-dutctl agent crash
-```
-
-The device `demo-board` is the simulated board. Attach to its console, which stays silent while the board is off:
-
-```
-dutctl demo-board console
-```
-
-In a third terminal, switch the board on and watch it boot in the second one; type `help` there for the shell's
-commands, and `exit` or Ctrl-A x to end the session. Then write new firmware, any file will do, and see the board boot
-it:
-
-```
-dutctl demo-board power on
-dutctl demo-board update README.md
-```
-
-Protect the flash, and the next update stops at the flash step, which leaves the board off, until you lift the
-protection:
-
-```
-dutctl demo-board protect
-dutctl demo-board update README.md
-dutctl demo-board unprotect
-```
-
-`reboot` power-cycles the board and shows the boot on a console of its own, which ends once the board is up. End the
-console in the second terminal first, since what one console shows of the board's output, another never sees:
-
-```
-dutctl demo-board reboot
-```
+[Get started](../../../docs/getting-started.md) runs an agent with the [example configuration](./demo-example-cfg.yml)
+and walks through the commands of both its devices.
 
 ## Modules and commands
 
