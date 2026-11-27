@@ -87,7 +87,7 @@ const (
 	verboseUsage      = `Annotate output with connection/RPC context (metadata)`
 	noColorUsage      = `Disable colored output`
 	userUsage         = `User Identity of the user of the device, defaults to <user>@<host>`
-	logUsage          = `Client-side diagnostic logging (on stderr), debug|warn|none, default is warn`
+	logUsage          = `Client-side diagnostic logging (on stderr), debug|warn|none`
 )
 
 func newApp(stdin io.Reader, stdout, stderr io.Writer, exitFunc func(int), args []string) *application {
@@ -104,7 +104,7 @@ func newApp(stdin io.Reader, stdout, stderr io.Writer, exitFunc func(int), args 
 		fs.PrintDefaults()
 	}
 	fs.Usage = func() {
-		fmt.Fprint(stderr, usageAbstract, usageSynopsis, usageDescription)
+		fmt.Fprint(stderr, usageAbstract, usageSynopsis, usageDescription, "\n")
 		app.printFlagDefaults()
 	}
 	// Flags
@@ -112,7 +112,9 @@ func newApp(stdin io.Reader, stdout, stderr io.Writer, exitFunc func(int), args 
 	fs.StringVar(&app.outputFormat, "f", "", outputFormatUsage)
 	fs.BoolVar(&app.verbose, "v", false, verboseUsage)
 	fs.BoolVar(&app.noColor, "no-color", false, noColorUsage)
-	fs.StringVar(&app.user, "u", auth.Default().User(), userUsage)
+	// The default identity is resolved after parsing, so that dutctl -h shows
+	// the same text on every machine.
+	fs.StringVar(&app.user, "u", "", userUsage)
 
 	mode := logModeWarn
 	fs.Var(&mode, "log", logUsage)
@@ -121,7 +123,16 @@ func newApp(stdin io.Reader, stdout, stderr io.Writer, exitFunc func(int), args 
 	fs.Parse(args[1:])
 	app.args = fs.Args()
 
-	fs.Visit(func(f *flag.Flag) { app.serverGiven = app.serverGiven || f.Name == "s" })
+	userGiven := false
+
+	fs.Visit(func(f *flag.Flag) {
+		app.serverGiven = app.serverGiven || f.Name == "s"
+		userGiven = userGiven || f.Name == "u"
+	})
+
+	if !userGiven {
+		app.user = auth.Default().User()
+	}
 
 	app.tui = app.runTUI
 
