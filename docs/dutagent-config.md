@@ -4,7 +4,7 @@ The _DUT Agent_ is configured by a YAML configuration file: the devices connecte
 device, and the modules each command runs. [About the architecture](./architecture.md#devices-commands-and-modules)
 explains how commands are built from modules.
 
-Commands support three approaches for arguments: static values, passthrough modules that receive all runtime arguments directly, and command-level argument templating that distributes named arguments to modules via template syntax (see [Command Argument Templating](./command-arg-templating.md)).
+[Let a command take arguments](./command-arg-templating.md) shows how to configure the arguments of a command.
 
 ## DUT Agent Configuration Schema
 
@@ -32,6 +32,18 @@ Commands support three approaches for arguments: static values, passthrough modu
 
 Command arguments define named parameters that can be passed at runtime and distributed to modules via template syntax.
 
+A command hands arguments to its modules in exactly one of three ways:
+
+- **Fixed**: the modules have `args`, and the command neither declares `args` nor has a passthrough module. The command
+  takes no arguments.
+- **Passthrough**: one module has `passthrough: true`, and the command declares no `args`. All runtime arguments go to
+  that module, and its usage information is the command's help text. A command has at most one passthrough module.
+- **Templated**: the command declares `args`. A module's `args` may contain `${name}` for a declared name, as the whole
+  argument or within a longer one, such as `/configs/${name}.yaml`. The runtime arguments are matched to the declared
+  ones by position, in the order of the declaration, not by name.
+
+A command cannot have both declared `args` and a passthrough module.
+
 | Attribute | Type   | Default | Description                          | Mandatory |
 |-----------|--------|---------|--------------------------------------|-----------|
 | name      | string |         | Argument name (used in templates)    | yes       |
@@ -52,6 +64,8 @@ Command arguments define named parameters that can be passed at runtime and dist
 
 ### Example config file
 
-See [demo-example-cfg.yml](../pkg/module/demo/demo-example-cfg.yml), the configuration of the demo modules: commands of
+[demo-example-cfg.yml](../pkg/module/demo/demo-example-cfg.yml), the configuration of the demo modules: commands of
 one module each on the device `agent`, and commands of several modules, with fixed, declared and passed through
 arguments and module options, on the simulated `demo-board`.
+
+<!-- embed: pkg/module/demo/demo-example-cfg.yml -->
